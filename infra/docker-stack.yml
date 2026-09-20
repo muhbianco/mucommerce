@@ -19,7 +19,7 @@ x-api-env: &api_env
   ENVIRONMENT: production
   LOG_LEVEL: INFO
   DOCS_ENABLED: "false"
-  DB_HOST: ${DB_HOST}
+  DB_HOST: host.docker.internal
   DB_PORT: "3306"
   DB_NAME: mucommerce
   DB_USER: mucommerce_app
@@ -55,6 +55,8 @@ services:
     image: muhrilobianco/commerce_api:latest
     environment:
       <<: *api_env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - chatbot-net
     deploy:
@@ -109,6 +111,8 @@ services:
       - --concurrency=2
     environment:
       <<: *api_env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - chatbot-net
     deploy:
@@ -130,6 +134,8 @@ services:
     command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "-l", "info"]
     environment:
       <<: *api_env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - chatbot-net
     deploy:
