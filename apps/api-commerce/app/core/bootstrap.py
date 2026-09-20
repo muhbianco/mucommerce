@@ -16,11 +16,16 @@ logger = get_logger(__name__)
 ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
 
+def alembic_sqlalchemy_url(url: str) -> str:
+    """ConfigParser interpolation treats `%` as a token; percent-encoded DSN must be doubled."""
+    return url.replace("%", "%%")
+
+
 def alembic_config(url: str | None = None) -> Config:
     config = Config(str(ALEMBIC_INI))
     config.attributes["configure_logger"] = False
     if url:
-        config.set_main_option("sqlalchemy.url", url)
+        config.set_main_option("sqlalchemy.url", alembic_sqlalchemy_url(url))
     return config
 
 

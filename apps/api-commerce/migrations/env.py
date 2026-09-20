@@ -8,6 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.core.bootstrap import alembic_sqlalchemy_url
 from app.core.config import settings
 from app.models.all import Base
 
@@ -18,7 +19,7 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 
 # Migrations always run with the migration user (DDL grants); runtime user has none.
 if not config.get_main_option("sqlalchemy.url"):
-    config.set_main_option("sqlalchemy.url", settings.migrate_database_url)
+    config.set_main_option("sqlalchemy.url", alembic_sqlalchemy_url(settings.migrate_database_url))
 
 target_metadata = Base.metadata
 

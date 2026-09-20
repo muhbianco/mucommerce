@@ -10,7 +10,7 @@ from alembic import command
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect
 
-from app.core.bootstrap import alembic_config
+from app.core.bootstrap import alembic_config, alembic_sqlalchemy_url
 
 
 @pytest.fixture
@@ -32,6 +32,13 @@ def test_upgrade_head_then_downgrade_base(sqlite_url: str) -> None:
     remaining = set(inspect(engine).get_table_names()) - {"alembic_version"}
     engine.dispose()
     assert remaining == set()
+
+
+def test_alembic_url_escapes_percent_encoding() -> None:
+    raw = "mysql+asyncmy://u:a%2Fb@127.0.0.1:3306/db"
+    config = alembic_config(raw)
+    assert config.get_main_option("sqlalchemy.url") == raw
+    assert alembic_sqlalchemy_url(raw) == "mysql+asyncmy://u:a%%2Fb@127.0.0.1:3306/db"
 
 
 def test_single_head_and_linear_history() -> None:
