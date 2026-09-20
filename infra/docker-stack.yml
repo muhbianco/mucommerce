@@ -115,6 +115,9 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - chatbot-net
+    # Same image as api; Dockerfile HEALTHCHECK hits :8000/healthz and would SIGTERM Celery.
+    healthcheck:
+      disable: true
     deploy:
       mode: replicated
       replicas: 1
@@ -131,13 +134,23 @@ services:
 
   beat:
     image: muhrilobianco/commerce_api:latest
-    command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "-l", "info"]
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - beat
+      - -l
+      - info
+      - -s
+      - /tmp/celerybeat-schedule
     environment:
       <<: *api_env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
       - chatbot-net
+    healthcheck:
+      disable: true
     deploy:
       mode: replicated
       replicas: 1
