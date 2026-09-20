@@ -1,0 +1,192 @@
+# =============================================================================
+# mucommerce — Stack Portainer (Docker Swarm + Traefik) — hel1
+# Stack: commerce            Rede: chatbot-net (Chatwoot, Redis, MinIO, api-agents)
+# Imagens: muhrilobianco/commerce_api:<tag>, muhrilobianco/commerce_web:<tag>
+#
+# Secrets vêm do Env do Portainer (${VAR}); este arquivo pode ir no StackFileContent sem merge.
+# Migrations NÃO rodam no boot: executar o job `commerce_migrate` antes do StackUpdate:
+#   docker run --rm --network chatbot-net --env-file <env> muhrilobianco/commerce_api:<tag> \
+#     sh -c "python -m app.cli db ensure && alembic upgrade head"
+#
+# Hosts estáticos (labels): loja.muhbianco.com.br, painel.muhbianco.com.br -> web
+#                           api-commerce.muhbianco.com.br -> api
+# Hosts de tenant chegam pelo providers.http do Traefik (infra/traefik/README.md).
+# =============================================================================
+
+version: "3.8"
+
+x-api-env: &api_env
+  ENVIRONMENT: production
+  LOG_LEVEL: INFO
+  DOCS_ENABLED: "false"
+  DB_HOST: ${DB_HOST}
+  DB_PORT: "3306"
+  DB_NAME: mucommerce
+  DB_USER: mucommerce_app
+  DB_PASSWORD: ${DB_PASSWORD}
+  MIGRATE_DB_USER: mucommerce_migrate
+  MIGRATE_DB_PASSWORD: ${MIGRATE_DB_PASSWORD}
+  RUN_MIGRATIONS_ON_STARTUP: "false"
+  REDIS_URL: redis://redis_redis:6379/4
+  CELERY_BROKER_URL: redis://redis_redis:6379/3
+  CELERY_RESULT_BACKEND: redis://redis_redis:6379/3
+  JWT_SECRET: ${JWT_SECRET}
+  INTERNAL_TOKEN_WEB: ${INTERNAL_TOKEN_WEB}
+  INTERNAL_TOKEN_TRAEFIK: ${INTERNAL_TOKEN_TRAEFIK}
+  INTERNAL_TOKEN_AGENTS: ${INTERNAL_TOKEN_AGENTS}
+  CREDENTIALS_MASTER_KEY: ${CREDENTIALS_MASTER_KEY}
+  CREDENTIALS_KEY_VERSION: "1"
+  PLATFORM_TENANT_SLUG: muhbianco
+  PLATFORM_BASE_DOMAIN: loja.muhbianco.com.br
+  PANEL_HOST: painel.muhbianco.com.br
+  API_PUBLIC_HOST: api-commerce.muhbianco.com.br
+  EDGE_CNAME_TARGET: edge.muhbianco.com.br
+  EDGE_PUBLIC_IPS: ${EDGE_PUBLIC_IPS}
+  EDGE_WEB_UPSTREAM: http://commerce_web:3000
+  EDGE_API_UPSTREAM: http://commerce_api:8000
+  CHATWOOT_PUBLIC_URL: https://chatwoot.muhbianco.com.br
+  SENTRY_DSN: ${SENTRY_DSN}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  METRICS_ENABLED: "true"
+
+services:
+  api:
+    image: muhrilobianco/commerce_api:latest
+    environment:
+      <<: *api_env
+    networks:
+      - chatbot-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+      update_config:
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=chatbot-net
+        - traefik.http.routers.commerce_api.rule=Host(`api-commerce.muhbianco.com.br`)
+        - traefik.http.routers.commerce_api.entrypoints=websecure
+        - traefik.http.routers.commerce_api.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.commerce_api.priority=20
+        - traefik.http.routers.commerce_api.service=commerce_api
+        - traefik.http.routers.commerce_api.middlewares=commerce_headers
+        - traefik.http.services.commerce_api.loadbalancer.server.port=8000
+        - traefik.http.services.commerce_api.loadbalancer.passHostHeader=true
+        - traefik.http.services.commerce_api.loadbalancer.healthcheck.path=/healthz
+        - traefik.http.services.commerce_api.loadbalancer.healthcheck.interval=15s
+        - traefik.http.middlewares.commerce_headers.headers.stsSeconds=31536000
+        - traefik.http.middlewares.commerce_headers.headers.stsIncludeSubdomains=true
+        - traefik.http.middlewares.commerce_headers.headers.contentTypeNosniff=true
+        - traefik.http.middlewares.commerce_headers.headers.browserXssFilter=true
+        - traefik.http.middlewares.commerce_headers.headers.referrerPolicy=strict-origin-when-cross-origin
+        - traefik.http.middlewares.commerce_headers.headers.customFrameOptionsValue=DENY
+        - traefik.http.middlewares.commerce_headers.headers.customResponseHeaders.X-Robots-Tag=noindex, nofollow
+
+  worker:
+    image: muhrilobianco/commerce_api:latest
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - worker
+      - -l
+      - info
+      - -Q
+      - commerce.default,commerce.outbox,commerce.payments,commerce.notifications,commerce.provisioning,commerce.media
+      - --concurrency=2
+    environment:
+      <<: *api_env
+    networks:
+      - chatbot-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.05"
+          memory: 128M
+
+  beat:
+    image: muhrilobianco/commerce_api:latest
+    command: ["celery", "-A", "app.workers.celery_app:celery_app", "beat", "-l", "info"]
+    environment:
+      <<: *api_env
+    networks:
+      - chatbot-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: 128M
+
+  web:
+    image: muhrilobianco/commerce_web:latest
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      COMMERCE_API_INTERNAL_URL: http://commerce_api:8000
+      INTERNAL_TOKEN_WEB: ${INTERNAL_TOKEN_WEB}
+      PANEL_HOST: painel.muhbianco.com.br
+      PLATFORM_BASE_DOMAIN: loja.muhbianco.com.br
+    networks:
+      - chatbot-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+      update_config:
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 512M
+        reservations:
+          cpus: "0.05"
+          memory: 128M
+      labels:
+        - traefik.enable=true
+        - traefik.swarm.network=chatbot-net
+        - traefik.http.routers.commerce_web.rule=Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)
+        - traefik.http.routers.commerce_web.entrypoints=websecure
+        - traefik.http.routers.commerce_web.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.commerce_web.priority=10
+        - traefik.http.routers.commerce_web.service=commerce_web
+        - traefik.http.services.commerce_web.loadbalancer.server.port=3000
+        - traefik.http.services.commerce_web.loadbalancer.passHostHeader=true
+        # /api dos hosts estáticos vai para a API (mesmo host = cookies first-party)
+        - traefik.http.routers.commerce_web_api.rule=(Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)) && PathPrefix(`/api`)
+        - traefik.http.routers.commerce_web_api.entrypoints=websecure
+        - traefik.http.routers.commerce_web_api.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.commerce_web_api.priority=20
+        - traefik.http.routers.commerce_web_api.service=commerce_api
+
+networks:
+  chatbot-net:
+    external: true
+    name: chatbot-net

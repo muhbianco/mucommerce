@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import re
+from collections import defaultdict
+from collections.abc import Iterable
+from typing import Any
+
+from app.core.config import settings
+from app.tenancy.models import DomainPurpose, DomainRole, TenantDomain
+
+_SAFE = re.compile(r"[^a-z0-9-]")
+
+
+def _name(*parts: str) -> str:
+    return "-".join(_SAFE.sub("-", p.lower()) for p in parts if p)
+
+
+def build_traefik_config(
+    domains: Iterable[TenantDomain],
+    chatwoot_account_ids: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Traefik dynamic configuration (HTTP provider format) for every active tenant host.
+
+    Per storefront host:
+      - `<slug>-<n>-web`: Host(`h`) → commerce-web (priority 10)
+      - `<slug>-<n>-api`: Host(`h`) && PathPrefix(`/api`) → commerce-api (priority 20)
+      - alias hosts get a `redirectregex` middleware (308) to the primary host.
+    Per chat_redirect host: 302 to the tenant's Chatwoot account.
+    Certificates: `tls.certResolver` per router → HTTP-01 per host.
+    """
+    chatwoot_account_ids = chatwoot_account_ids or {}
+    routers: dict[str, Any] = {}
+    middlewares: dict[str, Any] = {}
+    services: dict[str, Any] = {
+        "commerce-web": {"loadBalancer": {"servers": [{"url": settings.edge_web_upstream}]}},
+        "commerce-api": {"loadBalancer": {"servers": [{"url": settings.edge_api_upstream}]}},
+    }
+
+    by_tenant: dict[str, list[TenantDomain]] = defaultdict(list)
+    for domain in domains:
+        by_tenant[domain.tenant_id].append(domain)
+
+    for tenant_id, tenant_domains in by_tenant.items():
+        slug = tenant_id[:8]
+        primary = next(
+            (
+                d
+                for d in tenant_domains
+                if d.purpose == DomainPurpose.STOREFRONT and d.role == DomainRole.PRIMARY
+            ),
+            None,
+        )
+        tls = {"certResolver": settings.edge_cert_resolver}
+        for index, domain in enumerate(sorted(tenant_domains, key=lambda d: d.hostname)):
+            base = _name(slug, str(index))
+            host_rule = f"Host(`{domain.hostname}`)"
+
+            if domain.purpose == DomainPurpose.CHAT_REDIRECT:
+                account_id = chatwoot_account_ids.get(tenant_id)
+                target = (
+                    f"{settings.chatwoot_public_url}/app/accounts/{account_id}/dashboard"
+                    if account_id
+                    else settings.chatwoot_public_url
+                )
+                middlewares[f"{base}-chat"] = {
+                    "redirectRegex": {"regex": ".*", "replacement": target, "permanent": False}
+                }
+                routers[f"{base}-chat"] = {
+                    "rule": host_rule,
+                    "entryPoints": ["websecure"],
+                    "service": "commerce-web",
+                    "middlewares": [f"{base}-chat"],
+                    "tls": tls,
+                    "priority": 10,
+                }
+                continue
+
+            router_middlewares: list[str] = []
+            if primary is not None and domain.role == DomainRole.ALIAS:
+                middlewares[f"{base}-canonical"] = {
+                    "redirectRegex": {
+                        "regex": f"^https?://{re.escape(domain.hostname)}(.*)",
+                        "replacement": f"https://{primary.hostname}${{1}}",
+                        "permanent": True,
+                    }
+                }
+                router_middlewares.append(f"{base}-canonical")
+
+            routers[f"{base}-web"] = {
+                "rule": host_rule,
+                "entryPoints": ["websecure"],
+                "service": "commerce-web",
+                "tls": tls,
+                "priority": 10,
+                **({"middlewares": router_middlewares} if router_middlewares else {}),
+            }
+            routers[f"{base}-api"] = {
+                "rule": f"{host_rule} && PathPrefix(`/api`)",
+                "entryPoints": ["websecure"],
+                "service": "commerce-api",
+                "tls": tls,
+                "priority": 20,
+                **({"middlewares": router_middlewares} if router_middlewares else {}),
+            }
+
+    return {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
