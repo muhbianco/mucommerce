@@ -38,6 +38,7 @@ x-api-env: &api_env
   CREDENTIALS_KEY_VERSION: "1"
   PLATFORM_TENANT_SLUG: muhbianco
   PLATFORM_BASE_DOMAIN: loja.muhbianco.com.br
+  PLATFORM_ALIAS_HOSTS: staging.loja.muhbianco.com.br
   PANEL_HOST: painel.muhbianco.com.br
   API_PUBLIC_HOST: api-commerce.muhbianco.com.br
   EDGE_CNAME_TARGET: edge.muhbianco.com.br
@@ -172,7 +173,7 @@ services:
       labels:
         - traefik.enable=true
         - traefik.swarm.network=chatbot-net
-        - traefik.http.routers.commerce_web.rule=Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)
+        - traefik.http.routers.commerce_web.rule=Host(`loja.muhbianco.com.br`) || Host(`staging.loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)
         - traefik.http.routers.commerce_web.entrypoints=websecure
         - traefik.http.routers.commerce_web.tls.certresolver=letsencryptresolver
         - traefik.http.routers.commerce_web.priority=10
@@ -180,7 +181,7 @@ services:
         - traefik.http.services.commerce_web.loadbalancer.server.port=3000
         - traefik.http.services.commerce_web.loadbalancer.passHostHeader=true
         # /api dos hosts estáticos vai para a API (mesmo host = cookies first-party)
-        - traefik.http.routers.commerce_web_api.rule=(Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)) && PathPrefix(`/api`)
+        - traefik.http.routers.commerce_web_api.rule=(Host(`loja.muhbianco.com.br`) || Host(`staging.loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)) && PathPrefix(`/api`)
         - traefik.http.routers.commerce_web_api.entrypoints=websecure
         - traefik.http.routers.commerce_web_api.tls.certresolver=letsencryptresolver
         - traefik.http.routers.commerce_web_api.priority=20

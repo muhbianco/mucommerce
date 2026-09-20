@@ -29,6 +29,7 @@ Sem Docker local, `make api-test` continua funcionando: os testes unitários usa
 ## Convenções
 
 - Tenant é resolvido **só** pelo `Host` (ou `X-Tenant-Host` + token interno). Nunca por body/query.
+- Hosts da plataforma: `loja.muhbianco.com.br` (primário) e `staging.loja.muhbianco.com.br` (alias). `make api-migrate` + `python -m app.cli tenant seed-platform`.
 - Toda tabela de negócio tem `tenant_id`; o ORM aplica o filtro automaticamente (`TenantScoped`).
 - Dinheiro em centavos (`BIGINT`), tempo em UTC, IDs UUIDv7.
 - Eventos de domínio saem pela tabela `outbox_events` na mesma transação do agregado.

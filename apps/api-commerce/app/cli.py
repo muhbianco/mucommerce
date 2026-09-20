@@ -3,7 +3,7 @@
 python -m app.cli db ensure            # CREATE DATABASE IF NOT EXISTS (migration user)
 python -m app.cli db upgrade           # alembic upgrade head (migration user)
 python -m app.cli admin bootstrap      # first superadmin from BOOTSTRAP_ADMIN_* env
-python -m app.cli tenant seed-platform # tenant `muhbianco` + loja.muhbianco.com.br
+python -m app.cli tenant seed-platform # tenant `muhbianco` + loja + staging.loja
 """
 
 from __future__ import annotations
@@ -62,36 +62,59 @@ async def admin_bootstrap(email: str, password: str, full_name: str) -> int:
     return 0
 
 
-async def seed_platform_tenant() -> int:
-    factory = _session_factory(settings.database_url)
-    async with factory() as session:
-        service = TenantService(session)
-        tenant = await service.repo.get_by_slug(settings.platform_tenant_slug)
-        if tenant is None:
-            tenant = await service.create(
-                slug=settings.platform_tenant_slug,
-                name="MuhBianco",
-                actor=Actor.system("cli"),
-                plan="platform",
+async def _seed_platform_in_session(session: AsyncSession) -> None:
+    service = TenantService(session)
+    tenant = await service.repo.get_by_slug(settings.platform_tenant_slug)
+    if tenant is None:
+        tenant = await service.create(
+            slug=settings.platform_tenant_slug,
+            name="MuhBianco",
+            actor=Actor.system("cli"),
+            plan="platform",
+        )
+        tenant.status = TenantStatus.ACTIVE
+        tenant.activated_at = utcnow()
+    if await service.repo.get_domain_by_hostname(settings.platform_base_domain) is None:
+        current_primary = await service.repo.primary_domain(tenant.id)
+        if current_primary is not None:
+            current_primary.role = DomainRole.ALIAS
+        session.add(
+            TenantDomain(
+                tenant_id=tenant.id,
+                hostname=settings.platform_base_domain,
+                kind=DomainKind.CUSTOM_SUBDOMAIN,
+                purpose=DomainPurpose.STOREFRONT,
+                role=DomainRole.PRIMARY,
+                status=DomainStatus.ACTIVE,
+                verified_at=utcnow(),
             )
-            tenant.status = TenantStatus.ACTIVE
-            tenant.activated_at = utcnow()
-        if await service.repo.get_domain_by_hostname(settings.platform_base_domain) is None:
-            current_primary = await service.repo.primary_domain(tenant.id)
-            if current_primary is not None:
-                current_primary.role = DomainRole.ALIAS
+        )
+    for alias in settings.platform_alias_host_list:
+        if alias == settings.platform_base_domain:
+            continue
+        if await service.repo.get_domain_by_hostname(alias) is None:
             session.add(
                 TenantDomain(
                     tenant_id=tenant.id,
-                    hostname=settings.platform_base_domain,
+                    hostname=alias,
                     kind=DomainKind.CUSTOM_SUBDOMAIN,
                     purpose=DomainPurpose.STOREFRONT,
-                    role=DomainRole.PRIMARY,
+                    role=DomainRole.ALIAS,
                     status=DomainStatus.ACTIVE,
                     verified_at=utcnow(),
                 )
             )
+
+
+async def seed_platform_tenant(session: AsyncSession | None = None) -> int:
+    if session is not None:
+        await _seed_platform_in_session(session)
         await session.commit()
+    else:
+        factory = _session_factory(settings.database_url)
+        async with factory() as owned:
+            await _seed_platform_in_session(owned)
+            await owned.commit()
     logger.info("Platform tenant ready", extra={"slug": settings.platform_tenant_slug})
     return 0
 

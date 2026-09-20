@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # --- platform / edge ------------------------------------------------------------
     platform_tenant_slug: str = "muhbianco"
     platform_base_domain: str = "loja.muhbianco.com.br"
+    # Extra storefront hosts for the platform tenant (comma-separated). Staging first.
+    platform_alias_hosts: str = "staging.loja.muhbianco.com.br"
     panel_host: str = "painel.muhbianco.com.br"
     api_public_host: str = "api-commerce.muhbianco.com.br"
     edge_cname_target: str = "edge.muhbianco.com.br"
@@ -162,6 +164,12 @@ class Settings(BaseSettings):
     @property
     def edge_public_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.edge_public_ips.split(",") if ip.strip()]
+
+    @property
+    def platform_alias_host_list(self) -> list[str]:
+        return [
+            host.strip().lower() for host in self.platform_alias_hosts.split(",") if host.strip()
+        ]
 
     @property
     def dns_resolver_list(self) -> list[str]:
