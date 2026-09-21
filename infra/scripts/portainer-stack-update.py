@@ -95,7 +95,9 @@ def main() -> int:
 
     # Compose interpolates values, not comments: skip comment lines.
     body_lines = [ln for ln in yaml_text.splitlines() if not ln.lstrip().startswith("#")]
-    needed = sorted(set(re.findall(r"\$\{([A-Z0-9_]+)", "\n".join(body_lines))))
+    # `$${...}` is an escaped literal (e.g. a Traefik regex group), not a variable; variable
+    # names start with a letter or underscore.
+    needed = sorted(set(re.findall(r"(?<!\$)\$\{([A-Z_][A-Z0-9_]*)", "\n".join(body_lines))))
     present = {e["name"]: bool(e.get("value")) for e in env}
     missing = [k for k in needed if not present.get(k) and k not in OPTIONAL_EMPTY]
     print(f"stack={args.stack} id={stack_id} env_keys={sorted(present)}")
