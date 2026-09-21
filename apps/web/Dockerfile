@@ -12,7 +12,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
+# public/ may hold no tracked files (robots.txt is generated per host by app/robots.ts); git
+# does not keep empty dirs, and the runtime stage copies it.
+RUN mkdir -p public && pnpm build
 
 # ---------- runtime ----------
 FROM node:22-alpine AS runner
