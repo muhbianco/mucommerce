@@ -53,7 +53,7 @@ if [ -s "$SA_ENV_FILE" ]; then
   echo "service account already provisioned ($SA_ENV_FILE); skipping"
 else
   access_key="commerce$(openssl rand -hex 6)"
-  secret_key="$(openssl rand -hex 24)"
+  secret_key="$(openssl rand -hex 20)"  # MinIO accepts 8..40 chars
   mc admin user svcacct add --access-key "$access_key" --secret-key "$secret_key" \
     --policy /work/policy-commerce-sa.json "$ALIAS" "$ROOT_USER" > /dev/null
   umask 077
