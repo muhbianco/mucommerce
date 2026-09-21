@@ -1,0 +1,58 @@
+# Porta 1:1 do antigo .github/workflows/ci.yml: API (lint, tipos, testes SQLite), migrações +
+# isolamento + concorrência em MariaDB 10.11 real, web (lint, tipos, vitest, build) e gitleaks.
+when:
+  - event: [push, pull_request, manual]
+
+services:
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: mucommerce_test
+      MARIADB_USER: mucommerce_migrate
+      MARIADB_PASSWORD: migrate
+
+steps:
+  api-lint-test:
+    image: python:3.12-slim
+    directory: apps/api-commerce
+    environment:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    commands:
+      - pip install --quiet -r requirements-dev.txt
+      - ruff check .
+      - ruff format --check .
+      - mypy app
+      - pytest -q
+
+  api-mariadb:
+    image: python:3.12-slim
+    directory: apps/api-commerce
+    depends_on: [api-lint-test]
+    environment:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      MARIADB_TEST_URL: mysql+asyncmy://mucommerce_migrate:migrate@mariadb:3306/mucommerce_test?charset=utf8mb4
+    commands:
+      - pip install --quiet -r requirements-dev.txt
+      # A imagem do MariaDB só abre a porta de rede depois do init (o init roda com --skip-networking).
+      - for i in $(seq 1 60); do python -c "import socket; socket.create_connection(('mariadb', 3306), 2)" 2>/dev/null && break; sleep 2; done
+      - pytest -q tests/test_migrations.py
+      - TEST_DATABASE_URL="$${MARIADB_TEST_URL}" pytest -q tests/test_isolation.py tests/test_concurrency_mariadb.py
+
+  web:
+    image: node:22-alpine
+    directory: apps/web
+    depends_on: []
+    commands:
+      - corepack enable
+      - pnpm install --frozen-lockfile
+      - pnpm lint
+      - pnpm typecheck
+      - pnpm test
+      - pnpm build
+
+  gitleaks:
+    image: zricethezav/gitleaks:v8.30.1
+    depends_on: []
+    commands:
+      - gitleaks dir --redact --no-banner --config .gitleaks.toml .

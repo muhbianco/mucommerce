@@ -2,11 +2,12 @@
 # mucommerce — Stack Portainer (Docker Swarm + Traefik) — hel1
 # Stack: commerce            Rede: chatbot-net (Chatwoot, Redis, MinIO, api-agents)
 # Imagens: muhrilobianco/commerce_api:${COMMERCE_TAG}, muhrilobianco/commerce_web:${COMMERCE_TAG}
-#   COMMERCE_TAG = sha curto do commit buildado na VPS; nunca `latest` em produção.
+#   COMMERCE_TAG = sha12 do commit (Woodpecker, .woodpecker/deploy.yaml); nunca `latest` em produção.
 #
 # Secrets e COMMERCE_TAG vêm do Env do Portainer (${VAR}). O StackUpdate SUBSTITUI o Env
-# inteiro: reenviar todas as chaves (ver skill deploy), senão a stack sobe sem segredos.
-# Migrations NÃO rodam no boot: `infra/scripts/commerce-migrate.sh <tag>` antes do StackUpdate.
+# inteiro: sempre via hel1-ops/scripts/portainer-stack-update.py (reenvia todas as chaves).
+# Migrations NÃO rodam no boot: `infra/scripts/deploy.sh <tag>` roda commerce-migrate.sh antes
+# do StackUpdate (push no main faz isso sozinho).
 #
 # Serviços com prefixo `commerce-`: o nome curto do serviço vira alias DNS na chatbot-net, e
 # nomes genéricos (`api`, `web`) já capturaram tráfego de outras stacks.
@@ -53,7 +54,7 @@ x-api-env: &api_env
   METRICS_ENABLED: "true"
   # MinIO: internal S3 API for the server; browsers upload to / read from the public host.
   # Keys come from /root/.mucommerce-minio.env (infra/minio/setup.sh), merged into the stack
-  # Env by infra/scripts/portainer-stack-update.py --env-file.
+  # Env by hel1-ops/scripts/portainer-stack-update.py --env-file.
   # Staff sign in with their MuhBianco account: the API redeems one-time codes at api-agents over
   # chatbot-net; the site admin "Lojas" page calls the API from https://muhbianco.com.br (CORS).
   MUHBIANCO_ACCOUNTS_INTERNAL_URL: http://api_agents:8000

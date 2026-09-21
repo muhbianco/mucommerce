@@ -8,7 +8,7 @@ Loja online SaaS multi-tenant do ecossistema MuhBianco. Monorepo.
 | `apps/web/` | Next.js (App Router): landing, vitrine, checkout, área do cliente, painel do tenant, painel ops, Dashboard App do Chatwoot |
 | `infra/` | Docker Swarm stack, Dockerfiles, bootstrap do MariaDB, Traefik, MinIO, backups |
 | `docs/` | Arquitetura (entregáveis A–K), ADRs, runbooks |
-| `.github/workflows/` | CI: lint, testes (SQLite + MariaDB), build e push de imagens |
+| `.woodpecker/` | CI/CD no Woodpecker (`ci.muhbianco.com.br`): `ci.yaml` (lint, testes SQLite + MariaDB, web, gitleaks) e `deploy.yaml` (push no `main` = build `:<sha12>` → migração → StackUpdate) |
 
 ## Desenvolvimento local
 

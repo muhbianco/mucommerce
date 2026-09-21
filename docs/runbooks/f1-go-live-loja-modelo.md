@@ -1,6 +1,6 @@
 # F1 fatia 1 — go-live na loja modelo (`loja.muhbianco.com.br`)
 
-Pré-requisitos: CI verde no commit a subir e pedido explícito de deploy (skill `deploy`). Tudo abaixo roda no hel1. Nenhum valor secreto passa pelo chat.
+Pré-requisitos: pedido explícito de deploy (skill `deploy`). Desde a migração para o Woodpecker, **deploy = push no `main`**: `.woodpecker/ci.yaml` precisa ficar verde e `.woodpecker/deploy.yaml` faz os passos 1–4 abaixo sozinho (`infra/scripts/deploy.sh <sha12>` dentro de `hel1-deploy exec`). Os comandos abaixo ficam como referência/break-glass e rodam no hel1. Nenhum valor secreto passa pelo chat.
 
 ## 1. Deploy (skill `deploy`, produto Commerce)
 
@@ -11,7 +11,7 @@ Pré-requisitos: CI verde no commit a subir e pedido explícito de deploy (skill
    ```
 3. StackUpdate com as chaves do MinIO, que entram pela primeira vez:
    ```bash
-   python3 infra/scripts/portainer-stack-update.py --stack commerce --yaml infra/docker-stack.yml \
+   python3 /usr/src/hel1-ops/scripts/portainer-stack-update.py --stack commerce --yaml infra/docker-stack.yml \
      --set-env COMMERCE_TAG=$TAG --env-file /root/.mucommerce-minio.env --dry-run
    ```
    O dry-run precisa listar `MINIO_ACCESS_KEY` e `MINIO_SECRET_KEY` em `env_keys` e não abortar. Depois rodar sem `--dry-run`. Serviço novo: `commerce_commerce-media` (fila `commerce.media`, 1 processo).
