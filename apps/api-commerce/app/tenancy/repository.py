@@ -96,7 +96,13 @@ class TenantRepository:
                     [DomainStatus.PENDING_DNS, DomainStatus.VERIFYING, DomainStatus.VERIFIED]
                 )
             )
-            .order_by(TenantDomain.last_check_at.asc().nulls_first())
+            # Never-checked (NULL) first, then oldest check. Spelled without NULLS FIRST: MariaDB
+            # rejects that syntax (it only worked on the SQLite test engine).
+            .order_by(
+                TenantDomain.last_check_at.is_(None).desc(),
+                TenantDomain.last_check_at.asc(),
+                TenantDomain.id.asc(),
+            )
             .limit(limit)
         )
         return (await self.session.execute(stmt)).scalars().all()

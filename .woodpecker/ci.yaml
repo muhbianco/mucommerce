@@ -37,7 +37,7 @@ steps:
       # A imagem do MariaDB só abre a porta de rede depois do init (o init roda com --skip-networking).
       - for i in $(seq 1 60); do python -c "import socket; socket.create_connection(('mariadb', 3306), 2)" 2>/dev/null && break; sleep 2; done
       - pytest -q tests/test_migrations.py
-      - TEST_DATABASE_URL="$${MARIADB_TEST_URL}" pytest -q tests/test_isolation.py tests/test_concurrency_mariadb.py
+      - TEST_DATABASE_URL="$${MARIADB_TEST_URL}" pytest -q tests/test_isolation.py tests/test_concurrency_mariadb.py tests/test_domain_verify_queue.py
 
   web:
     image: node:22-alpine
