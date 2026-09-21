@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.ids import new_public_key
@@ -25,6 +26,8 @@ from app.models.base import (
     UUIDPrimaryKeyMixin,
 )
 from app.tenancy.settings_schemas import default_settings
+
+NONCE_TYPE = LargeBinary(12).with_variant(mysql.VARBINARY(12), "mysql", "mariadb")
 
 
 class TenantStatus(StrEnum):
@@ -163,7 +166,9 @@ class TenantIntegrationCredential(UUIDPrimaryKeyMixin, TimestampMixin, TenantSco
     key_name: Mapped[str] = mapped_column(String(64), nullable=False)
     # LargeBinary maps to BLOB on MariaDB and on SQLite.
     ciphertext: Mapped[bytes] = mapped_column(LargeBinary(4096), nullable=False)
-    nonce: Mapped[bytes] = mapped_column(LargeBinary(12), nullable=False)
+    # AES-GCM nonce: exactly 12 bytes, stored inline. BLOB(12) would become TINYBLOB on
+    # MariaDB, which `alembic check` reports as drift.
+    nonce: Mapped[bytes] = mapped_column(NONCE_TYPE, nullable=False)
     key_version: Mapped[int] = mapped_column(Integer, nullable=False)
     masked: Mapped[str] = mapped_column(String(64), nullable=False)
     rotated_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
