@@ -50,6 +50,12 @@ def test_catalog_and_inventory_flags_start_off() -> None:
     assert DEFAULT_FEATURE_FLAGS["inventory"] is False
 
 
+def test_flags_without_code_start_off() -> None:
+    # A module switched on in the site admin must do something; these ship in later phases.
+    for key in ("events", "pickup", "chatwoot", "delivery", "coupons", "sales_agent"):
+        assert DEFAULT_FEATURE_FLAGS[key] is False, key
+
+
 # ----------------------------------------------------------------------------- settings
 def test_every_default_setting_matches_its_schema() -> None:
     assert set(DEFAULT_SETTINGS) == set(SETTINGS_SCHEMAS)

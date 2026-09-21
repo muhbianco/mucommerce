@@ -179,12 +179,14 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     # Phase 1 slice 1: off until the tenant is ready; turned on first in the loja modelo.
     "catalog": False,
     "inventory": False,
-    "events": True,
-    "pickup": True,
+    # Off until their phase ships (catálogo completo, checkout, Chatwoot): a module switched on
+    # in the site admin must do something.
+    "events": False,
+    "pickup": False,
     "delivery": False,
     "manufacturing": False,
     "coupons": False,
-    "chatwoot": True,
+    "chatwoot": False,
     "payments.mercadopago": False,
     "payments.infinitepay": False,
     "sales_agent": False,
