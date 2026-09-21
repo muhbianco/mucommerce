@@ -6,6 +6,8 @@
 #
 # Public: pages answer, /metrics, /readyz and /internal are not reachable from the internet,
 # robots/sitemap per host, and (when the loja modelo is public) catalog API + product JSON-LD.
+# SMOKE_CUSTOM_HOSTS (space separated, e.g. a test domain routed by the Traefik HTTP provider):
+# valid certificate, storefront answers and /internal stays closed on each of them.
 # Internal (one-shot container of the same tag on chatbot-net, see commerce-cli.sh): readyz with
 # database, Redis and storage, and `media smoke`, which also proves outbox relay → consumer →
 # media worker. Exit 1 if any check fails; each check prints one line.
@@ -13,6 +15,7 @@ set -uo pipefail
 
 MODE="${1:?usage: smoke.sh <image-tag> | --public-only}"
 STORE="${SMOKE_STORE_HOST:-loja.muhbianco.com.br}"
+CUSTOM_HOSTS="${SMOKE_CUSTOM_HOSTS:-}"
 PANEL="${SMOKE_PANEL_HOST:-painel.muhbianco.com.br}"
 API="${SMOKE_API_HOST:-api-commerce.muhbianco.com.br}"
 TENANT="${SMOKE_TENANT:-muhbianco}"
@@ -46,14 +49,16 @@ body_has() {  # body_has <name> <url> <fixed string>
 }
 
 closed() {  # closed <name> <url>: 404, or (whitelist store) the login gate — never served content
-  local out code location
+  local out code location host
+  host="${2#https://}"
+  host="${host%%/*}"
   out="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "$2" || true)"
   code="${out%% *}"
   location="${out#* }"
   case "$code" in
     404) report ok "$1" "404" ;;
     302 | 303 | 307) case "$location" in
-        "https://$STORE/entrar?next="*) report ok "$1" "$code → login" ;;
+        "https://$host/entrar?next="*) report ok "$1" "$code → login" ;;
         *) report FAIL "$1" "$code → $location" ;;
       esac ;;
     *) report FAIL "$1" "$code $2" ;;
@@ -103,6 +108,12 @@ case "$code" in
     ;;
   *) report FAIL "catálogo" "$code $catalog" ;;
 esac
+
+# ------------------------------------------------------------------ custom domains
+for host in $CUSTOM_HOSTS; do  # curl verifies the certificate: a default Traefik cert gives 000
+  expect_status "$host /" "https://$host/" "200 301 302 303 307 308"
+  closed "$host internal" "https://$host/api/v1/internal/edge/traefik"
+done
 
 # ------------------------------------------------------------------ internal (hel1 only)
 if [ "$MODE" != "--public-only" ]; then
