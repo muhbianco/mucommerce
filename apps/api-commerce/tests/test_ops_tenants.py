@@ -3,11 +3,12 @@ from __future__ import annotations
 import uuid
 
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit.models import AuditLog, OutboxEvent
 from app.tenancy.context import CROSS_TENANT_OPTION
+from app.tenancy.models import TenantDomain
 
 
 async def test_create_tenant_is_idempotent_and_audited(
@@ -71,7 +72,9 @@ async def test_create_tenant_is_idempotent_and_audited(
 
 
 async def test_features_settings_status_and_domains(
-    client: AsyncClient, operator_headers: dict[str, str]
+    client: AsyncClient,
+    operator_headers: dict[str, str],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     created = await client.post(
         "/api/v1/ops/tenants",
@@ -123,9 +126,17 @@ async def test_features_settings_status_and_domains(
     assert context.status_code == 200
     assert context.json()["access_mode"] == "public"
 
+    # A host that does not answer yet can never be the canonical one.
+    too_early = await client.post(
+        f"/api/v1/ops/tenants/{tenant_id}/domains",
+        json={"hostname": "lunares.com.br", "role": "primary"},
+        headers=operator_headers,
+    )
+    assert too_early.status_code == 422
+
     domain = await client.post(
         f"/api/v1/ops/tenants/{tenant_id}/domains",
-        json={"hostname": "Lunares.com.br", "role": "primary"},
+        json={"hostname": "Lunares.com.br"},
         headers=operator_headers,
     )
     assert domain.status_code == 201, domain.text
@@ -149,8 +160,51 @@ async def test_features_settings_status_and_domains(
 
     listing = await client.get(f"/api/v1/ops/tenants/{tenant_id}/domains", headers=operator_headers)
     hosts = {d["hostname"]: d for d in listing.json()}
-    assert hosts["lunares.loja.test"]["role"] == "alias"  # demoted when the apex became primary
+    assert hosts["lunares.loja.test"]["role"] == "primary"  # untouched while the apex is pending
+    assert hosts["lunares.com.br"]["role"] == "alias"
+
+    promote_url = f"/api/v1/ops/tenants/{tenant_id}/domains/{body['id']}/primary"
+    pending = await client.post(promote_url, headers=operator_headers)
+    assert pending.status_code == 409
+    assert pending.json()["error"]["details"]["code"] == "domain_not_active"
+
+    async with session_factory() as session:
+        await session.execute(
+            update(TenantDomain)
+            .where(TenantDomain.id == body["id"])
+            .values(status="active")
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+        await session.commit()
+    promoted = await client.post(promote_url, headers=operator_headers)
+    assert promoted.status_code == 200, promoted.text
+    assert promoted.json()["role"] == "primary"
+    again = await client.post(promote_url, headers=operator_headers)
+    assert again.status_code == 200 and again.json()["role"] == "primary"  # idempotent
+
+    listing = await client.get(f"/api/v1/ops/tenants/{tenant_id}/domains", headers=operator_headers)
+    hosts = {d["hostname"]: d for d in listing.json()}
+    assert hosts["lunares.loja.test"]["role"] == "alias"
     assert hosts["lunares.com.br"]["role"] == "primary"
+    context = await client.get("/api/v1/storefront/context", headers={"host": "lunares.com.br"})
+    assert context.json()["primary_host"] == "lunares.com.br"
+    async with session_factory() as session:
+        audited = (
+            await session.execute(
+                select(AuditLog.before_json, AuditLog.after_json)
+                .where(AuditLog.action == "domain.primary_changed")
+                .execution_options(**{CROSS_TENANT_OPTION: True})
+            )
+        ).all()
+    assert [tuple(row) for row in audited] == [
+        ({"primary": "lunares.loja.test"}, {"primary": "lunares.com.br"})
+    ]
+
+    other = await client.post(
+        f"/api/v1/ops/tenants/99999999-9999-9999-9999-999999999999/domains/{body['id']}/primary",
+        headers=operator_headers,
+    )
+    assert other.status_code == 404
 
     duplicate = await client.post(
         f"/api/v1/ops/tenants/{tenant_id}/domains",

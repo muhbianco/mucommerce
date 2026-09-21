@@ -322,6 +322,27 @@ async def verify_domain(
     )
 
 
+@router.post(
+    "/{tenant_id}/domains/{domain_id}/primary",
+    response_model=DomainRead,
+    summary="Torna um domínio ativo o primário da loja (o anterior vira alias)",
+)
+async def set_primary_domain(
+    request: Request,
+    session: DbSession,
+    user: PlatformOperator,
+    tenant_id: TenantId,
+    domain_id: str,
+) -> DomainRead:
+    service = TenantService(session)
+    tenant = await service.get_or_404(tenant_id)
+    domain = await service.repo.get_domain(tenant_id, domain_id)
+    if domain is None:
+        raise NotFoundError("Domínio não encontrado.")
+    await service.set_primary_domain(tenant, domain, admin_actor(request, user))
+    return _domain_read(domain)
+
+
 @router.delete(
     "/{tenant_id}/domains/{domain_id}",
     response_model=DomainRead,

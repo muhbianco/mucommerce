@@ -342,14 +342,16 @@ class TenantService:
         ):
             raise ValidationError("Hostname reservado pela plataforma.", hostname=host)
 
+        if role == DomainRole.PRIMARY and purpose == DomainPurpose.STOREFRONT:
+            # The primary host feeds canonical URLs, sitemap and redirects: a host that does not
+            # answer yet must never take that place. Promote it once it is active.
+            raise ValidationError(
+                "Domínio novo entra como alias; torne-o primário depois de ativo.", hostname=host
+            )
+
         existing = await self.repo.get_domain_by_hostname(host)
         if existing is not None:
             raise ConflictError("Hostname já registrado.", hostname=host)
-
-        if role == DomainRole.PRIMARY and purpose == DomainPurpose.STOREFRONT:
-            current_primary = await self.repo.primary_domain(tenant.id, purpose)
-            if current_primary is not None:
-                current_primary.role = DomainRole.ALIAS
 
         kind = classify_kind(host)
         domain = TenantDomain(
@@ -408,6 +410,54 @@ class TenantService:
             after={"status": str(DomainStatus.DISABLED)},
         )
         await invalidate_host_cache([domain.hostname])
+        return domain
+
+    async def set_primary_domain(
+        self, tenant: Tenant, domain: TenantDomain, actor: Actor
+    ) -> TenantDomain:
+        """Make an active storefront host the canonical one; the previous primary becomes alias."""
+        if domain.purpose != DomainPurpose.STOREFRONT:
+            raise ValidationError("Só domínios da loja podem ser primários.")
+        if domain.role == DomainRole.PRIMARY:
+            return domain  # idempotent
+        if domain.status != DomainStatus.ACTIVE:
+            raise ConflictError(
+                "Só um domínio ativo pode ser primário. Verifique o DNS antes.",
+                code="domain_not_active",
+            )
+        # Serialise role changes per tenant: two promotions at once must not leave two primaries.
+        await self.session.execute(
+            select(Tenant.id).where(Tenant.id == tenant.id).with_for_update()
+        )
+        previous = await self.repo.primary_domain(tenant.id, DomainPurpose.STOREFRONT)
+        if previous is not None:
+            previous.role = DomainRole.ALIAS
+        domain.role = DomainRole.PRIMARY
+        await self.session.flush()
+        await audit(
+            self.session,
+            actor=actor.id,
+            action="domain.primary_changed",
+            entity_type="tenant_domain",
+            entity_id=domain.id,
+            tenant_id=tenant.id,
+            before={"primary": previous.hostname if previous else None},
+            after={"primary": domain.hostname},
+            ip=actor.ip,
+            user_agent=actor.user_agent,
+        )
+        await emit(
+            self.session,
+            aggregate_type="tenant_domain",
+            aggregate_id=domain.id,
+            event_type="domain.primary_changed",
+            payload={
+                "hostname": domain.hostname,
+                "previous": previous.hostname if previous else None,
+            },
+            tenant_id=tenant.id,
+        )
+        await invalidate_host_cache([domain.hostname] + ([previous.hostname] if previous else []))
         return domain
 
     async def verify_domain(self, domain: TenantDomain, verifier: DnsVerifier) -> DnsCheck:
