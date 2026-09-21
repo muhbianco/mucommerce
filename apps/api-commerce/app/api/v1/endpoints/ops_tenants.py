@@ -3,11 +3,18 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import APIRouter, Path, Request, status
+from fastapi import APIRouter, Path, Query, Request, status
 
 from app.api.deps import DbSession, PlatformOperator, admin_actor
 from app.audit.idempotency import idempotent
 from app.core.exceptions import NotFoundError
+from app.core.pagination import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    Page,
+    decode_cursor,
+    encode_cursor,
+)
 from app.schemas.tenant import (
     DnsInstructionsRead,
     DomainCheckRead,
@@ -51,12 +58,21 @@ def _domain_read(domain: TenantDomain, with_instructions: bool = False) -> Domai
     )
 
 
-@router.get("", response_model=list[TenantRead], summary="Lista tenants")
+@router.get("", response_model=Page[TenantRead], summary="Lista tenants (mais novos primeiro)")
 async def list_tenants(
-    session: DbSession, _: PlatformOperator, status_filter: str | None = None
-) -> list[TenantRead]:
-    tenants = await TenantService(session).repo.list(status=status_filter)
-    return [TenantRead.model_validate(t, from_attributes=True) for t in tenants]
+    session: DbSession,
+    _: PlatformOperator,
+    status_filter: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+) -> Page[TenantRead]:
+    before_id = decode_cursor(cursor, "id")["id"] if cursor else None
+    rows = await TenantService(session).repo.list_page(
+        limit=limit, before_id=before_id, status=status_filter
+    )
+    items = [TenantRead.model_validate(t, from_attributes=True) for t in rows[:limit]]
+    next_cursor = encode_cursor(id=rows[limit - 1].id) if len(rows) > limit else None
+    return Page[TenantRead](items=items, next_cursor=next_cursor)
 
 
 @router.post(

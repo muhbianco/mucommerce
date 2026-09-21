@@ -73,12 +73,11 @@ async def logout(session: DbSession, user: CurrentAdmin, body: LogoutRequest | N
 
 @router.get("/me", response_model=MeResponse, summary="Usuário atual e memberships")
 async def me(session: DbSession, user: CurrentAdmin) -> MeResponse:
-    repo = TenantRepository(session)
+    active = [m for m in user.memberships if m.status == "active"]
+    tenants = await TenantRepository(session).get_many({m.tenant_id for m in active})
     memberships: list[MembershipRead] = []
-    for membership in user.memberships:
-        if membership.status != "active":
-            continue
-        tenant = await repo.get(membership.tenant_id)
+    for membership in active:
+        tenant = tenants.get(membership.tenant_id)
         memberships.append(
             MembershipRead(
                 tenant_id=membership.tenant_id,

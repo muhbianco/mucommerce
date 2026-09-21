@@ -237,7 +237,7 @@ Convenções iguais às da `api-agents` (Settings pydantic-settings, `mysql+asyn
 apps/api-commerce/
   app/
     main.py                      # create_app, middlewares, mounts
-    core/                        # config, database, security, scopes, rate_limit (Redis), crypto (AES-GCM envelope), logging (JSON), otel
+    core/                        # config, database, security, scopes, rate_limit (Redis), crypto (AES-GCM envelope), logging (JSON), observability (Sentry, métricas)
     tenancy/                     # TenantContext, resolver (Host / X-Tenant-Host), dependency `current_tenant`, ORM filter (with_loader_criteria), domains, provisioning
     identity/                    # customers, identities (google), sessions (cookies), admin users, memberships, RBAC, access (liberar_loja)
     catalog/                     # products, variants, options/modifiers, categories, media, events

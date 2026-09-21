@@ -11,7 +11,7 @@ from fastapi import Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,6 +77,14 @@ def idempotent(
             tenant_id = session_tenant_id(session) or "-"
             req_hash = await _request_hash(request)
             existing = await _find(session, scope, tenant_id, key)
+            if existing is not None and existing.expires_at <= utcnow():
+                # Past its TTL the key is free again. The unique row is reused (the purge
+                # job may not have deleted it yet), starting over as a first request.
+                existing.request_hash = req_hash
+                existing.response_status = None
+                existing.response_body = None
+                existing.locked_at = None
+                existing.expires_at = utcnow() + TTL
 
             if existing is not None:
                 if existing.request_hash != req_hash:
@@ -124,6 +132,35 @@ def idempotent(
         return wrapper
 
     return decorator
+
+
+async def purge_expired(
+    session: AsyncSession, *, batch_size: int = 500, max_batches: int = 20
+) -> int:
+    """Delete keys past their TTL in bounded batches (daily beat job). Returns rows deleted."""
+    deleted = 0
+    for _ in range(max_batches):
+        ids = list(
+            (
+                await session.execute(
+                    select(IdempotencyKey.id)
+                    .where(IdempotencyKey.expires_at < utcnow())
+                    .limit(batch_size)
+                    .execution_options(**{CROSS_TENANT_OPTION: True})
+                )
+            ).scalars()
+        )
+        if not ids:
+            break
+        await session.execute(
+            delete(IdempotencyKey)
+            .where(IdempotencyKey.id.in_(ids))
+            .execution_options(synchronize_session=False, **{CROSS_TENANT_OPTION: True})
+        )
+        deleted += len(ids)
+        if len(ids) < batch_size:
+            break
+    return deleted
 
 
 async def _find(

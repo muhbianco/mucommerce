@@ -63,27 +63,3 @@ def setup_metrics(app: FastAPI) -> None:
         should_ignore_untemplated=True,
         excluded_handlers=["/metrics", "/healthz", "/readyz"],
     ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
-
-
-def setup_tracing(app: FastAPI) -> None:
-    """OpenTelemetry → OTLP/HTTP. Only when OTEL_EXPORTER_OTLP_ENDPOINT is set."""
-    if not settings.otel_exporter_otlp_endpoint:
-        return
-    try:
-        from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    except ImportError:  # pragma: no cover - optional extra
-        logger.warning("opentelemetry packages not installed; tracing disabled")
-        return
-    provider = TracerProvider(
-        resource=Resource.create({"service.name": "api-commerce", "service.version": __version__})
-    )
-    provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.otel_exporter_otlp_endpoint))
-    )
-    trace.set_tracer_provider(provider)
-    FastAPIInstrumentor.instrument_app(app, excluded_urls="healthz,readyz,metrics")

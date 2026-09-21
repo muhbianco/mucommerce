@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit import outbox
+from app.audit import idempotency, outbox
 from app.core.logging import get_logger
+from app.identity.repository import AdminUserRepository
 from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
@@ -89,3 +92,23 @@ def recheck_active_domains() -> int:
         return len(domains)
 
     return run_async(with_session(_run))
+
+
+REFRESH_TOKEN_RETENTION = timedelta(days=7)
+
+
+@celery_app.task(name="app.workers.tasks.purge_expired_records")
+def purge_expired_records() -> dict[str, int]:
+    """Daily: idempotency keys past their TTL and refresh tokens expired for a week."""
+
+    async def _run(session: AsyncSession) -> dict[str, int]:
+        return {
+            "idempotency_keys": await idempotency.purge_expired(session),
+            "refresh_tokens": await AdminUserRepository(session).purge_expired_refresh(
+                older_than=REFRESH_TOKEN_RETENTION
+            ),
+        }
+
+    purged = run_async(with_session(_run))
+    logger.info("Expired records purged", extra=purged)
+    return purged

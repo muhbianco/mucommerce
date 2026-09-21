@@ -16,7 +16,7 @@ from app.api.versioning import ApiVersion, create_version_app
 from app.core.config import settings
 from app.core.database import dispose_engine
 from app.core.logging import configure_logging, get_logger
-from app.core.observability import setup_metrics, setup_sentry, setup_tracing
+from app.core.observability import setup_metrics, setup_sentry
 from app.core.redis import close_redis
 from app.tenancy.orm_filter import register_tenant_filter
 from app.workers import consumers as _consumers  # noqa: F401  (registers outbox consumers)
@@ -83,7 +83,6 @@ def create_app() -> FastAPI:
     register_exception_handlers(application)
     application.include_router(health.router)
     setup_metrics(application)
-    setup_tracing(application)
 
     for version in API_VERSIONS:
         version_app = create_version_app(version)

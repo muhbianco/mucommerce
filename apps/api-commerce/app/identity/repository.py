@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from datetime import timedelta
+
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.models import AdminRefreshToken, AdminUser, TenantMembership
@@ -42,3 +44,34 @@ class AdminUserRepository:
         for token in tokens:
             token.revoked_at = now
         return len(tokens)
+
+    async def purge_expired_refresh(
+        self, *, older_than: timedelta, batch_size: int = 500, max_batches: int = 20
+    ) -> int:
+        """Delete refresh tokens expired for longer than `older_than`, in bounded batches.
+
+        Rotated/revoked tokens are kept until they expire so reuse detection still sees them.
+        """
+        cutoff = utcnow() - older_than
+        deleted = 0
+        for _ in range(max_batches):
+            ids = list(
+                (
+                    await self.session.execute(
+                        select(AdminRefreshToken.id)
+                        .where(AdminRefreshToken.expires_at < cutoff)
+                        .limit(batch_size)
+                    )
+                ).scalars()
+            )
+            if not ids:
+                break
+            await self.session.execute(
+                delete(AdminRefreshToken)
+                .where(AdminRefreshToken.id.in_(ids))
+                .execution_options(synchronize_session=False)
+            )
+            deleted += len(ids)
+            if len(ids) < batch_size:
+                break
+        return deleted

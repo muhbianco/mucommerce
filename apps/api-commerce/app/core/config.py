@@ -99,7 +99,6 @@ class Settings(BaseSettings):
 
     # --- observability --------------------------------------------------------------
     sentry_dsn: str = ""
-    otel_exporter_otlp_endpoint: str = ""
     metrics_enabled: bool = True
 
     # --- bootstrap (CLI only) -------------------------------------------------------

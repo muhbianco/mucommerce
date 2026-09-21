@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,11 +34,25 @@ class TenantRepository:
         stmt = select(Tenant).where(Tenant.public_key == public_key)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list(self, *, status: str | None = None, limit: int = 100) -> Sequence[Tenant]:
-        stmt = select(Tenant).order_by(Tenant.created_at.desc()).limit(limit)
+    async def list_page(
+        self, *, limit: int, before_id: str | None = None, status: str | None = None
+    ) -> Sequence[Tenant]:
+        """Newest first, keyset on the primary key (UUIDv7 sorts by creation time).
+
+        Returns up to `limit + 1` rows; the extra one only signals a next page.
+        """
+        stmt = select(Tenant).order_by(Tenant.id.desc()).limit(limit + 1)
+        if before_id:
+            stmt = stmt.where(Tenant.id < before_id)
         if status:
             stmt = stmt.where(Tenant.status == status)
         return (await self.session.execute(stmt)).scalars().all()
+
+    async def get_many(self, tenant_ids: Collection[str]) -> dict[str, Tenant]:
+        if not tenant_ids:
+            return {}
+        stmt = select(Tenant).where(Tenant.id.in_(list(tenant_ids)))
+        return {tenant.id: tenant for tenant in (await self.session.execute(stmt)).scalars()}
 
     async def get_domain_by_hostname(self, hostname: str) -> TenantDomain | None:
         stmt = select(TenantDomain).where(TenantDomain.hostname == hostname)

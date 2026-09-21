@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from typing import Any
+
 from celery import Celery
+from celery.signals import beat_init, celeryd_init, setup_logging
 
 from app.core.config import settings
+from app.core.logging import configure_logging
+from app.core.observability import setup_sentry
 
 QUEUE_DEFAULT = "commerce.default"
 QUEUE_OUTBOX = "commerce.outbox"
@@ -50,5 +55,22 @@ celery_app.conf.update(
             "task": "app.workers.tasks.recheck_active_domains",
             "schedule": 1800.0,
         },
+        "purge-expired-records": {
+            "task": "app.workers.tasks.purge_expired_records",
+            "schedule": 86400.0,
+        },
     },
 )
+
+
+@setup_logging.connect
+def _configure_logging(**_: Any) -> None:
+    """JSON logs like the API. Connecting this signal stops Celery from installing its own."""
+    configure_logging(settings.log_level)
+
+
+@celeryd_init.connect
+@beat_init.connect
+def _init_error_reporting(**_: Any) -> None:
+    # Before the prefork pool forks, so every child inherits the client (CeleryIntegration).
+    setup_sentry()

@@ -50,7 +50,6 @@ x-api-env: &api_env
   EDGE_API_UPSTREAM: http://commerce-api:8000
   CHATWOOT_PUBLIC_URL: https://chatwoot.muhbianco.com.br
   SENTRY_DSN: ${SENTRY_DSN}
-  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
   METRICS_ENABLED: "true"
 
 services:

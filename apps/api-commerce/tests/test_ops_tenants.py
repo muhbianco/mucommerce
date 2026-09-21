@@ -185,3 +185,39 @@ async def test_tenant_staff_cannot_use_ops_routes(
         headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
     )
     assert response.status_code == 403
+
+
+async def test_tenant_listing_is_keyset_paginated(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    created = []
+    for n in range(5):
+        response = await client.post(
+            "/api/v1/ops/tenants",
+            json={"slug": f"loja{n}", "name": f"Loja {n}"},
+            headers={**operator_headers, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        created.append(response.json()["slug"])
+
+    seen: list[str] = []
+    cursor = None
+    for _ in range(5):
+        params = {"limit": "2", **({"cursor": cursor} if cursor else {})}
+        page = await client.get("/api/v1/ops/tenants", params=params, headers=operator_headers)
+        assert page.status_code == 200, page.text
+        body = page.json()
+        assert len(body["items"]) <= 2
+        seen += [item["slug"] for item in body["items"]]
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+    assert seen == list(reversed(created))  # newest first, no gaps, no repeats
+
+    too_big = await client.get(
+        "/api/v1/ops/tenants", params={"limit": "1000"}, headers=operator_headers
+    )
+    assert too_big.status_code == 422
+    tampered = await client.get(
+        "/api/v1/ops/tenants", params={"cursor": "bm90LWpzb24"}, headers=operator_headers
+    )
+    assert tampered.status_code == 422
