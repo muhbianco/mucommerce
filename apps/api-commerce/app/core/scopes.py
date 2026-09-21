@@ -21,6 +21,7 @@ class Scope(StrEnum):
     CATALOG_READ = "catalog:read"
     CATALOG_WRITE = "catalog:write"
     CATALOG_PUBLISH = "catalog:publish"
+    MEDIA_WRITE = "media:write"
     INVENTORY_READ = "inventory:read"
     INVENTORY_ADJUST = "inventory:adjust"
     MANUFACTURING_READ = "manufacturing:read"
@@ -56,6 +57,7 @@ _TENANT_ROLE_SCOPES: dict[TenantRole, frozenset[Scope]] = {
         {
             Scope.CATALOG_READ,
             Scope.CATALOG_WRITE,
+            Scope.MEDIA_WRITE,
             Scope.INVENTORY_READ,
             Scope.INVENTORY_ADJUST,
             Scope.MANUFACTURING_READ,

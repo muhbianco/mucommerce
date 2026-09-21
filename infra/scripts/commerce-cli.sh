@@ -23,7 +23,11 @@ if [ "$TAG" = "latest" ]; then
 fi
 [ -r "$ENV_FILE" ] || { echo "env file not readable: $ENV_FILE" >&2; exit 2; }
 
-exec docker run --rm \
+# stdin always attached (--password-stdin); a TTY only when the caller has one (password prompt).
+tty_flags=(-i)
+if [ -t 0 ] && [ -t 1 ]; then tty_flags=(-it); fi
+
+exec docker run --rm "${tty_flags[@]}" \
   --network chatbot-net \
   --add-host host.docker.internal:host-gateway \
   --env-file "$ENV_FILE" \

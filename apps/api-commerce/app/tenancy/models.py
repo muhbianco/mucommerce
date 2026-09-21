@@ -24,6 +24,7 @@ from app.models.base import (
     UtcDateTime,
     UUIDPrimaryKeyMixin,
 )
+from app.tenancy.settings_schemas import default_settings
 
 
 class TenantStatus(StrEnum):
@@ -170,6 +171,9 @@ class TenantIntegrationCredential(UUIDPrimaryKeyMixin, TimestampMixin, TenantSco
 
 DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "storefront": True,
+    # Phase 1 slice 1: off until the tenant is ready; turned on first in the loja modelo.
+    "catalog": False,
+    "inventory": False,
     "events": True,
     "pickup": True,
     "delivery": False,
@@ -182,10 +186,5 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "whatsapp_owned": False,
 }
 
-DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
-    "storefront": {"access_mode": "whitelist", "currency": "BRL"},
-    "branding": {"primary_color": "#111111", "logo_url": None},
-    "seo": {"title": None, "description": None, "og_image_url": None},
-    "fulfillment": {"modes": ["pickup"], "min_order_cents": 0},
-    "checkout": {"reservation_mode": "reserve_on_place", "pix_ttl_minutes": 30},
-}
+# One source of truth: the versioned schemas (app/tenancy/settings_schemas.py).
+DEFAULT_SETTINGS: dict[str, dict[str, Any]] = default_settings()

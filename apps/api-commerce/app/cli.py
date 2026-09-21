@@ -2,7 +2,10 @@
 
 python -m app.cli db ensure            # CREATE DATABASE IF NOT EXISTS (migration user)
 python -m app.cli db upgrade           # alembic upgrade head (migration user)
-python -m app.cli admin bootstrap      # first superadmin from BOOTSTRAP_ADMIN_* env
+python -m app.cli admin bootstrap --email E [--password-stdin]   # first superadmin
+python -m app.cli admin grant --email E --tenant-slug S --role owner [--create --name N]
+    Passwords never go in argv (ps, shell history): --password-stdin, BOOTSTRAP_ADMIN_PASSWORD
+    or an interactive prompt (infra/scripts/commerce-cli.sh allocates a TTY when it has one).
 python -m app.cli tenant seed-platform # tenant `muhbianco` served only at loja.muhbianco.com.br
 python -m app.cli tenant disable-domain <hostname>  # take a host out of the edge (audited)
 python -m app.cli outbox ping          # emits `system.ping`; its delivery proves the outbox runs
@@ -12,17 +15,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import sys
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.audit import outbox
+from app.audit.writer import audit
 from app.core.bootstrap import ensure_database_exists, upgrade_head
 from app.core.config import settings
 from app.core.exceptions import ConflictError
 from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.logging import configure_logging, get_logger
-from app.core.scopes import PlatformRole
+from app.core.scopes import PlatformRole, TenantRole
+from app.identity.models import TenantMembership
 from app.identity.repository import AdminUserRepository
 from app.identity.service import AdminAuthService
 from app.models.base import utcnow
@@ -45,25 +52,143 @@ def _session_factory(url: str) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
-async def admin_bootstrap(email: str, password: str, full_name: str) -> int:
-    factory = _session_factory(settings.database_url)
-    async with factory() as session:
-        repo = AdminUserRepository(session)
-        if await repo.get_by_email(email):
-            logger.info("Bootstrap admin already exists", extra={"email": email})
-            return 0
-        if len(password) < 12:
-            logger.error("Bootstrap admin password must have at least 12 characters")
+MIN_PASSWORD_LENGTH = 12
+
+
+def read_password(*, from_stdin: bool) -> str | None:
+    """Password from stdin (--password-stdin), BOOTSTRAP_ADMIN_PASSWORD or a prompt.
+
+    Never from argv: arguments show up in `ps` and in shell history.
+    """
+    if from_stdin:
+        return sys.stdin.readline().rstrip("\r\n") or None
+    from_env = settings.bootstrap_admin_password.get_secret_value()
+    if from_env:
+        return from_env
+    if sys.stdin.isatty():
+        first = getpass.getpass("Senha: ")
+        if first != getpass.getpass("Repita a senha: "):
+            logger.error("Passwords do not match")
+            return None
+        return first
+    return None
+
+
+def _weak(password: str | None) -> bool:
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        logger.error(
+            "Admin password missing or shorter than the minimum",
+            extra={"min_length": MIN_PASSWORD_LENGTH},
+        )
+        return True
+    return False
+
+
+async def admin_bootstrap(
+    email: str, password: str | None, full_name: str, session: AsyncSession | None = None
+) -> int:
+    """First platform superadmin. Idempotent: an existing e-mail is left untouched."""
+    if session is None:
+        async with _session_factory(settings.database_url)() as owned:
+            return await admin_bootstrap(email, password, full_name, owned)
+    email = email.strip().lower()
+    if await AdminUserRepository(session).get_by_email(email):
+        logger.info("Bootstrap admin already exists", extra={"email": email})
+        return 0
+    if _weak(password):
+        return 2
+    await AdminAuthService(session).create_user(
+        email=email,
+        full_name=full_name,
+        password=password,
+        platform_role=PlatformRole.SUPERADMIN,
+        actor="system:cli",
+    )
+    await session.commit()
+    logger.info("Bootstrap admin created", extra={"email": email})
+    return 0
+
+
+async def admin_grant(
+    *,
+    email: str,
+    tenant_slug: str,
+    role: str,
+    create: bool = False,
+    full_name: str = "",
+    password: str | None = None,
+    session: AsyncSession | None = None,
+) -> int:
+    """Give an admin user a role in a tenant (creating the user with --create). Idempotent."""
+    if session is None:
+        async with _session_factory(settings.database_url)() as owned:
+            return await admin_grant(
+                email=email,
+                tenant_slug=tenant_slug,
+                role=role,
+                create=create,
+                full_name=full_name,
+                password=password,
+                session=owned,
+            )
+    email = email.strip().lower()
+    try:
+        tenant_role = TenantRole(role)
+    except ValueError:
+        logger.error("Unknown tenant role", extra={"role": role})
+        return 2
+    tenant = await TenantService(session).repo.get_by_slug(tenant_slug)
+    if tenant is None:
+        logger.error("Tenant not found", extra={"slug": tenant_slug})
+        return 1
+    auth = AdminAuthService(session)
+    user = await AdminUserRepository(session).get_by_email(email)
+    if user is None:
+        if not create:
+            logger.error("Admin user not found; pass --create", extra={"email": email})
+            return 1
+        if _weak(password):
             return 2
-        await AdminAuthService(session).create_user(
+        user = await auth.create_user(
             email=email,
-            full_name=full_name,
+            full_name=full_name or email,
             password=password,
-            platform_role=PlatformRole.SUPERADMIN,
+            platform_role=None,
             actor="system:cli",
         )
-        await session.commit()
-    logger.info("Bootstrap admin created", extra={"email": email})
+    membership = (
+        await session.execute(
+            select(TenantMembership)
+            .where(TenantMembership.tenant_id == tenant.id)
+            .where(TenantMembership.admin_user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if membership is None:
+        await auth.add_membership(
+            user=user, tenant_id=tenant.id, role=tenant_role, actor="system:cli"
+        )
+    elif membership.role != tenant_role or membership.status != "active":
+        before = {"role": membership.role, "status": membership.status}
+        membership.role = tenant_role
+        membership.status = "active"
+        await audit(
+            session,
+            actor="system:cli",
+            action="membership.updated",
+            entity_type="tenant_membership",
+            entity_id=membership.id,
+            tenant_id=tenant.id,
+            before=before,
+            after={"role": str(tenant_role), "status": "active"},
+        )
+    else:
+        logger.info("Membership already in place", extra={"email": email, "slug": tenant_slug})
+        return 0
+    await session.commit()
+    logger.info(
+        "Membership granted",
+        extra={"email": email, "slug": tenant_slug, "role": str(tenant_role)},
+    )
     return 0
 
 
@@ -184,10 +309,15 @@ def main(argv: list[str] | None = None) -> int:
     admin = sub.add_parser("admin").add_subparsers(dest="cmd", required=True)
     bootstrap = admin.add_parser("bootstrap")
     bootstrap.add_argument("--email", default=settings.bootstrap_admin_email)
-    bootstrap.add_argument(
-        "--password", default=settings.bootstrap_admin_password.get_secret_value()
-    )
     bootstrap.add_argument("--name", default="MuhBianco Ops")
+    bootstrap.add_argument("--password-stdin", action="store_true")
+    grant = admin.add_parser("grant")
+    grant.add_argument("--email", required=True)
+    grant.add_argument("--tenant-slug", required=True)
+    grant.add_argument("--role", required=True, choices=[str(r) for r in TenantRole])
+    grant.add_argument("--create", action="store_true", help="create the admin user if missing")
+    grant.add_argument("--name", default="")
+    grant.add_argument("--password-stdin", action="store_true")
 
     tenant = sub.add_parser("tenant").add_subparsers(dest="cmd", required=True)
     tenant.add_parser("seed-platform")
@@ -206,10 +336,23 @@ def main(argv: list[str] | None = None) -> int:
         upgrade_head()
         return 0
     if args.group == "admin" and args.cmd == "bootstrap":
-        if not args.email or not args.password:
-            logger.error("Provide --email/--password or BOOTSTRAP_ADMIN_EMAIL/PASSWORD")
+        if not args.email:
+            logger.error("Provide --email or BOOTSTRAP_ADMIN_EMAIL")
             return 2
-        return asyncio.run(admin_bootstrap(args.email, args.password, args.name))
+        password = read_password(from_stdin=args.password_stdin)
+        return asyncio.run(admin_bootstrap(args.email, password, args.name))
+    if args.group == "admin" and args.cmd == "grant":
+        password = read_password(from_stdin=args.password_stdin) if args.create else None
+        return asyncio.run(
+            admin_grant(
+                email=args.email,
+                tenant_slug=args.tenant_slug,
+                role=args.role,
+                create=args.create,
+                full_name=args.name,
+                password=password,
+            )
+        )
     if args.group == "tenant" and args.cmd == "seed-platform":
         return asyncio.run(seed_platform_tenant())
     if args.group == "tenant" and args.cmd == "disable-domain":

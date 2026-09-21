@@ -85,6 +85,16 @@ class PermissionDeniedError(DomainError):
     message = "Permissão insuficiente para esta operação."
 
 
+class FeatureDisabledError(PermissionDeniedError):
+    error_code = "feature_disabled"
+    message = "Este recurso não está habilitado para a loja."
+
+
+class LoginRequiredError(AuthenticationError):
+    error_code = "login_required"
+    message = "Entre na loja para ver este conteúdo."
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"

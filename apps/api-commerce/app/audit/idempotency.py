@@ -49,14 +49,15 @@ def _serialize(result: Any) -> tuple[int, Any]:
 
 
 def idempotent(
-    scope: str, *, status_code: int = 200
+    scope: str, *, status_code: int = 200, required: bool = True
 ) -> Callable[[Callable[P, Awaitable[Any]]], Callable[P, Awaitable[Any]]]:
     """Wrap an endpoint so a repeated `Idempotency-Key` replays the first response.
 
     The endpoint must receive `request: Request` and `session: AsyncSession`
     as keyword parameters (FastAPI injects both). Behaviour:
 
-    - missing header → 422 `idempotency_key_required`
+    - missing header → 422 `idempotency_key_required` (with `required=False` the request just
+      runs without replay protection: for creates where a duplicate is harmless to retry)
     - same key, same payload, finished → stored response + `Idempotent-Replayed: true`
     - same key, same payload, still running → 409 `idempotency_in_progress`
     - same key, different payload → 422 `idempotency_key_reused`
@@ -71,6 +72,8 @@ def idempotent(
                 raise RuntimeError("idempotent() needs `request` and `session` kwargs")
 
             key = (request.headers.get(IDEMPOTENCY_HEADER) or "").strip()
+            if not key and not required:
+                return await func(*args, **kwargs)
             if not key or len(key) > 128:
                 raise IdempotencyKeyRequiredError()
 

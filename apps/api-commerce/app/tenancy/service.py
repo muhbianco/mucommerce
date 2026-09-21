@@ -32,6 +32,7 @@ from app.tenancy.models import (
 )
 from app.tenancy.repository import TenantRepository
 from app.tenancy.resolver import invalidate_host_cache
+from app.tenancy.settings_schemas import validate_setting
 
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
 
@@ -259,8 +260,7 @@ class TenantService:
     async def set_setting(
         self, tenant: Tenant, key: str, value: dict[str, Any], actor: Actor
     ) -> dict[str, Any]:
-        if key not in DEFAULT_SETTINGS:
-            raise ValidationError("Chave de configuração desconhecida.", key=key)
+        schema_version, value = validate_setting(key, value)
         bind_session_tenant(self.session, tenant.id)
         current = await self.repo.settings(tenant.id)
         row = (
@@ -271,11 +271,22 @@ class TenantService:
             )
         ).scalar_one_or_none()
         if row is None:
-            row = TenantSetting(tenant_id=tenant.id, key=key, value=value)
+            row = TenantSetting(
+                tenant_id=tenant.id, key=key, value=value, schema_version=schema_version
+            )
             self.session.add(row)
         else:
             row.value = value
+            row.schema_version = schema_version
         await self.session.flush()
+        await emit(
+            self.session,
+            aggregate_type="tenant",
+            aggregate_id=tenant.id,
+            event_type="tenant.settings_changed",
+            payload={"key": key, "schema_version": schema_version},
+            tenant_id=tenant.id,
+        )
         await audit(
             self.session,
             actor=actor.id,
