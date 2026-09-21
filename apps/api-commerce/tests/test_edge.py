@@ -40,7 +40,10 @@ def test_primary_alias_and_chat_redirect() -> None:
         assert router["entryPoints"] == ["websecure"]
 
     api_rules = {r["rule"] for r in api_routers.values()}
-    assert "Host(`lunares.com.br`) && PathPrefix(`/api`)" in api_rules
+    assert (
+        "Host(`lunares.com.br`) && PathPrefix(`/api`) && !PathRegexp(`^/api/(v1|latest)/internal`)"
+        in api_rules
+    )
     assert all(r["priority"] == 20 for r in api_routers.values())
 
     canonical = [

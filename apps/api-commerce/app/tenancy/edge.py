@@ -10,6 +10,9 @@ from app.core.config import settings
 from app.tenancy.models import DomainPurpose, DomainRole, TenantDomain
 
 _SAFE = re.compile(r"[^a-z0-9-]")
+# Same exclusion as the static routers in infra/docker-stack.yml: internal routes are reachable
+# only from the internal network, never through a tenant host.
+INTERNAL_API_PATHS = "`^/api/(v1|latest)/internal`"
 
 
 def _name(*parts: str) -> str:
@@ -35,7 +38,8 @@ def build_traefik_config(
 
     Per storefront host (`<key>` = `_host_key(hostname)`):
       - `<key>-web`: Host(`h`) → commerce-web (priority 10)
-      - `<key>-api`: Host(`h`) && PathPrefix(`/api`) → commerce-api (priority 20)
+      - `<key>-api`: Host(`h`) && PathPrefix(`/api`), minus `/api/*/internal` → commerce-api
+        (priority 20); internal paths fall to the web router and 404, as on the static hosts
       - alias hosts get a `redirectregex` middleware (308) to the primary host.
     Per chat_redirect host: 302 to the tenant's Chatwoot account.
     Hosts in `settings.static_edge_hosts` are skipped: the stack labels already route them.
@@ -110,7 +114,7 @@ def build_traefik_config(
                 **({"middlewares": router_middlewares} if router_middlewares else {}),
             }
             routers[f"{base}-api"] = {
-                "rule": f"{host_rule} && PathPrefix(`/api`)",
+                "rule": f"{host_rule} && PathPrefix(`/api`) && !PathRegexp({INTERNAL_API_PATHS})",
                 "entryPoints": ["websecure"],
                 "service": "commerce-api",
                 "tls": tls,
