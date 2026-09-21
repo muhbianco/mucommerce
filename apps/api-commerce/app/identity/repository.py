@@ -20,6 +20,10 @@ class AdminUserRepository:
         stmt = select(AdminUser).where(AdminUser.email == email.strip().lower())
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_by_external_account(self, account_id: str) -> AdminUser | None:
+        stmt = select(AdminUser).where(AdminUser.external_account_id == account_id)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def membership(self, user_id: str, tenant_id: str) -> TenantMembership | None:
         stmt = (
             select(TenantMembership)
@@ -28,6 +32,27 @@ class AdminUserRepository:
             .where(TenantMembership.status == "active")
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def any_membership(self, user_id: str, tenant_id: str) -> TenantMembership | None:
+        """Membership in any status (for re-granting a revoked one)."""
+        stmt = (
+            select(TenantMembership)
+            .where(TenantMembership.admin_user_id == user_id)
+            .where(TenantMembership.tenant_id == tenant_id)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def members_of(self, tenant_ids: list[str]) -> list[tuple[TenantMembership, AdminUser]]:
+        if not tenant_ids:
+            return []
+        stmt = (
+            select(TenantMembership, AdminUser)
+            .join(AdminUser, AdminUser.id == TenantMembership.admin_user_id)
+            .where(TenantMembership.tenant_id.in_(tenant_ids))
+            .where(TenantMembership.status == "active")
+            .order_by(TenantMembership.tenant_id, TenantMembership.role, AdminUser.email)
+        )
+        return [(m, u) for m, u in (await self.session.execute(stmt)).tuples()]
 
     async def get_refresh_by_hash(self, token_hash: str) -> AdminRefreshToken | None:
         stmt = select(AdminRefreshToken).where(AdminRefreshToken.token_hash == token_hash)

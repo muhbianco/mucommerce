@@ -7,7 +7,7 @@ import { logout } from "../actions";
 import styles from "../panel.module.css";
 
 // Authenticated shell. Links are relative to the panel host root: the middleware maps
-// painel.<domain>/x to /painel/x, so URLs stay clean (painel.muhbianco.com.br/ops/tenants).
+// painel.<domain>/x to /painel/x, so URLs stay clean (painel.muhbianco.com.br/t/<id>).
 export default async function PanelShell({ children }: { children: ReactNode }) {
   const me = await requireMe();
   return (
@@ -17,7 +17,7 @@ export default async function PanelShell({ children }: { children: ReactNode }) 
           Painel MuhBianco
         </Link>
         <Link href="/">Lojas</Link>
-        {me.platform_role ? <Link href="/ops/tenants">Ops</Link> : null}
+        {me.platform_role ? <a href="https://muhbianco.com.br/admin.html#lojas">Lojas (admin)</a> : null}
         <span className={styles.spacer} />
         <span>{me.email}</span>
         <form action={logout}>

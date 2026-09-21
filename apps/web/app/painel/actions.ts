@@ -13,7 +13,6 @@ import {
   safeReturnPath,
   type TokenPair,
 } from "@/lib/panel/token";
-import { ACCESS_MODES, type Tenant, type TenantPanelContext } from "@/lib/panel/types";
 
 // Server Actions only run for same-origin POSTs (Next checks Origin against Host), which is the
 // CSRF protection for every mutation below. Errors come back as ?erro=<code> on a redirect so
@@ -62,62 +61,4 @@ export async function logout(): Promise<void> {
   jar.set(ACCESS_COOKIE, "", EXPIRED_COOKIE);
   jar.set(REFRESH_COOKIE, "", EXPIRED_COOKIE);
   redirect("/entrar");
-}
-
-export async function createTenant(form: FormData): Promise<void> {
-  let tenant: Tenant;
-  try {
-    tenant = await api<Tenant>("/ops/tenants", {
-      json: { slug: field(form, "slug"), name: field(form, "name") },
-      // One key per rendered form: a double submit replays instead of creating twice.
-      idempotencyKey: field(form, "idempotency_key") || undefined,
-    });
-  } catch (error) {
-    redirect(`/ops/tenants?erro=${errorCode(error)}`);
-  }
-  redirect(`/ops/tenants/${encodeURIComponent(tenant.id)}`);
-}
-
-export async function setTenantStatus(form: FormData): Promise<void> {
-  const id = encodeURIComponent(field(form, "tenant_id"));
-  let outcome = "ok=status";
-  try {
-    await api(`/ops/tenants/${id}/status`, { json: { status: field(form, "status") } });
-  } catch (error) {
-    outcome = `erro=${errorCode(error)}`;
-  }
-  redirect(`/ops/tenants/${id}?${outcome}`);
-}
-
-export async function setFeatures(form: FormData): Promise<void> {
-  const id = encodeURIComponent(field(form, "tenant_id"));
-  const keys = field(form, "keys").split(",").filter(Boolean);
-  // Unchecked boxes are not submitted: every listed key is sent, checked or not.
-  const flags = Object.fromEntries(keys.map((key) => [key, form.get(`flag:${key}`) === "on"]));
-  let outcome = "ok=flags";
-  try {
-    await api(`/ops/tenants/${id}/features`, { method: "PUT", json: { flags } });
-  } catch (error) {
-    outcome = `erro=${errorCode(error)}`;
-  }
-  redirect(`/ops/tenants/${id}?${outcome}`);
-}
-
-export async function setAccessMode(form: FormData): Promise<void> {
-  const id = encodeURIComponent(field(form, "tenant_id"));
-  const mode = field(form, "access_mode");
-  let outcome = "ok=acesso";
-  try {
-    if (!(ACCESS_MODES as readonly string[]).includes(mode)) throw new ApiError(422, "validation_error", "");
-    // PUT replaces the whole setting: start from the current value to keep its other fields.
-    const context = await api<TenantPanelContext>(`/admin/tenants/${id}/context`);
-    const current = context.settings.storefront ?? {};
-    await api(`/ops/tenants/${id}/settings/storefront`, {
-      method: "PUT",
-      json: { value: { ...current, access_mode: mode } },
-    });
-  } catch (error) {
-    outcome = `erro=${errorCode(error)}`;
-  }
-  redirect(`/ops/tenants/${id}?${outcome}`);
 }

@@ -33,6 +33,30 @@ class TenantRead(BaseModel):
     created_at: datetime
 
 
+class TenantOwnerRead(BaseModel):
+    admin_user_id: str
+    account_id: str | None
+    email: str
+    full_name: str
+    role: str
+
+
+class TenantListItem(TenantRead):
+    """List row for the MuhBianco admin "Lojas" page: tenant plus its owners and address."""
+
+    primary_host: str | None = None
+    access_mode: str = "whitelist"
+    owners: list[TenantOwnerRead] = Field(default_factory=list)
+
+
+class TenantOwnerSet(StrictModel):
+    """The store owner is a MuhBianco account (api-agents user), picked in the site admin."""
+
+    account_id: str = Field(min_length=36, max_length=36)
+    email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+$")
+    full_name: str = Field(default="", max_length=200)
+
+
 class TenantStatusChange(StrictModel):
     status: str = Field(pattern=r"^(provisioning|active|suspended|archived|draft)$")
     reason: str | None = Field(default=None, max_length=200)

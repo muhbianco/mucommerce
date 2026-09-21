@@ -54,16 +54,10 @@ export interface Domain {
   last_error: string | null;
 }
 
-/** Mirrors TenantService.set_status: which transitions the API accepts from each status. */
-export const TENANT_TRANSITIONS: Record<string, string[]> = {
-  draft: ["provisioning", "active", "archived"],
-  provisioning: ["active", "draft"],
-  active: ["suspended"],
-  suspended: ["active", "archived"],
-  archived: [],
-};
-
-export const ACCESS_MODES = ["public", "login_required", "whitelist"] as const;
+export interface TenantListItem extends Tenant {
+  primary_host: string | null;
+  owners: { admin_user_id: string; account_id: string | null; email: string; full_name: string; role: string }[];
+}
 
 // ------------------------------------------------------------------ catalog (phase 1)
 export interface Price {

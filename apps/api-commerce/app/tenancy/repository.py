@@ -132,6 +132,21 @@ class TenantRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return {row.key: dict(row.value) for row in rows}
 
+    async def setting_for_many(
+        self, tenant_ids: Collection[str], key: str
+    ) -> dict[str, dict[str, object]]:
+        """One setting for a page of tenants (ops list), in one query."""
+        if not tenant_ids:
+            return {}
+        stmt = (
+            select(TenantSetting)
+            .where(TenantSetting.tenant_id.in_(list(tenant_ids)))
+            .where(TenantSetting.key == key)
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return {row.tenant_id: dict(row.value) for row in rows}
+
     async def next_sequence(self, name: str) -> int:
         """Tenant-scoped (session must carry the tenant); concurrent callers get distinct values.
 

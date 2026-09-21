@@ -106,6 +106,11 @@ class Settings(BaseSettings):
     storage_private_bucket: str = "commerce-private"
     storage_timeout_seconds: float = 20.0
 
+    # --- MuhBianco accounts (api-agents): staff sign in to the panel with their account -----
+    # Internal URL used to redeem the one-time sign-in code (never leaves chatbot-net).
+    muhbianco_accounts_internal_url: str = "http://api_agents:8000"
+    muhbianco_accounts_timeout_seconds: float = 5.0
+
     # --- cors -----------------------------------------------------------------------
     cors_origins: str = ""
 

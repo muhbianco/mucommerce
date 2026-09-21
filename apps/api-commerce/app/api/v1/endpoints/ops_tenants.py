@@ -7,6 +7,7 @@ from fastapi import APIRouter, Path, Query, Request, status
 
 from app.api.deps import DbSession, PlatformOperator, admin_actor
 from app.audit.idempotency import idempotent
+from app.audit.writer import audit
 from app.core.exceptions import NotFoundError
 from app.core.pagination import (
     DEFAULT_PAGE_SIZE,
@@ -15,6 +16,10 @@ from app.core.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from app.core.scopes import TenantRole
+from app.identity.models import AdminUser, TenantMembership
+from app.identity.repository import AdminUserRepository
+from app.identity.service import AdminAuthService
 from app.schemas.tenant import (
     DnsInstructionsRead,
     DomainCheckRead,
@@ -23,6 +28,9 @@ from app.schemas.tenant import (
     FeatureFlagsUpdate,
     SettingUpdate,
     TenantCreate,
+    TenantListItem,
+    TenantOwnerRead,
+    TenantOwnerSet,
     TenantRead,
     TenantStatusChange,
 )
@@ -65,21 +73,102 @@ def _domain_read(domain: TenantDomain, with_instructions: bool = False) -> Domai
     )
 
 
-@router.get("", response_model=Page[TenantRead], summary="Lista tenants (mais novos primeiro)")
+def _owner_read(membership: TenantMembership, user: AdminUser) -> TenantOwnerRead:
+    return TenantOwnerRead(
+        admin_user_id=user.id,
+        account_id=user.external_account_id,
+        email=user.email,
+        full_name=user.full_name,
+        role=membership.role,
+    )
+
+
+@router.get("", response_model=Page[TenantListItem], summary="Lista tenants (mais novos primeiro)")
 async def list_tenants(
     session: DbSession,
     _: PlatformOperator,
     status_filter: str | None = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=256)] = None,
-) -> Page[TenantRead]:
+) -> Page[TenantListItem]:
     before_id = decode_cursor(cursor, "id")["id"] if cursor else None
     rows = await TenantService(session).repo.list_page(
         limit=limit, before_id=before_id, status=status_filter
     )
-    items = [TenantRead.model_validate(t, from_attributes=True) for t in rows[:limit]]
+    page = rows[:limit]
+    # Owners in one query for the whole page (no N+1); domains are eager-loaded with the tenant.
+    members = await AdminUserRepository(session).members_of([t.id for t in page])
+    storefront = await TenantService(session).repo.setting_for_many(
+        [t.id for t in page], "storefront"
+    )
+    owners: dict[str, list[TenantOwnerRead]] = {}
+    for membership, user in members:
+        if membership.role == TenantRole.OWNER:
+            owners.setdefault(membership.tenant_id, []).append(_owner_read(membership, user))
+    items = [
+        TenantListItem(
+            **TenantRead.model_validate(t, from_attributes=True).model_dump(),
+            primary_host=next(
+                (
+                    d.hostname
+                    for d in t.domains
+                    if d.purpose == DomainPurpose.STOREFRONT and d.role == DomainRole.PRIMARY
+                ),
+                None,
+            ),
+            access_mode=str(storefront.get(t.id, {}).get("access_mode", "whitelist")),
+            owners=owners.get(t.id, []),
+        )
+        for t in page
+    ]
     next_cursor = encode_cursor(id=rows[limit - 1].id) if len(rows) > limit else None
-    return Page[TenantRead](items=items, next_cursor=next_cursor)
+    return Page[TenantListItem](items=items, next_cursor=next_cursor)
+
+
+@router.put(
+    "/{tenant_id}/owner",
+    response_model=list[TenantOwnerRead],
+    summary="Define a conta MuhBianco dona da loja (troca a anterior)",
+)
+async def set_owner(
+    request: Request,
+    session: DbSession,
+    user: PlatformOperator,
+    tenant_id: TenantId,
+    body: TenantOwnerSet,
+) -> list[TenantOwnerRead]:
+    """One owner per store: the chosen account becomes `owner` and any previous owner is
+    demoted to `admin` (they keep working in the store until removed)."""
+    tenant = await TenantService(session).get_or_404(tenant_id)
+    actor = admin_actor(request, user).id
+    auth = AdminAuthService(session)
+    owner = await auth.ensure_account_user(
+        account_id=body.account_id, email=body.email, full_name=body.full_name
+    )
+    repo = AdminUserRepository(session)
+    for membership, member in await repo.members_of([tenant.id]):
+        if membership.role == TenantRole.OWNER and member.id != owner.id:
+            membership.role = TenantRole.ADMIN
+    current = await repo.any_membership(owner.id, tenant.id)
+    if current is None:
+        await auth.add_membership(
+            user=owner, tenant_id=tenant.id, role=TenantRole.OWNER, actor=actor
+        )
+    else:
+        current.role = TenantRole.OWNER
+        current.status = "active"
+    await session.flush()
+    await audit(
+        session,
+        actor=actor,
+        action="tenant.owner_set",
+        entity_type="tenant",
+        entity_id=tenant.id,
+        tenant_id=tenant.id,
+        after={"admin_user_id": owner.id, "account_id": body.account_id},
+    )
+    members = await repo.members_of([tenant.id])
+    return [_owner_read(m, u) for m, u in members if m.role == TenantRole.OWNER]
 
 
 @router.post(

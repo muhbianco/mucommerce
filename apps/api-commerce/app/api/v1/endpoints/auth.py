@@ -7,14 +7,18 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 from app.api.deps import CurrentAdmin, DbSession
 from app.core.config import settings
+from app.core.exceptions import PermissionDeniedError
 from app.core.rate_limit import client_ip, rate_limit
 from app.core.scopes import scopes_for_tenant_role
+from app.identity.accounts import redeem_code
 from app.identity.service import AdminAuthService
 from app.schemas.auth import (
+    AccessTokenResponse,
     LogoutRequest,
     MembershipRead,
     MeResponse,
     RefreshRequest,
+    SsoExchangeRequest,
     TokenResponse,
 )
 from app.tenancy.repository import TenantRepository
@@ -45,6 +49,42 @@ async def login(
         ip=client_ip(request),
         user_agent=request.headers.get("user-agent"),
     )
+    return TokenResponse(
+        access_token=pair.access_token,
+        refresh_token=pair.refresh_token,
+        expires_in=pair.expires_in,
+    )
+
+
+sso_limit = rate_limit(
+    "auth.sso",
+    settings.login_rate_limit_attempts,
+    settings.login_rate_limit_window_seconds,
+)
+
+
+@router.post(
+    "/sso/exchange",
+    response_model=TokenResponse | AccessTokenResponse,
+    summary="Login com a conta MuhBianco (código de uso único + PKCE)",
+    dependencies=[Depends(sso_limit)],
+)
+async def sso_exchange(
+    request: Request, session: DbSession, body: SsoExchangeRequest
+) -> TokenResponse | AccessTokenResponse:
+    """The panel (server side) or the MuhBianco admin page trades the one-time code for a
+    session. `site_admin` tokens are access-only and only for platform admins."""
+    account = await redeem_code(body.code, body.code_verifier)
+    if body.purpose == "site_admin" and not account.is_platform_admin:
+        raise PermissionDeniedError("Só administradores da MuhBianco gerenciam lojas.")
+    pair = await AdminAuthService(session).login_with_account(
+        account,
+        ip=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+        issue_refresh=body.purpose == "panel",
+    )
+    if body.purpose == "site_admin":
+        return AccessTokenResponse(access_token=pair.access_token, expires_in=pair.expires_in)
     return TokenResponse(
         access_token=pair.access_token,
         refresh_token=pair.refresh_token,

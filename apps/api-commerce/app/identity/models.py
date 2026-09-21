@@ -37,6 +37,8 @@ class AdminUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255))
     google_subject: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # The person's MuhBianco account (api-agents `users.id`): the panel signs in through it.
+    external_account_id: Mapped[str | None] = mapped_column(String(36), unique=True)
     platform_role: Mapped[str | None] = mapped_column(String(16))  # superadmin | operator | NULL
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=AdminUserStatus.ACTIVE)
     last_login_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

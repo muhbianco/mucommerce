@@ -18,25 +18,21 @@ Pré-requisitos: CI verde no commit a subir e pedido explícito de deploy (skill
 4. Verificar que `commerce_commerce-api|web|worker|media|beat` estão 1/1 na tag nova.
 5. Rodar `wget -qO- http://commerce-api:8000/readyz` de dentro da `chatbot-net`. O esperado é `"storage": true`. Se vier `false`, a API está sem acesso ao MinIO (endpoint `http://minio:9000` ou chaves).
 
-## 2. Acesso ao painel (operador, no terminal do hel1)
+## 2. Acesso ao painel
 
-Hoje não há admin no banco. A senha é digitada por você; nunca em argv nem no chat:
+Não há admin separado: o painel entra com a conta MuhBianco (ADR 0009). Quem é `admin` no site entra como superadmin da plataforma. O comando `admin bootstrap` da CLI fica só para emergência, quando o site estiver fora do ar.
 
-```bash
-infra/scripts/commerce-cli.sh $TAG python -m app.cli admin bootstrap --email <seu-email>
-```
+## 3. Ligar a loja modelo (admin do site → Lojas, depois painel)
 
-O comando cria o superadmin e pede a senha duas vezes (mínimo de 12 caracteres). Com isso você entra em `https://painel.muhbianco.com.br` e tem acesso a qualquer loja pelo papel de plataforma. Um membro com papel `owner` só da loja modelo, se quiser, sai com `admin grant --email … --tenant-slug muhbianco --role owner --create`.
-
-## 3. Ligar a loja modelo (painel → Ops → muhbianco)
-
-1. Módulos: ligar `catalog` e `inventory` (os demais não mudam).
-2. Acesso à vitrine: `public`.
-3. Em Configurações da loja:
-   - enviar o logo e escolher a cor;
-   - preencher o SEO e marcar "aparecer no Google";
-   - montar a página inicial (hero, destaques e contato).
-4. Categorias e cerca de 10 produtos, cada um com pelo menos uma imagem. Publicar exige preço maior que zero e imagem pronta. Dar entrada de estoque nos produtos com estoque controlado.
+1. Em `https://muhbianco.com.br/admin.html#lojas`, na loja `muhbianco`:
+   - defina o dono (a sua conta);
+   - em Módulos, ligue `catalog` e `inventory`;
+   - em "Quem vê a vitrine", escolha `Pública`.
+2. Em `https://painel.muhbianco.com.br`, entre com Google e abra a loja. Em Configurações:
+   - envie o logo e escolha a cor;
+   - preencha o SEO e marque "aparecer no Google";
+   - monte a página inicial (hero, destaques e contato).
+3. Cadastre categorias e cerca de 10 produtos, cada um com pelo menos uma imagem. Publicar exige preço maior que zero e imagem pronta. Dê entrada de estoque nos produtos com estoque controlado.
 
 Rollback funcional sem deploy: desligar `catalog` (a vitrine e as rotas do painel voltam a 404/403) ou trocar o acesso para `whitelist`.
 

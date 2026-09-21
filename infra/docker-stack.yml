@@ -54,6 +54,10 @@ x-api-env: &api_env
   # MinIO: internal S3 API for the server; browsers upload to / read from the public host.
   # Keys come from /root/.mucommerce-minio.env (infra/minio/setup.sh), merged into the stack
   # Env by infra/scripts/portainer-stack-update.py --env-file.
+  # Staff sign in with their MuhBianco account: the API redeems one-time codes at api-agents over
+  # chatbot-net; the site admin "Lojas" page calls the API from https://muhbianco.com.br (CORS).
+  MUHBIANCO_ACCOUNTS_INTERNAL_URL: http://api_agents:8000
+  CORS_ORIGINS: https://muhbianco.com.br
   STORAGE_ENDPOINT: http://minio:9000
   STORAGE_PUBLIC_URL: https://storage.s3.muhbianco.com.br
   STORAGE_ACCESS_KEY: ${MINIO_ACCESS_KEY}
@@ -218,6 +222,8 @@ services:
       INTERNAL_TOKEN_WEB: ${INTERNAL_TOKEN_WEB}
       PANEL_HOST: painel.muhbianco.com.br
       PLATFORM_BASE_DOMAIN: loja.muhbianco.com.br
+      # Public MuhBianco login (api-agents) the panel's "Entrar com Google" goes through.
+      MUHBIANCO_ACCOUNTS_URL: https://api.muhbianco.com.br
     networks:
       - chatbot-net
     deploy:
