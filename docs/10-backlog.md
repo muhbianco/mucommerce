@@ -14,7 +14,7 @@ Prioridade: **P0** (bloqueia a fase), **P1** (necessário para aceite da fase), 
 | E00-06 | Cutover do deploy do Chatwoot | `/usr/src/muchatwoot` no VPS; atualizar skill/mapa de deploy; primeiro deploy pelo fork; taggear imagens `mb-v4.17.1-1`; arquivar `muh-chatwoot` | P1 | E00-03 | `docker service ls` 1/1 com nova imagem; README do repo antigo aponta para o fork | — | 2 |
 | E00-07 | PR upstream do fix `webhook_url = "null"` | Abrir PR em `chatwoot/chatwoot` com spec; link no commit local | P2 | E00-03 | PR aberto | revisão upstream demorada | 2 |
 | E00-08 | Runbook de upgrade do Chatwoot | `docs/chatwoot/upgrade.md`: fetch tags, cherry-pick/rebase, staging sob demanda, `db:chatwoot_prepare`, rollback | P1 | E00-04 | Runbook testado em staging com `v4.17.1 → v4.17.x` | — | 2 |
-| E00-09 | ADRs | `docs/adr/0001-api-commerce-separada.md`, `0002-shared-schema-tenant-id.md`, `0003-traefik-http-provider.md`, `0004-celery-outbox.md`, `0005-payment-provider-modes.md`, `0006-chatwoot-sem-fork.md` | P1 | — | ADRs revisados | — | 2 |
+| E00-09 | ADRs | `docs/adr/0001-api-commerce-separada.md`, `0002-shared-schema-tenant-id.md`, `0003-traefik-http-provider.md`, `0004-celery-outbox.md`, `0005-payment-provider-modes.md`, `0006-chatwoot-api-fork-minimo.md` | P1 | — | ADRs revisados | — | 2 |
 
 ## E01 — Fundação da API (Fase 0)
 

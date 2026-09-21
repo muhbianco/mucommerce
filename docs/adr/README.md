@@ -7,6 +7,7 @@
 | [0003](0003-traefik-http-provider.md) | Domínios de tenant via `providers.http` do Traefik; HTTP-01 por host |
 | [0004](0004-celery-outbox.md) | Celery + Redis e transactional outbox com DLQ |
 | [0005](0005-payment-provider-modes.md) | `PaymentProvider` com modos `embedded` (MP) e `redirect` (InfinitePay) |
-| [0006](0006-chatwoot-sem-fork.md) | Chatwoot por API + Dashboard App; fork mínimo em `muchatwoot@mb/main` |
+| [0006](0006-chatwoot-api-fork-minimo.md) | Chatwoot por API + Dashboard App; fork mínimo em `muchatwoot@mb/main` |
+| [0007](0007-sem-staging-loja-modelo.md) | Sem staging: `loja.muhbianco.com.br` é a loja modelo em produção, com flags, expand/contract e backup testado |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.
