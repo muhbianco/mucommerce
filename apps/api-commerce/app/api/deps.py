@@ -20,8 +20,11 @@ from app.core.exceptions import (
 from app.core.rate_limit import client_ip
 from app.core.scopes import PlatformRole, Scope, platform_role_covers, scopes_for_tenant_role
 from app.core.security import constant_time_equals, decode_access_token
+from app.customers.access import Viewer, check_catalog_access
+from app.customers.sessions import SESSION_COOKIE, resolve_viewer
 from app.identity.models import AdminUser
 from app.identity.repository import AdminUserRepository
+from app.models.base import utcnow
 from app.tenancy.context import TenantContext, bind_session_tenant
 from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
@@ -54,6 +57,7 @@ CurrentAdmin = Annotated[AdminUser, Depends(get_current_admin)]
 PLATFORM_GUARD_ATTR = "__platform_guard__"
 TENANT_GUARD_ATTR = "__tenant_guard__"
 CATALOG_ACCESS_GUARD_ATTR = "__catalog_access_guard__"
+CUSTOMER_GUARD_ATTR = "__customer_guard__"
 
 
 def require_platform_role(required: PlatformRole) -> Callable[..., Awaitable[AdminUser]]:
@@ -146,22 +150,71 @@ async def get_storefront_tenant(
 StorefrontTenant = Annotated[TenantContext, Depends(get_storefront_tenant)]
 
 
-async def require_catalog_access(tenant: StorefrontTenant) -> TenantContext:
+def _is_web(x_internal_token: str | None) -> bool:
+    expected = settings.internal_token_for("web")
+    return bool(expected and x_internal_token and constant_time_equals(x_internal_token, expected))
+
+
+# --------------------------------------------------------------------------- customer session
+async def get_optional_customer(
+    request: Request,
+    session: DbSession,
+    tenant: StorefrontTenant,
+    x_customer_session: Annotated[str | None, Header()] = None,
+    x_internal_token: Annotated[str | None, Header()] = None,
+) -> Viewer | None:
+    """The signed-in customer of THIS store, if any.
+
+    The browser sends the host-only `__Host-mb_sess` cookie on `/api` of the store's host; the
+    web's server-side calls forward the same token in `X-Customer-Session`, honoured only with
+    the web's internal token. The session must belong to the resolved store.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    if x_customer_session and _is_web(x_internal_token):
+        token = x_customer_session
+    if not token:
+        return None
+    return await resolve_viewer(session, tenant.id, token, utcnow())
+
+
+OptionalCustomer = Annotated[Viewer | None, Depends(get_optional_customer)]
+
+
+async def require_customer(viewer: OptionalCustomer) -> Viewer:
+    if viewer is None:
+        raise LoginRequiredError()
+    return viewer
+
+
+setattr(require_customer, CUSTOMER_GUARD_ATTR, True)
+CurrentCustomer = Annotated[Viewer, Depends(require_customer)]
+
+
+def storefront_access_mode(tenant: TenantContext) -> str:
+    return str(tenant.settings.get("storefront", {}).get("access_mode", "whitelist"))
+
+
+def check_storefront_catalog(tenant: TenantContext, viewer: Viewer | None) -> None:
+    """Raise unless the catalog of `tenant` is visible to `viewer` (see check_catalog_access)."""
+    if not (tenant.feature("storefront") and tenant.feature("catalog")):
+        raise NotFoundError("Recurso não encontrado.")
+    check_catalog_access(storefront_access_mode(tenant), viewer)
+
+
+async def require_catalog_access(
+    tenant: StorefrontTenant, viewer: OptionalCustomer
+) -> TenantContext:
     """Gate for every storefront catalog read.
 
     - `storefront` or `catalog` off → 404, as if the store had no catalog;
-    - `access_mode=public` → open;
-    - anything else → 401 `login_required`. Customer sessions (whitelist approval) land in
-      phase 1 slice 2 and extend this check; until then only public stores show a catalog.
+    - `public` → open; otherwise a session of this store is needed (401 `login_required`),
+      and `whitelist` also needs approval (403 `access_pending` / `access_required`);
+      blocked customers get 403 `access_blocked`.
 
-    The web's internal token only changes which Host is resolved (`get_storefront_tenant`);
-    it never grants access here.
+    The web's internal token only changes which Host is resolved and lets the web forward the
+    customer's session; it never grants access by itself.
     """
-    if not (tenant.feature("storefront") and tenant.feature("catalog")):
-        raise NotFoundError("Recurso não encontrado.")
-    access_mode = str(tenant.settings.get("storefront", {}).get("access_mode", "whitelist"))
-    if access_mode != "public":
-        raise LoginRequiredError()
+    check_storefront_catalog(tenant, viewer)
     return tenant
 
 

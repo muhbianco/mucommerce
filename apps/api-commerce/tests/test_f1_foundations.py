@@ -17,12 +17,16 @@ from app.audit.idempotency import idempotent
 from app.audit.models import IdempotencyKey, OutboxEvent
 from app.cli import admin_bootstrap, admin_grant, read_password
 from app.core.exceptions import (
+    AccessBlockedError,
+    AccessPendingError,
+    AccessRequiredError,
     FeatureDisabledError,
     LoginRequiredError,
     NotFoundError,
     ValidationError,
 )
 from app.core.scopes import PlatformRole, Scope, TenantRole, scopes_for_tenant_role
+from app.customers.access import Viewer, check_catalog_access
 from app.identity.models import AdminUser, TenantMembership
 from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
 from app.tenancy.models import (
@@ -136,18 +140,44 @@ def _context(**overrides: Any) -> TenantContext:
 
 async def test_catalog_access_gate() -> None:
     public = _context()
-    assert await require_catalog_access(public) is public
+    assert await require_catalog_access(public, None) is public
 
+    whitelist = _context(settings={"storefront": {"access_mode": "whitelist"}})
     with pytest.raises(LoginRequiredError):
-        await require_catalog_access(
-            _context(settings={"storefront": {"access_mode": "whitelist"}})
-        )
+        await require_catalog_access(whitelist, None)
     with pytest.raises(LoginRequiredError):
-        await require_catalog_access(_context(settings={}))  # missing = whitelist
+        await require_catalog_access(_context(settings={}), None)  # missing = whitelist
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={"storefront": True}))
+        await require_catalog_access(_context(features={"storefront": True}), None)
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={"catalog": True}))
+        await require_catalog_access(_context(features={"catalog": True}), None)
+
+
+@pytest.mark.parametrize(
+    ("mode", "status", "outcome"),
+    [
+        ("public", None, None),
+        ("public", "blocked", None),
+        ("login_required", None, None),
+        ("login_required", "pending", None),
+        ("login_required", "blocked", AccessBlockedError),
+        ("whitelist", "approved", None),
+        ("whitelist", "pending", AccessPendingError),
+        ("whitelist", None, AccessRequiredError),
+        ("whitelist", "revoked", AccessRequiredError),
+        ("whitelist", "blocked", AccessBlockedError),
+        ("unknown-mode", "pending", AccessPendingError),  # closed by default
+    ],
+)
+def test_access_matrix_for_signed_in_customers(
+    mode: str, status: str | None, outcome: type[Exception] | None
+) -> None:
+    viewer = Viewer(customer_id="c", session_id="s", access_status=status)
+    if outcome is None:
+        check_catalog_access(mode, viewer)
+    else:
+        with pytest.raises(outcome):
+            check_catalog_access(mode, viewer)
 
 
 async def test_panel_route_feature_gate(session_factory: async_sessionmaker[AsyncSession]) -> None:

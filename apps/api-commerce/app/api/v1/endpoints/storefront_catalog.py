@@ -13,7 +13,13 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
-from app.api.deps import CatalogReader, DbSession, StorefrontTenant, require_catalog_access
+from app.api.deps import (
+    CatalogReader,
+    DbSession,
+    OptionalCustomer,
+    StorefrontTenant,
+    check_storefront_catalog,
+)
 from app.catalog.pricing import EffectivePrice
 from app.catalog.storefront import (
     STOREFRONT_PAGE_MAX,
@@ -21,8 +27,14 @@ from app.catalog.storefront import (
     StorefrontCatalog,
     image_payload,
 )
-from app.core.exceptions import AuthenticationError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    AuthenticationError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.core.pagination import Page, decode_cursor, encode_cursor
+from app.customers.access import Viewer
 from app.media.service import ready_media_by_ids
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
@@ -236,10 +248,10 @@ async def storefront_sitemap(session: DbSession, tenant: CatalogReader) -> Sitem
 
 
 # ----------------------------------------------------------------------------- landing
-async def _catalog_accessible(tenant: TenantContext) -> bool:
+def _catalog_accessible(tenant: TenantContext, viewer: Viewer | None) -> bool:
     try:
-        await require_catalog_access(tenant)
-    except (NotFoundError, AuthenticationError):
+        check_storefront_catalog(tenant, viewer)
+    except (NotFoundError, AuthenticationError, PermissionDeniedError):
         return False
     return True
 
@@ -249,12 +261,14 @@ async def _catalog_accessible(tenant: TenantContext) -> bool:
     response_model=list[dict[str, Any]],
     summary="Blocos da página inicial, com produtos/categorias/imagens resolvidos",
 )
-async def storefront_landing(session: DbSession, tenant: StorefrontTenant) -> list[dict[str, Any]]:
+async def storefront_landing(
+    session: DbSession, tenant: StorefrontTenant, viewer: OptionalCustomer
+) -> list[dict[str, Any]]:
     if not tenant.feature("storefront"):
         raise NotFoundError("Recurso não encontrado.")
     landing = LandingV1.model_validate(tenant.settings.get("landing") or {})
     blocks = [block.model_dump() for block in landing.blocks]
-    show_catalog = await _catalog_accessible(tenant)
+    show_catalog = _catalog_accessible(tenant, viewer)
     catalog = StorefrontCatalog(session, utcnow())
 
     media_ids = [

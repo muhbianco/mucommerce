@@ -95,6 +95,23 @@ class LoginRequiredError(AuthenticationError):
     message = "Entre na loja para ver este conteúdo."
 
 
+class AccessRequiredError(PermissionDeniedError):
+    """Signed in, but this store only shows its catalog to approved customers."""
+
+    error_code = "access_required"
+    message = "Esta loja libera o catálogo para clientes aprovados. Solicite acesso."
+
+
+class AccessPendingError(PermissionDeniedError):
+    error_code = "access_pending"
+    message = "Seu pedido de acesso está em análise pela loja."
+
+
+class AccessBlockedError(PermissionDeniedError):
+    error_code = "access_blocked"
+    message = "Seu acesso a esta loja não está liberado."
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"
