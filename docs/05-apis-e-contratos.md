@@ -114,6 +114,15 @@ Prefixo `/admin/tenants/{t}`; auth `admin_jwt`; escopos entre parênteses.
 | POST | `/media/uploads` | `media:write` | `{owner_type, owner_id, mime, bytes, filename}` → `{media_id, upload_url (PUT assinado), headers}` | — | |
 | POST | `/media/{id}/complete` | `media:write` | dispara `process_media` | — | `media.ready` (async) |
 | DELETE | `/media/{id}` | `media:write` | remove objetos | — | |
+
+> **Implementado na F1/S3** (todas as rotas acima também exigem a flag `catalog`, senão `403 feature_disabled`):
+> - `GET /products?status=&q=&category_id=&cursor=&limit=` (keyset por id, ≤100; `archived` só com `status=archived`); `q` busca no nome e prefixo do SKU.
+> - `POST /products` e `POST /categories`: `Idempotency-Key` opcional. SKU/slug gerados quando omitidos; conflito → `409`.
+> - `PATCH /products/{id}`: parcial; `null` limpa campos opcionais; SKU não muda; o estado combinado (preço × promoção) é revalidado.
+> - `POST /products/{id}/publish`: exige preço > 0 e variante ativa (`409` com `details.missing`); S4 acrescenta "≥1 mídia pronta". `published_at` guarda a 1ª publicação.
+> - Variantes: só `PATCH /products/{id}/variants/{vid}` (`name`, `price_cents`, `cost_cents`, `status`) nesta fatia; criação de variantes por opções = E05-09.
+> - Categorias: `GET` devolve lista plana (raízes primeiro, por posição); reorder = `PATCH` de `position`.
+> - Eventos de outbox só do agregado produto: `product.created|updated|published|unpublished|archived`.
 | GET | `/inventory/balances` | `inventory:read` | `?item_type&low_stock=true` | — | |
 | GET | `/inventory/movements` | `inventory:read` | `?item_id&from&to&type` | — | |
 | POST | `/inventory/adjustments` | `inventory:adjust` | `{items:[{item_type,item_id,qty_delta|qty_counted,reason,note}]}` → movimentos `adjustment|count|loss` | **obrigatório** | `inventory.adjusted`, `inventory.low_stock` |

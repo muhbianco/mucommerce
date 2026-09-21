@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    admin_catalog,
     admin_tenants,
     auth,
     internal,
@@ -21,6 +22,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     },
     {"name": "Ops — Outbox / DLQ", "description": "Eventos de domínio e reprocessamento."},
     {"name": "Painel do tenant", "description": "Tenant vem do path e é validado por membership."},
+    {
+        "name": "Painel — Catálogo",
+        "description": "Produtos, variantes e categorias do tenant (flag `catalog`).",
+    },
     {"name": "Interno", "description": "Consumidores de serviço: Traefik, Next.js, api-agents."},
     {"name": "Vitrine (público)", "description": "Resolvido pelo Host do tenant."},
     {"name": "Infraestrutura", "description": "Health checks."},
@@ -33,6 +38,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     ops_tenants.router,
     ops_outbox.router,
     admin_tenants.router,
+    admin_catalog.router,
     internal.router,
     storefront.router,
 )

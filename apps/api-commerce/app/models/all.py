@@ -7,6 +7,7 @@ from app.audit.models import (
     OutboxEvent,
     ProcessedEvent,
 )
+from app.catalog.models import Category, Product, ProductCategory, ProductVariant
 from app.identity.models import (
     AdminRefreshToken,
     AdminUser,
@@ -31,6 +32,7 @@ __all__ = [
     "AdminUser",
     "AuditLog",
     "Base",
+    "Category",
     "Customer",
     "CustomerIdentity",
     "CustomerSession",
@@ -39,6 +41,9 @@ __all__ = [
     "OutboxDelivery",
     "OutboxEvent",
     "ProcessedEvent",
+    "Product",
+    "ProductCategory",
+    "ProductVariant",
     "Tenant",
     "TenantDomain",
     "TenantFeatureFlag",

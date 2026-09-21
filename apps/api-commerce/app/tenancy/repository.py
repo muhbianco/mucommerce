@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
+from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import Executable, Table, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.tenancy.context import CROSS_TENANT_OPTION
+from app.core.exceptions import TenantContextMissingError
+from app.core.ids import new_id
+from app.tenancy.context import CROSS_TENANT_OPTION, session_tenant_id
 from app.tenancy.models import (
     DomainPurpose,
     DomainStatus,
@@ -130,18 +135,40 @@ class TenantRepository:
         return {row.key: dict(row.value) for row in rows}
 
     async def next_sequence(self, name: str) -> int:
-        """Tenant-scoped (session must carry the tenant). Row lock on MariaDB."""
-        stmt = select(TenantSequence).where(TenantSequence.name == name)
-        if self.session.bind is not None and self.session.bind.dialect.name in {
+        """Tenant-scoped (session must carry the tenant); concurrent callers get distinct values.
+
+        The row is created with an upsert, so two first calls racing each other do not hit the
+        unique key, and then read under a row lock (MariaDB) until the transaction ends.
+        """
+        tenant_id = session_tenant_id(self.session)
+        if tenant_id is None:
+            raise TenantContextMissingError()
+        mariadb = self.session.bind is not None and self.session.bind.dialect.name in {
             "mysql",
             "mariadb",
-        }:
+        }
+        values = {"id": new_id(), "tenant_id": tenant_id, "name": name, "next_value": 1}
+        table = cast(Table, TenantSequence.__table__)
+        create: Executable
+        if mariadb:
+            # No-op update on conflict (keeps the current value): MariaDB has no DO NOTHING.
+            create = (
+                mysql_insert(table)
+                .values(**values)
+                .on_duplicate_key_update(next_value=table.c.next_value)
+            )
+        else:
+            create = sqlite_insert(table).values(**values).on_conflict_do_nothing()
+        await self.session.execute(create)
+
+        stmt = (
+            select(TenantSequence)
+            .where(TenantSequence.name == name)
+            .execution_options(populate_existing=True)
+        )
+        if mariadb:
             stmt = stmt.with_for_update()
-        seq = (await self.session.execute(stmt)).scalar_one_or_none()
-        if seq is None:
-            seq = TenantSequence(name=name, next_value=1)
-            self.session.add(seq)
-            await self.session.flush()
+        seq = (await self.session.execute(stmt)).scalar_one()
         value = seq.next_value
         seq.next_value = value + 1
         await self.session.flush()

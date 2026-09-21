@@ -25,6 +25,10 @@ from app.tenancy.models import TenantFeatureFlag, TenantSetting
 from tests.conftest import create_admin, create_tenant, login
 
 COVERED_TENANT_SCOPED_TABLES = {
+    "categories",
+    "products",
+    "product_variants",
+    "product_categories",
     "tenant_settings",
     "tenant_feature_flags",
     "tenant_sequences",
@@ -239,3 +243,76 @@ def test_every_ops_route_requires_a_platform_role() -> None:
         f"{sorted(r.methods)} {r.path}" for r in routes if PLATFORM_GUARD_ATTR not in _guards(r)
     ]
     assert not unguarded, unguarded
+
+
+async def test_catalog_routes_never_reach_another_tenants_rows(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Ids from tenant B used under tenant A's path answer 404/422, never B's data."""
+    from app.tenancy.service import Actor, TenantService
+
+    tenants = {}
+    headers = {}
+    for slug in ("alpha", "beta"):
+        tenant = await create_tenant(session_factory, slug)
+        async with session_factory() as session:
+            service = TenantService(session)
+            await service.set_features(
+                await service.get_or_404(tenant.id), {"catalog": True}, Actor.system("tests")
+            )
+            await session.commit()
+        await create_admin(
+            session_factory, f"dona@{slug}.test", memberships={tenant.id: TenantRole.OWNER}
+        )
+        tenants[slug] = tenant
+        headers[slug] = await login(client, f"dona@{slug}.test")
+
+    alpha_base = f"/api/v1/admin/tenants/{tenants['alpha'].id}"
+    beta_base = f"/api/v1/admin/tenants/{tenants['beta'].id}"
+    beta_product = (
+        await client.post(
+            f"{beta_base}/products",
+            json={"name": "Segredo", "base_price_cents": 100},
+            headers=headers["beta"],
+        )
+    ).json()
+    beta_category = (
+        await client.post(f"{beta_base}/categories", json={"name": "Dela"}, headers=headers["beta"])
+    ).json()
+    variant_id = beta_product["variants"][0]["id"]
+    mine = headers["alpha"]
+
+    product_url = f"{alpha_base}/products/{beta_product['id']}"
+    assert (await client.get(product_url, headers=mine)).status_code == 404
+    assert (await client.patch(product_url, json={"name": "x"}, headers=mine)).status_code == 404
+    assert (await client.delete(product_url, headers=mine)).status_code == 404
+    assert (await client.post(f"{product_url}/publish", headers=mine)).status_code == 404
+    variant_url = f"{product_url}/variants/{variant_id}"
+    assert (await client.patch(variant_url, json={"name": "x"}, headers=mine)).status_code == 404
+    category_url = f"{alpha_base}/categories/{beta_category['id']}"
+    assert (await client.patch(category_url, json={"name": "x"}, headers=mine)).status_code == 404
+    assert (await client.delete(category_url, headers=mine)).status_code == 404
+
+    linked = await client.post(
+        f"{alpha_base}/products",
+        json={"name": "Meu", "base_price_cents": 100, "category_ids": [beta_category["id"]]},
+        headers=mine,
+    )
+    assert linked.status_code == 422
+    child = await client.post(
+        f"{alpha_base}/categories",
+        json={"name": "Filha", "parent_id": beta_category["id"]},
+        headers=mine,
+    )
+    assert child.status_code == 422
+    listed = await client.get(f"{alpha_base}/products", headers=mine)
+    assert listed.json()["items"] == []
+    # Tenant B's path with tenant A's credentials: the tenant itself does not exist for A.
+    assert (await client.get(f"{beta_base}/products", headers=mine)).status_code == 404
+    # Same SKU sequence number in both tenants: numbering is per tenant.
+    mine_product = (
+        await client.post(
+            f"{alpha_base}/products", json={"name": "Meu", "base_price_cents": 1}, headers=mine
+        )
+    ).json()
+    assert mine_product["sku"] == beta_product["sku"] == "P00001"

@@ -55,6 +55,15 @@ Todas as tabelas abaixo têm `id`, `tenant_id` (exceto as marcadas **global**), 
 - **events**: `slug`, `name`, `description_md`, `media_id`, `starts_at`, `ends_at`, `sales_open_at`, `sales_close_at`, `status ∈ draft|published|closed|cancelled`, `capacity` nullable, `capacity_used`, `featured`, `location JSON`; UNIQUE `(tenant_id, slug)`.
 - **event_products**: `event_id`, `product_id`, `position`, `event_price_cents` nullable.
 
+> **Como foi implementado (F1, S3, migration `0004_catalog`)** — onde difere do desenho acima:
+> - `products.status` sem `sold_out`: disponibilidade é derivada do estoque (S5/S7), não é estado do produto.
+> - `product_categories` tem `id` + UNIQUE `(tenant_id, product_id, category_id)` em vez de PK composta (mesma convenção das demais tabelas).
+> - FKs compostas `(tenant_id, x_id) → pai(tenant_id, id)` em `product_variants`, `product_categories` e `categories.parent_id`; `products`/`categories` também têm FK `tenant_id → tenants`. Todo índice de FK é declarado (senão o MariaDB cria um implícito e o `alembic check` acusa drift).
+> - SKU é único por tenant **entre produtos e variantes**, imutável; gerado como `P00001…` por `tenant_sequences` (`product_sku`) quando omitido. A variante padrão (`Padrão`) herda o SKU do produto.
+> - Categorias: no máximo 2 níveis e 200 ativas por tenant; arquivar exige não ter subcategorias ativas e desfaz os vínculos com produtos.
+> - Variante com `price_cents` próprio ignora a promoção do produto; a que herda o preço herda a promoção. Janela de promoção `[início, fim)`.
+> - `product_tags`, `product_options*` e modificadores ficam para E05-02/E05-09.
+
 ### inventory
 - **inventory_items** (view lógica): item = `product_variant` ou `raw_material`. Tabelas físicas:
 - **inventory_balances**: `item_type ∈ variant|raw_material`, `item_id`, `on_hand DECIMAL(18,6)`, `reserved DECIMAL(18,6)`, `unit`, `min_level`, `updated_at`; UNIQUE `(tenant_id, item_type, item_id)`. `available = on_hand - reserved` (calculado).
