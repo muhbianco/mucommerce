@@ -4,7 +4,16 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, Index, LargeBinary, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import (
@@ -122,17 +131,24 @@ class CustomerIdentity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
-class CustomerSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Opaque session per (customer, tenant). Cookie is host-only on the tenant domain."""
+class CustomerSession(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Opaque session per (customer, tenant). Cookie `__Host-mb_sess` on the tenant host only;
+    the table keeps only the SHA-256 of the token."""
 
     __tablename__ = "customer_sessions"
-    __table_args__ = (Index("ix_customer_sessions_customer_tenant", "customer_id", "tenant_id"),)
+    __table_args__ = (
+        Index("ix_customer_sessions_customer_tenant", "customer_id", "tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], name="fk_customer_sessions_tenant_id_tenants"
+        ),
+    )
 
     customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), nullable=False)
-    tenant_id: Mapped[str] = mapped_column(String(36), ForeignKey("tenants.id"), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    # logout | rotated | blocked | revoked | logout_all
+    revoked_reason: Mapped[str | None] = mapped_column(String(32))
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(300))
 
@@ -144,11 +160,19 @@ class CustomerTenantAccess(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Ba
     __table_args__ = (
         UniqueConstraint("tenant_id", "customer_id", name="uq_customer_tenant_access_customer"),
         Index("ix_customer_tenant_access_status", "tenant_id", "status"),
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], name="fk_customer_tenant_access_tenant"
+        ),
     )
 
     customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=AccessStatus.PENDING)
+    # request (the customer asked) | panel | chatwoot | agent
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="panel")
+    requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    request_message: Mapped[str | None] = mapped_column(String(500))
+    status_changed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    status_changed_by_actor: Mapped[str | None] = mapped_column(String(120))
     chatwoot_contact_id: Mapped[int | None] = mapped_column(BigInteger)
     approved_by_actor: Mapped[str | None] = mapped_column(String(120))
     approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

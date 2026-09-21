@@ -8,6 +8,7 @@ from app.audit.models import (
     ProcessedEvent,
 )
 from app.catalog.models import Category, Product, ProductCategory, ProductVariant
+from app.customers.models import CustomerAuthFlow
 from app.identity.models import (
     AdminRefreshToken,
     AdminUser,
@@ -36,6 +37,7 @@ __all__ = [
     "Base",
     "Category",
     "Customer",
+    "CustomerAuthFlow",
     "CustomerIdentity",
     "CustomerSession",
     "CustomerTenantAccess",

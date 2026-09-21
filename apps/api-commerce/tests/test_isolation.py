@@ -38,6 +38,7 @@ COVERED_TENANT_SCOPED_TABLES = {
     "tenant_sequences",
     "tenant_integration_credentials",
     "customer_tenant_access",
+    "customer_sessions",
 }
 
 
