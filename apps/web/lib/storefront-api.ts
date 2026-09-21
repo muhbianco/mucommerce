@@ -27,17 +27,25 @@ export const PUBLIC_REVALIDATE_SECONDS = 60;
  * token) and is never cached. The host is also part of the URL so cached entries can never be
  * shared between tenants, whatever the fetch cache does with headers.
  */
+export interface StoreFetchOptions {
+  /** Never send the customer's session (store-wide data such as the legal documents). */
+  anonymous?: boolean;
+  /** Skip the 60 s cache: the answer must be current (e.g. versions recorded as consent). */
+  fresh?: boolean;
+}
+
 export async function storefrontApi<T>(
   context: StorefrontContext,
   path: string,
   params: Record<string, string | undefined> = {},
+  options: StoreFetchOptions = {},
 ): Promise<StoreResult<T>> {
   const host = context.host ?? context.primary_host ?? "";
   const base = process.env.COMMERCE_API_INTERNAL_URL ?? "http://127.0.0.1:8000";
   const query = new URLSearchParams({ _host: host });
   for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
   const cache =
-    context.access_mode === "public"
+    context.access_mode === "public" && !options.fresh
       ? ({ next: { revalidate: PUBLIC_REVALIDATE_SECONDS } } as const)
       : ({ cache: "no-store" } as const);
   const requestHeaders: Record<string, string> = {
@@ -45,7 +53,7 @@ export async function storefrontApi<T>(
     "X-Internal-Token": process.env.INTERNAL_TOKEN_WEB ?? "",
     Accept: "application/json",
   };
-  if (context.access_mode !== "public") {
+  if (context.access_mode !== "public" && !options.anonymous) {
     const session = (await cookies()).get(CUSTOMER_SESSION_COOKIE)?.value;
     if (session) requestHeaders["X-Customer-Session"] = session;
   }

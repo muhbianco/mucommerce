@@ -7,7 +7,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import type { Media, Page, ProductSummary } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
-import { deleteMedia, saveBranding, saveLanding, saveSeo } from "../actions";
+import { deleteMedia, publishLegalDocument, saveBranding, saveLanding, saveSeo } from "../actions";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
 
@@ -40,12 +40,13 @@ export default async function Settings({
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   if (!tenantScopes(me, context.tenant_id).can("settings:write")) notFound();
   const path = `/admin/tenants/${context.tenant_id}`;
-  const [brandMedia, landingMedia, products] = await Promise.all([
+  const [brandMedia, landingMedia, products, legal] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
     api<Media[]>(`${path}/media?owner_type=landing`),
     context.features.catalog
       ? api<Page<ProductSummary>>(`${path}/products?status=active&limit=100`)
       : Promise.resolve({ items: [], next_cursor: null }),
+    api<LegalOverview>(`${path}/legal-documents`),
   ]);
   const branding = context.settings.branding ?? {};
   const seo = context.settings.seo ?? {};
@@ -286,6 +287,45 @@ export default async function Settings({
           </div>
         </form>
       </section>
+
+      <section className={styles.card}>
+        <h2>Termos e privacidade</h2>
+        <p className="muted">
+          Cada publicação vira uma nova versão. Quem entra na loja aceita a versão mostrada na tela de login, e o
+          aceite fica registrado com data.
+        </p>
+        {(["terms", "privacy"] as const).map((kind) => {
+          const current = legal[kind];
+          return (
+            <form key={kind} action={publishLegalDocument} className={styles.form}>
+              {tenantField}
+              <input type="hidden" name="kind" value={kind} />
+              <label>
+                {LEGAL_LABEL[kind]}
+                {current ? ` (versão ${current.version})` : " (não publicado)"}
+                <textarea name="content" rows={8} minLength={20} maxLength={100000} required defaultValue={current?.content ?? ""} />
+              </label>
+              <button type="submit" className={styles.buttonGhost}>
+                Publicar {LEGAL_LABEL[kind].toLowerCase()}
+              </button>
+            </form>
+          );
+        })}
+      </section>
     </>
   );
+}
+
+const LEGAL_LABEL = { terms: "Termos de uso", privacy: "Política de privacidade" } as const;
+
+interface LegalDocument {
+  kind: "terms" | "privacy";
+  version: number;
+  content: string;
+  published_at: string;
+}
+
+interface LegalOverview {
+  terms: LegalDocument | null;
+  privacy: LegalDocument | null;
 }

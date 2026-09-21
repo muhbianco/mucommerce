@@ -43,6 +43,9 @@ Binding = Annotated[str, Field(min_length=32, max_length=128)]
 class StartBody(StrictModel):
     return_to: Annotated[str, Field(max_length=512)] = "/"
     binding: Binding
+    # Versions of the store's terms/privacy shown next to "Entrar": recorded as consent.
+    terms_version: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    privacy_version: Annotated[int, Field(ge=1, le=100_000)] | None = None
 
 
 class StartResponse(BaseModel):
@@ -111,7 +114,12 @@ async def start_google(
     session: DbSession, tenant: StorefrontTenant, body: StartBody, ip: ClientIp
 ) -> StartResponse:
     url = await CustomerAuthService(session).start(
-        tenant, return_to=body.return_to, binding=body.binding, ip=ip
+        tenant,
+        return_to=body.return_to,
+        binding=body.binding,
+        ip=ip,
+        terms_version=body.terms_version,
+        privacy_version=body.privacy_version,
     )
     return StartResponse(authorize_url=url)
 

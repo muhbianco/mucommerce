@@ -8,6 +8,7 @@ from app.audit.models import (
     ProcessedEvent,
 )
 from app.catalog.models import Category, Product, ProductCategory, ProductVariant
+from app.customers.legal_models import Consent, LegalDocument
 from app.customers.models import CustomerAuthFlow
 from app.identity.models import (
     AdminRefreshToken,
@@ -36,6 +37,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "Category",
+    "Consent",
     "Customer",
     "CustomerAuthFlow",
     "CustomerIdentity",
@@ -44,6 +46,7 @@ __all__ = [
     "IdempotencyKey",
     "InventoryBalance",
     "InventoryMovement",
+    "LegalDocument",
     "MediaAsset",
     "OutboxDelivery",
     "OutboxEvent",

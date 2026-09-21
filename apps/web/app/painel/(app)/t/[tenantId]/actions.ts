@@ -394,3 +394,13 @@ export async function setCustomerAccess(form: FormData): Promise<void> {
 function safeListPath(value: string, fallback: string): string {
   return value.startsWith(`${fallback}`) && !value.includes("//") ? value : fallback;
 }
+
+// ------------------------------------------------------------------ legal documents
+export async function publishLegalDocument(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const kind = text(form, "kind");
+  await run(`${page}/configuracoes`, "legal", async () => {
+    if (kind !== "terms" && kind !== "privacy") throw new FormError("acao_invalida");
+    await api(`${path}/legal-documents`, { json: { kind, content: text(form, "content") } });
+  });
+}

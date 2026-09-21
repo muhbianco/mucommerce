@@ -72,6 +72,22 @@ test("loja bloqueia um cliente e ele perde a sessão na hora", async ({ page, br
   await expect(page).toHaveURL(/\/entrar\?next=%2Floja&erro=sessao_expirada$|\/entrar\?next=%2Floja$/);
 });
 
+test("loja publica os termos; o login mostra a versão e a página de políticas o texto", async ({ page, browser }) => {
+  const admin = await adminPanel(browser);
+  await admin.getByRole("link", { name: "Configurações" }).click();
+  const terms = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Publicar termos de uso" }) });
+  await terms.locator("textarea").fill("Termos da Loja Fechada: pedidos, entregas e trocas conforme a lei.");
+  await terms.getByRole("button", { name: "Publicar termos de uso" }).click();
+  await expect(admin.getByText("Documento publicado.")).toBeVisible();
+
+  await page.goto(`${CLOSED_STORE}/entrar`);
+  await expect(page.getByText(/Ao entrar, você aceita/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Entrar com Google" })).toHaveAttribute("href", /tv=1/);
+  await page.getByRole("link", { name: "os termos de uso" }).click();
+  await expect(page.getByRole("heading", { name: "Termos de uso" })).toBeVisible();
+  await expect(page.getByText(/Termos da Loja Fechada/)).toBeVisible();
+});
+
 test("código de retorno forjado ou reusado volta para o login", async ({ page }) => {
   await page.goto(`${CLOSED_STORE}/auth/complete?hc=forjado-forjado-forjado`);
   await expect(page).toHaveURL(/\/entrar\?erro=sessao_expirada$/);

@@ -13,11 +13,18 @@ import { relativeRedirect } from "@/lib/relative-redirect";
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const next = safeStorePath(request.nextUrl.searchParams.get("next"));
   const binding = randomBytes(32).toString("base64url");
+  const version = (name: string) => {
+    const value = Number(request.nextUrl.searchParams.get(name));
+    return Number.isInteger(value) && value > 0 && value <= 100_000 ? value : undefined;
+  };
   let authorizeUrl: string;
   try {
     ({ authorize_url: authorizeUrl } = await customerApi<{ authorize_url: string }>(
       "/internal/customer-auth/google/start",
-      { json: { return_to: next, binding }, session: null },
+      {
+        json: { return_to: next, binding, terms_version: version("tv"), privacy_version: version("pv") },
+        session: null,
+      },
     ));
   } catch (error) {
     const reason =

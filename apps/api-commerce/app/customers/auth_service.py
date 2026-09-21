@@ -33,6 +33,7 @@ from app.core.exceptions import (
     InvalidLoginStateError,
 )
 from app.customers import oidc
+from app.customers.legal import Acceptance, LegalService
 from app.customers.models import CustomerAuthFlow
 from app.customers.repository import AccessRepository, CustomerSessionRepository
 from app.customers.sessions import hash_token, open_session
@@ -91,7 +92,14 @@ class CustomerAuthService:
 
     # ------------------------------------------------------------------ 1. start
     async def start(
-        self, tenant: TenantContext, *, return_to: str | None, binding: str, ip: str | None
+        self,
+        tenant: TenantContext,
+        *,
+        return_to: str | None,
+        binding: str,
+        ip: str | None,
+        terms_version: int | None = None,
+        privacy_version: int | None = None,
     ) -> str:
         if not settings.customer_login_configured:
             raise CustomerLoginUnavailableError()
@@ -109,6 +117,8 @@ class CustomerAuthService:
                 nonce_hash=_sha(nonce),
                 binding_hash=_sha(binding),
                 expires_at=utcnow() + FLOW_TTL,
+                terms_version=str(terms_version) if terms_version else None,
+                privacy_version=str(privacy_version) if privacy_version else None,
                 ip=ip,
             )
         )
@@ -316,6 +326,15 @@ class CustomerAuthService:
             ip=ip,
             user_agent=user_agent,
         )
+        accepted = [
+            Acceptance(kind, int(version))
+            for kind, version in (("terms", flow.terms_version), ("privacy", flow.privacy_version))
+            if version and version.isdigit()
+        ]
+        if accepted:
+            await LegalService(self.session, tenant).record_acceptance(
+                customer.id, accepted, at=now, ip=ip, user_agent=user_agent
+            )
         access = await AccessRepository(self.session).for_customer(customer.id)
         return Completed(
             session_token=token,
