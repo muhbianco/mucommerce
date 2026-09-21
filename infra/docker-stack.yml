@@ -59,6 +59,10 @@ x-api-env: &api_env
   # chatbot-net; the site admin "Lojas" page calls the API from https://muhbianco.com.br (CORS).
   MUHBIANCO_ACCOUNTS_INTERNAL_URL: http://api_agents:8000
   CORS_ORIGINS: https://muhbianco.com.br
+  # Store customers sign in with Google through the stores' own OAuth client (not the MuhBianco
+  # account). The Env keeps the owner's names; the callback is api-commerce's central one.
+  GOOGLE_CUSTOMER_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+  GOOGLE_CUSTOMER_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
   STORAGE_ENDPOINT: http://minio:9000
   STORAGE_PUBLIC_URL: https://storage.s3.muhbianco.com.br
   STORAGE_ACCESS_KEY: ${MINIO_ACCESS_KEY}

@@ -13,21 +13,15 @@ O código da etapa A vai para produção desligado: as flags `customer_login` e 
    - status **Em produção** (em teste, só e-mails cadastrados conseguem entrar).
 2. Em **Credenciais → Criar ID do cliente OAuth → Aplicativo da Web**, cadastre o URI de redirecionamento, que é um só para todas as lojas, inclusive as de domínio próprio:
    `https://api-commerce.muhbianco.com.br/api/v1/auth/google/callback`
-3. Grave o ID e o segredo no host, **nunca** no chat nem no repositório:
-   ```bash
-   echo 'GOOGLE_CUSTOMER_CLIENT_ID=...' >> /root/.mucommerce.env
-   echo 'GOOGLE_CUSTOMER_CLIENT_SECRET=...' >> /root/.mucommerce.env
-   ```
+3. Grave o ID e o segredo no host (**nunca** no chat, em prints nem no repositório), em
+   `/root/.mucommerce.env`, como `GOOGLE_OAUTH_CLIENT_ID` e `GOOGLE_OAUTH_CLIENT_SECRET`.
+   Feito em 21/09/2026.
 
-## 2. Levar as chaves para a stack `commerce` (Claude, com pedido de deploy)
+## 2. Levar as chaves para a stack `commerce` (feito em 21/09/2026)
 
-- Acrescentar ao `x-api-env` de `infra/docker-stack.yml`:
-  ```yaml
-  GOOGLE_CUSTOMER_CLIENT_ID: ${GOOGLE_CUSTOMER_CLIENT_ID}
-  GOOGLE_CUSTOMER_CLIENT_SECRET: ${GOOGLE_CUSTOMER_CLIENT_SECRET}
-  ```
-- Só quando as chaves já estiverem no arquivo do host: o `portainer-stack-update.py` recusa `${VAR}` que falte no Env.
-- O deploy leva as chaves via `--env-file`, e o `envKeys` é conferido depois.
+- **Env do Portainer:** as duas chaves entraram com `portainer-stack-update.py --env-file <arquivo temporário só com elas>`, mantendo o YAML e a tag em produção. `env_keys_added` confirmou as duas.
+- **YAML:** `infra/docker-stack.yml` mapeia `GOOGLE_CUSTOMER_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}` e o segredo. O `portainer-stack-update.py` recusa `${VAR}` que falte no Env, então a chave precisa estar no Env **antes** do deploy do YAML.
+- **Trocar o segredo:** edite o arquivo do host e repita o `--env-file`.
 
 ## 3. WhatsApp dos clientes (Claude, com pedido de deploy do api-agents)
 
