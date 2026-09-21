@@ -3,13 +3,18 @@
 Used by setup.sh. Reads ROOT_ENV_FILE (MINIO_ROOT_USER / MINIO_ROOT_PASSWORD) and prints the mc
 alias line to stdout, which setup.sh redirects into a 0600 temp file. `--user` prints only the
 root user name (needed as the parent of the service account).
+
+mc splits MC_HOST with a regex and does NOT percent-decode it: `*` sent as `%2A` becomes part of
+the secret and every request fails with SignatureDoesNotMatch. So credentials go in raw, and the
+few characters MC_HOST cannot carry are rejected up front instead of silently mangled.
 """
 
 from __future__ import annotations
 
 import os
 import sys
-from urllib.parse import quote
+
+UNSUPPORTED = set(":@/ \t")
 
 
 def read_env(path: str) -> dict[str, str]:
@@ -32,8 +37,15 @@ def main() -> int:
     if "--user" in sys.argv[1:]:
         print(user)
         return 0
+    if UNSUPPORTED & set(user + password):
+        print(
+            "root user/password contain ':', '@', '/' or spaces, which MC_HOST cannot carry; "
+            "run `mc alias set` interactively instead",
+            file=sys.stderr,
+        )
+        return 2
     alias = os.environ.get("ALIAS", "hel1")
-    print(f"MC_HOST_{alias}=http://{quote(user, safe='')}:{quote(password, safe='')}@minio:9000")
+    print(f"MC_HOST_{alias}=http://{user}:{password}@minio:9000")
     return 0
 
 

@@ -20,7 +20,7 @@ SA_ENV_FILE="${SA_ENV_FILE:-/root/.mucommerce-minio.env}"
 
 [ -r "$ROOT_ENV_FILE" ] || { echo "missing $ROOT_ENV_FILE" >&2; exit 2; }
 
-# mc takes its alias from MC_HOST_<alias>. Build it (URL-encoded) in a private temp file so the
+# mc takes its alias from MC_HOST_<alias> (raw, mc does not percent-decode). Build it in a private temp file so the
 # root credentials never reach argv/ps or the terminal.
 MC_RUN_ENV="$(mktemp)"
 trap 'rm -f "$MC_RUN_ENV"' EXIT
