@@ -69,8 +69,19 @@ def test_primary_alias_and_chat_redirect() -> None:
 
 def test_empty_config_still_has_services() -> None:
     config = build_traefik_config([])
-    assert config["http"]["routers"] == {}
+    assert set(config["http"]) == {"services"}
     assert set(config["http"]["services"]) == {"commerce-web", "commerce-api"}
+
+
+def test_empty_sections_are_left_out() -> None:
+    """Regression: Traefik rejected `"middlewares": {}` ("cannot be a standalone element") and
+    ignored the whole answer, so a lone primary domain never got a router."""
+    tenant = "0192a1b2-0000-7000-8000-000000000001"
+    http = build_traefik_config([_domain(tenant, "loja.cliente.com.br", DomainRole.PRIMARY)])[
+        "http"
+    ]
+    assert set(http) == {"routers", "services"}
+    assert all(value for value in http.values())
 
 
 def test_router_names_do_not_collide_for_tenants_created_in_the_same_second() -> None:

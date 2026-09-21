@@ -122,4 +122,11 @@ def build_traefik_config(
                 **({"middlewares": router_middlewares} if router_middlewares else {}),
             }
 
-    return {"http": {"routers": routers, "services": services, "middlewares": middlewares}}
+    # Traefik's decoder rejects an empty map ("middlewares cannot be a standalone element")
+    # and then ignores the whole answer, so empty sections are left out.
+    http: dict[str, Any] = {"services": services}
+    if routers:
+        http["routers"] = routers
+    if middlewares:
+        http["middlewares"] = middlewares
+    return {"http": http}
