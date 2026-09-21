@@ -424,6 +424,9 @@ class TenantService:
 
     async def recheck_active_domain(self, domain: TenantDomain, verifier: DnsVerifier) -> None:
         """Periodic re-check: three consecutive failures take the host out of the edge."""
+        if domain.hostname in settings.static_edge_hosts:
+            # Our own zone, routed by stack labels: a DNS hiccup must not 404 the loja modelo.
+            return
         check = await verifier.check(domain.hostname, domain.verification_token)
         domain.last_check_at = utcnow()
         if check.target_ok:

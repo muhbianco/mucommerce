@@ -2,28 +2,15 @@ import { notFound } from "next/navigation";
 
 import { getStorefrontContext } from "@/lib/server-context";
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string }>;
-}) {
+export default async function LoginPage() {
   const context = await getStorefrontContext();
   if (!context) notFound();
-  const { next } = await searchParams;
-  // Only relative paths are honoured as return targets.
-  const returnTo = next && next.startsWith("/") && !next.startsWith("//") ? next : "/loja";
+  // Customer login (Google, callback central + handoff) arrives with the identity slice of
+  // phase 1; until then there is no endpoint to link to.
   return (
     <main>
       <h1>Entrar em {context.tenant.name}</h1>
-      <p className="muted">
-        O login Google (Authorization Code + PKCE, callback central) entra na fase 1. O botão abaixo
-        aponta para o endpoint que iniciará o fluxo.
-      </p>
-      <p>
-        <a className="button" href={`/api/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`}>
-          Entrar com Google
-        </a>
-      </p>
+      <p className="muted">O acesso com login ainda não está disponível nesta loja.</p>
     </main>
   );
 }

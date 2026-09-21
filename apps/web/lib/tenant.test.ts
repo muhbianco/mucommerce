@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyHost, isPublicStorefrontPath, normalizeHost, requiresSession } from "./tenant";
+import {
+  classifyHost,
+  isPanelPath,
+  isPublicStorefrontPath,
+  normalizeHost,
+  panelRewritePath,
+  requiresSession,
+} from "./tenant";
 
 const rules = { panelHost: "painel.muhbianco.com.br", platformBaseDomain: "loja.muhbianco.com.br" };
 
@@ -39,5 +46,20 @@ describe("access gating", () => {
     expect(requiresSession("/loja", "login_required")).toBe(true);
     expect(requiresSession("/loja", "public")).toBe(false);
     expect(requiresSession("/", "whitelist")).toBe(false);
+  });
+});
+
+describe("panel routing", () => {
+  it("serves every panel-host path from /painel", () => {
+    expect(panelRewritePath("/")).toBe("/painel");
+    expect(panelRewritePath("/ops/tenants")).toBe("/painel/ops/tenants");
+    expect(panelRewritePath("/painel")).toBe("/painel");
+    expect(panelRewritePath("/painel/t/abc")).toBe("/painel/t/abc");
+  });
+  it("recognises panel paths without matching lookalikes", () => {
+    expect(isPanelPath("/painel")).toBe(true);
+    expect(isPanelPath("/painel/ops")).toBe(true);
+    expect(isPanelPath("/painelx")).toBe(false);
+    expect(isPanelPath("/loja")).toBe(false);
   });
 });

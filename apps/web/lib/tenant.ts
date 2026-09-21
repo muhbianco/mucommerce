@@ -67,3 +67,19 @@ export function requiresSession(pathname: string, accessMode: StorefrontContext[
   if (accessMode === "public") return false;
   return !isPublicStorefrontPath(pathname);
 }
+
+const PANEL_PREFIX = "/painel";
+
+/** True for `/painel` and anything below it. */
+export function isPanelPath(pathname: string): boolean {
+  return pathname === PANEL_PREFIX || pathname.startsWith(PANEL_PREFIX + "/");
+}
+
+/**
+ * On the panel host every path lives under `/painel` (`/` → `/painel`, `/ops` → `/painel/ops`),
+ * so the storefront landing at `/` never renders there. Paths already under `/painel` stay as-is.
+ */
+export function panelRewritePath(pathname: string): string {
+  if (isPanelPath(pathname)) return pathname;
+  return pathname === "/" ? PANEL_PREFIX : PANEL_PREFIX + pathname;
+}

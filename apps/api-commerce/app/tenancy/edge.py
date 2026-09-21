@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -15,17 +16,29 @@ def _name(*parts: str) -> str:
     return "-".join(_SAFE.sub("-", p.lower()) for p in parts if p)
 
 
+def _host_key(hostname: str) -> str:
+    """Stable, unique router prefix for a hostname.
+
+    Derived from the hostname alone, so adding or removing another domain never renames
+    existing routers. The digest keeps `a-b.com` and `a.b.com` from colliding after
+    `_name` folds dots into dashes.
+    """
+    digest = hashlib.sha256(hostname.encode()).hexdigest()[:8]
+    return _name(hostname, digest)
+
+
 def build_traefik_config(
     domains: Iterable[TenantDomain],
     chatwoot_account_ids: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Traefik dynamic configuration (HTTP provider format) for every active tenant host.
 
-    Per storefront host:
-      - `<slug>-<n>-web`: Host(`h`) → commerce-web (priority 10)
-      - `<slug>-<n>-api`: Host(`h`) && PathPrefix(`/api`) → commerce-api (priority 20)
+    Per storefront host (`<key>` = `_host_key(hostname)`):
+      - `<key>-web`: Host(`h`) → commerce-web (priority 10)
+      - `<key>-api`: Host(`h`) && PathPrefix(`/api`) → commerce-api (priority 20)
       - alias hosts get a `redirectregex` middleware (308) to the primary host.
     Per chat_redirect host: 302 to the tenant's Chatwoot account.
+    Hosts in `settings.static_edge_hosts` are skipped: the stack labels already route them.
     Certificates: `tls.certResolver` per router → HTTP-01 per host.
     """
     chatwoot_account_ids = chatwoot_account_ids or {}
@@ -36,12 +49,12 @@ def build_traefik_config(
         "commerce-api": {"loadBalancer": {"servers": [{"url": settings.edge_api_upstream}]}},
     }
 
+    static_hosts = settings.static_edge_hosts
     by_tenant: dict[str, list[TenantDomain]] = defaultdict(list)
     for domain in domains:
         by_tenant[domain.tenant_id].append(domain)
 
     for tenant_id, tenant_domains in by_tenant.items():
-        slug = tenant_id[:8]
         primary = next(
             (
                 d
@@ -51,8 +64,10 @@ def build_traefik_config(
             None,
         )
         tls = {"certResolver": settings.edge_cert_resolver}
-        for index, domain in enumerate(sorted(tenant_domains, key=lambda d: d.hostname)):
-            base = _name(slug, str(index))
+        for domain in sorted(tenant_domains, key=lambda d: d.hostname):
+            if domain.hostname in static_hosts:
+                continue
+            base = _host_key(domain.hostname)
             host_rule = f"Host(`{domain.hostname}`)"
 
             if domain.purpose == DomainPurpose.CHAT_REDIRECT:

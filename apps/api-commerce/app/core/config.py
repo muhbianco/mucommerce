@@ -80,9 +80,8 @@ class Settings(BaseSettings):
 
     # --- platform / edge ------------------------------------------------------------
     platform_tenant_slug: str = "muhbianco"
+    # Storefront host of the platform tenant (the "loja modelo"); no staging, no aliases.
     platform_base_domain: str = "loja.muhbianco.com.br"
-    # Extra storefront hosts for the platform tenant (comma-separated). Staging first.
-    platform_alias_hosts: str = "staging.loja.muhbianco.com.br"
     panel_host: str = "painel.muhbianco.com.br"
     api_public_host: str = "api-commerce.muhbianco.com.br"
     edge_cname_target: str = "edge.muhbianco.com.br"
@@ -166,10 +165,18 @@ class Settings(BaseSettings):
         return [ip.strip() for ip in self.edge_public_ips.split(",") if ip.strip()]
 
     @property
-    def platform_alias_host_list(self) -> list[str]:
-        return [
-            host.strip().lower() for host in self.platform_alias_hosts.split(",") if host.strip()
-        ]
+    def static_edge_hosts(self) -> frozenset[str]:
+        """Hosts routed by the stack's Swarm labels, not by the dynamic providers.http config.
+
+        They never enter `build_traefik_config` (a second router for the same Host would
+        race the label one) and DNS re-checks never take them offline: they live in our
+        own zone, not in a tenant's.
+        """
+        return frozenset(
+            host.strip().lower()
+            for host in (self.platform_base_domain, self.panel_host, self.api_public_host)
+            if host.strip()
+        )
 
     @property
     def dns_resolver_list(self) -> list[str]:
