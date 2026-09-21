@@ -7,7 +7,8 @@ memory, and images are written as already processed. Stores (hosts resolve to 12
 Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http):
 
 - `loja.localhost`           tenant `muhbianco`, public, with published products
-- `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer)
+- `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer);
+                             customers sign in with Google (apps/web/e2e/fake-google.mjs)
 
 Panel login goes through apps/web/e2e/fake-accounts.mjs, which plays the MuhBianco accounts
 service (api-agents) at MUHBIANCO_ACCOUNTS_INTERNAL_URL. The file lives under tests/ so it never
@@ -24,6 +25,8 @@ import tempfile
 from pathlib import Path
 
 PORT = int(os.environ.get("E2E_API_PORT", "8791"))
+GOOGLE_PORT = int(os.environ.get("E2E_GOOGLE_PORT", "8792"))
+WEB_PORT = int(os.environ.get("E2E_WEB_PORT", "3100"))
 DB_FILE = Path(os.environ.get("E2E_DB_FILE", Path(tempfile.gettempdir()) / "mucommerce-e2e.db"))
 
 E2E_ENV = {
@@ -46,6 +49,15 @@ E2E_ENV = {
         "MUHBIANCO_ACCOUNTS_INTERNAL_URL", "http://127.0.0.1:8790"
     ),
     "STORAGE_PUBLIC_URL": "http://storage.localhost",
+    # Store customers sign in against apps/web/e2e/fake-google.mjs.
+    "GOOGLE_CUSTOMER_CLIENT_ID": "e2e-client",
+    "GOOGLE_CUSTOMER_CLIENT_SECRET": "e2e-client-password",
+    "GOOGLE_CUSTOMER_REDIRECT_URI": f"http://api.localhost:{PORT}/api/v1/auth/google/callback",
+    "GOOGLE_OIDC_ISSUER": f"http://127.0.0.1:{GOOGLE_PORT}",
+    "GOOGLE_OIDC_AUTHORIZE_URL": f"http://127.0.0.1:{GOOGLE_PORT}/o/oauth2/v2/auth",
+    "GOOGLE_OIDC_TOKEN_URL": f"http://127.0.0.1:{GOOGLE_PORT}/token",
+    "GOOGLE_OIDC_JWKS_URL": f"http://127.0.0.1:{GOOGLE_PORT}/certs",
+    "STOREFRONT_ORIGIN_TEMPLATE": f"http://{{host}}:{WEB_PORT}",
     "REDIS_URL": "",
     "CELERY_BROKER_URL": "",
     "METRICS_ENABLED": "false",
@@ -64,7 +76,7 @@ from app.catalog.service import CatalogService  # noqa: E402
 from app.cli import _seed_platform_in_session  # noqa: E402
 from app.core.database import create_app_engine  # noqa: E402
 from app.media.models import MediaAsset, MediaStatus  # noqa: E402
-from app.models.base import Base  # noqa: E402
+from app.models.all import Base  # noqa: E402  (every model, for create_all)
 from app.tenancy.context import bind_session_tenant  # noqa: E402
 from app.tenancy.models import TenantStatus  # noqa: E402
 from app.tenancy.orm_filter import register_tenant_filter  # noqa: E402
@@ -136,7 +148,9 @@ async def seed() -> None:
         await session.commit()
     async with factory() as session:  # fresh session: `domains` is loaded by get_or_404
         service = TenantService(session)
-        await service.set_features(await service.get_or_404(closed_id), {"catalog": True}, ACTOR)
+        await service.set_features(
+            await service.get_or_404(closed_id), {"catalog": True, "customer_login": True}, ACTOR
+        )
         await session.commit()
         await _publish_products(session, closed_id)
         await session.commit()

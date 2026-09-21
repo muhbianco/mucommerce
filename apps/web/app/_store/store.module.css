@@ -147,3 +147,13 @@
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

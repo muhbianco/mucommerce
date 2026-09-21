@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { getStorefrontContext } from "@/lib/server-context";
+import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
 import {
   AVAILABILITY_LABEL,
@@ -59,9 +60,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
   if (!context) notFound();
   const { slug } = await params;
   const result = await loadProduct(slug);
-  if (result.kind === "login_required") redirect("/loja");
-  if (result.kind !== "ok") notFound();
-  const product = result.data;
+  const product = requireCatalog(result, `/loja/produto/${encodeURIComponent(slug)}`);
   const origin = storeOrigin(context);
   const url = `${origin}/loja/produto/${product.slug}`;
   const category = product.categories[0];

@@ -30,6 +30,7 @@ export default async function TenantLayout({
         {catalog && context.features.inventory && scopes.can("inventory:read") ? (
           <Link href={`${base}/estoque`}>Estoque</Link>
         ) : null}
+        {scopes.can("customers:read") ? <Link href={`${base}/clientes`}>Clientes</Link> : null}
         {scopes.can("settings:write") ? <Link href={`${base}/configuracoes`}>Configurações</Link> : null}
       </nav>
       {children}

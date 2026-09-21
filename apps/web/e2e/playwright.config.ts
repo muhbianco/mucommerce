@@ -16,6 +16,7 @@ import { defineConfig } from "@playwright/test";
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 3100);
 const API_PORT = 8791;
 const ACCOUNTS_PORT = 8790;
+const GOOGLE_PORT = 8792;
 const WEB_ENV = {
   COMMERCE_API_INTERNAL_URL: `http://127.0.0.1:${API_PORT}`,
   INTERNAL_TOKEN_WEB: "e2e-web-token",
@@ -41,6 +42,12 @@ export default defineConfig({
   },
   webServer: [
     {
+      command: "node fake-google.mjs",
+      url: `http://127.0.0.1:${GOOGLE_PORT}/healthz`,
+      env: { E2E_GOOGLE_PORT: String(GOOGLE_PORT), E2E_GOOGLE_CLIENT_ID: "e2e-client" },
+      reuseExistingServer: false,
+    },
+    {
       command: "node fake-accounts.mjs",
       url: `http://127.0.0.1:${ACCOUNTS_PORT}/healthz`,
       env: { E2E_ACCOUNTS_PORT: String(ACCOUNTS_PORT), E2E_PANEL_URL: `http://painel.localhost:${WEB_PORT}` },
@@ -50,7 +57,12 @@ export default defineConfig({
       command: `${process.env.E2E_PYTHON ?? "python"} tests/e2e/server.py`,
       cwd: "../../api-commerce",
       url: `http://127.0.0.1:${API_PORT}/healthz`,
-      env: { E2E_API_PORT: String(API_PORT), MUHBIANCO_ACCOUNTS_INTERNAL_URL: `http://127.0.0.1:${ACCOUNTS_PORT}` },
+      env: {
+        E2E_API_PORT: String(API_PORT),
+        E2E_GOOGLE_PORT: String(GOOGLE_PORT),
+        E2E_WEB_PORT: String(WEB_PORT),
+        MUHBIANCO_ACCOUNTS_INTERNAL_URL: `http://127.0.0.1:${ACCOUNTS_PORT}`,
+      },
       timeout: 60_000,
       reuseExistingServer: false,
     },
@@ -68,3 +80,4 @@ export default defineConfig({
 export const STORE = `http://loja.localhost:${WEB_PORT}`;
 export const CLOSED_STORE = `http://fechada.loja.localhost:${WEB_PORT}`;
 export const PANEL = `http://painel.localhost:${WEB_PORT}`;
+export const FAKE_GOOGLE = `http://127.0.0.1:${GOOGLE_PORT}`;

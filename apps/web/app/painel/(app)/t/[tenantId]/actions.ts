@@ -373,3 +373,24 @@ export async function saveLanding(form: FormData): Promise<void> {
     await api(`${path}/settings/landing`, { method: "PUT", json: { value: { blocks } } });
   });
 }
+
+// ------------------------------------------------------------------ customers (whitelist)
+const ACCESS_DECISIONS = new Set(["approved", "blocked", "revoked"]);
+
+export async function setCustomerAccess(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const customerId = id(text(form, "customer_id"));
+  const status = text(form, "status");
+  const back = safeListPath(text(form, "back"), `${page}/clientes`);
+  await run(back, `acesso_${status}`, async () => {
+    if (!ACCESS_DECISIONS.has(status)) throw new FormError("acao_invalida");
+    await api(`${path}/customers/${customerId}/access`, {
+      json: { status, note: optional(form, "note") },
+    });
+  });
+}
+
+/** The list the decision came from (tab/search kept); never another tenant or host. */
+function safeListPath(value: string, fallback: string): string {
+  return value.startsWith(`${fallback}`) && !value.includes("//") ? value : fallback;
+}

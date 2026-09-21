@@ -1,6 +1,8 @@
+import { cookies } from "next/headers";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import type { StorefrontContext } from "@/lib/tenant";
 
 import styles from "./store.module.css";
@@ -12,7 +14,10 @@ interface Logo {
 }
 
 /** Brand header + footer around every storefront page. */
-export function StoreShell({ context, children }: { context: StorefrontContext; children: ReactNode }) {
+export async function StoreShell({ context, children }: { context: StorefrontContext; children: ReactNode }) {
+  // Public stores stay cacheable: only closed stores read the session cookie.
+  const signedIn =
+    context.access_mode !== "public" && Boolean((await cookies()).get(CUSTOMER_SESSION_COOKIE));
   const branding = context.branding as { primary_color?: string; logo?: Logo | null };
   const logo = branding.logo;
   return (
@@ -33,6 +38,13 @@ export function StoreShell({ context, children }: { context: StorefrontContext; 
         </Link>
         <span className={styles.spacer} />
         {context.features.catalog ? <Link href="/loja">Produtos</Link> : null}
+        {signedIn ? (
+          <form action="/auth/sair" method="post">
+            <button type="submit" className={styles.linkButton}>
+              Sair
+            </button>
+          </form>
+        ) : null}
       </header>
       <main>{children}</main>
       <footer className={styles.footer}>

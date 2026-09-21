@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { lookupStorefrontContext } from "@/lib/context-cache";
+import { CUSTOMER_SESSION_COOKIE as SESSION_COOKIE } from "@/lib/customer-cookies";
 import { callRefresh, refreshOnce } from "@/lib/panel/refresh";
 import {
   ACCESS_COOKIE,
@@ -14,7 +15,6 @@ import {
 } from "@/lib/panel/token";
 import { classifyHost, isPanelPath, panelRewritePath, requiresSession, resolveRequestHost } from "@/lib/tenant";
 
-const SESSION_COOKIE = "mb_sess";
 const TENANT_HEADERS = ["x-tenant-id", "x-tenant-slug", "x-tenant-host", "x-tenant-context", "x-host-kind"];
 
 export const config = {

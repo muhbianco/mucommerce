@@ -17,6 +17,9 @@ const OK: Record<string, string> = {
   marca: "Marca salva.",
   seo: "SEO salvo.",
   landing: "Página inicial salva.",
+  acesso_approved: "Acesso liberado.",
+  acesso_blocked: "Cliente bloqueado nesta loja.",
+  acesso_revoked: "Acesso revogado.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -32,6 +35,7 @@ const ERRORS: Record<string, string> = {
   data_invalida: "Data inválida.",
   escolha_produtos: "Escolha ao menos um produto para o bloco de destaques.",
   idempotency_in_progress: "Essa operação ainda está em andamento; aguarde.",
+  invalid_transition: "Essa mudança não é possível a partir da situação atual.",
 };
 
 export function Flash({ ok, erro }: { ok?: string; erro?: string }) {

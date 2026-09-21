@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { getStorefrontContext } from "@/lib/server-context";
+import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
 import { type CategoryRef, isIndexable, jsonLd, type ProductPage, storeOrigin } from "@/lib/storefront";
 import type { StorefrontContext } from "@/lib/tenant";
@@ -47,14 +48,16 @@ export default async function CategoryPage({
   const { slug } = await params;
   const { cursor } = await searchParams;
   const found = await load(context, slug);
-  if (found.kind === "login_required") redirect("/loja");
-  if (found.kind !== "ok") notFound();
+  if (found.kind !== "ok") {
+    requireCatalog(found, `/loja/categoria/${encodeURIComponent(slug)}`);
+    notFound();
+  }
   const products = await storefrontApi<ProductPage>(context, "/catalog/products", {
     category: found.category.slug,
     cursor: cursor?.slice(0, 256),
     limit: "24",
   });
-  if (products.kind !== "ok") notFound();
+  const page = requireCatalog(products, `/loja/categoria/${encodeURIComponent(slug)}`);
   const origin = storeOrigin(context);
   const trail = [
     { name: "Produtos", url: `${origin}/loja` },
@@ -90,15 +93,15 @@ export default async function CategoryPage({
           ))}
         </nav>
       ) : null}
-      {products.data.items.length === 0 ? <p>Nenhum produto nesta categoria.</p> : null}
+      {page.items.length === 0 ? <p>Nenhum produto nesta categoria.</p> : null}
       <div className={styles.grid}>
-        {products.data.items.map((product) => (
+        {page.items.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}
       </div>
-      {products.data.next_cursor ? (
+      {page.next_cursor ? (
         <p className={styles.section}>
-          <Link href={`/loja/categoria/${found.category.slug}?cursor=${encodeURIComponent(products.data.next_cursor)}`}>
+          <Link href={`/loja/categoria/${found.category.slug}?cursor=${encodeURIComponent(page.next_cursor)}`}>
             Mais produtos →
           </Link>
         </p>

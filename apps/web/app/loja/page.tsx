@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getStorefrontContext } from "@/lib/server-context";
+import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
 import { type CategoryRef, isIndexable, type ProductPage, storeOrigin } from "@/lib/storefront";
 
@@ -40,24 +41,11 @@ export default async function Store({
     storefrontApi<ProductPage>(context, "/catalog/products", { q: query, cursor: cursor?.slice(0, 256), limit: "24" }),
     storefrontApi<CategoryRef[]>(context, "/catalog/categories"),
   ]);
-  if (products.kind === "not_found") notFound();
-  if (products.kind === "login_required") {
-    return (
-      <StoreShell context={context}>
-        <h1>{context.tenant.name}</h1>
-        <p>Esta loja é exclusiva para clientes cadastrados.</p>
-        <p>
-          <Link className="button" href="/entrar">
-            Entrar
-          </Link>
-        </p>
-      </StoreShell>
-    );
-  }
+  const page = requireCatalog(products, "/loja");
   const roots = categories.kind === "ok" ? categories.data.filter((c) => !c.parent_id) : [];
   const next = new URLSearchParams();
   if (query) next.set("q", query);
-  if (products.data.next_cursor) next.set("cursor", products.data.next_cursor);
+  if (page.next_cursor) next.set("cursor", page.next_cursor);
 
   return (
     <StoreShell context={context}>
@@ -77,13 +65,13 @@ export default async function Store({
           ))}
         </nav>
       ) : null}
-      {products.data.items.length === 0 ? <p>Nenhum produto encontrado.</p> : null}
+      {page.items.length === 0 ? <p>Nenhum produto encontrado.</p> : null}
       <div className={styles.grid}>
-        {products.data.items.map((product) => (
+        {page.items.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}
       </div>
-      {products.data.next_cursor ? (
+      {page.next_cursor ? (
         <p className={styles.section}>
           <Link href={`/loja?${next.toString()}`}>Mais produtos →</Link>
         </p>
