@@ -52,4 +52,4 @@ imprime segredo; arquivos de credencial ficam em `/root` com modo 600.
 
 | Data | Arquivo | Tempo de restore | Resultado | Obs. |
 |---|---|---|---|---|
-| — | — | — | — | primeiro drill no deploy da F0.5 |
+| 2026-09-21 | `mucommerce-20260921T140552Z.sql.gz` (4,6 KB) | < 1 s | ok: sha256, 19 tabelas, `alembic` 0002_identity, contagens = produção | offsite ainda sem destino (script sai 3) |
