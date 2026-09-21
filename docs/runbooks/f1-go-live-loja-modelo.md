@@ -26,7 +26,7 @@ Hoje não há admin no banco. A senha é digitada por você; nunca em argv nem n
 infra/scripts/commerce-cli.sh $TAG python -m app.cli admin bootstrap --email <seu-email>
 ```
 
-O comando cria o superadmin e pede a senha duas vezes. Com isso você entra em `https://painel.muhbianco.com.br` e tem acesso a qualquer loja pelo papel de plataforma. Um membro com papel `owner` só da loja modelo, se quiser, sai com `admin grant --email … --tenant-slug muhbianco --role owner --create`.
+O comando cria o superadmin e pede a senha duas vezes (mínimo de 12 caracteres). Com isso você entra em `https://painel.muhbianco.com.br` e tem acesso a qualquer loja pelo papel de plataforma. Um membro com papel `owner` só da loja modelo, se quiser, sai com `admin grant --email … --tenant-slug muhbianco --role owner --create`.
 
 ## 3. Ligar a loja modelo (painel → Ops → muhbianco)
 
