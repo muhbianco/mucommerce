@@ -69,6 +69,17 @@ for path in /metrics /readyz /api/v1/internal/edge/traefik /api/latest/internal/
   closed "loja $path" "https://$STORE$path"
 done
 body_has "painel robots" "https://$PANEL/robots.txt" "Disallow: /"
+
+# Customer sign-in: to Google with PKCE S256 once the stores' Google client is configured and the
+# store has `customer_login`; until then the store says so on /entrar (never a 5xx).
+login="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "https://$STORE/auth/google/start?next=%2Floja" || true)"
+case "$login" in
+  "302 https://accounts.google.com/o/oauth2/v2/auth?"*code_challenge_method=S256*)
+    report ok "login cliente" "302 → Google (PKCE S256)" ;;
+  "303 https://$STORE/entrar?erro=login_indisponivel"*)
+    report ok "login cliente" "desligado nesta loja (login_indisponivel)" ;;
+  *) report FAIL "login cliente" "${login:-sem resposta}" ;;
+esac
 expect_status "loja robots" "https://$STORE/robots.txt" "200"
 
 catalog="https://$STORE/api/v1/storefront/catalog/products?limit=1"

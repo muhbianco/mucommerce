@@ -18,7 +18,12 @@ Escopos (`app/core/scopes.py`): `catalog:read|write|publish`, `inventory:read|ad
 ## 2. Isolamento e autenticação
 
 - Tenant só por Host/`X-Tenant-Host`+token/path validado (ver [02 §5](02-arquitetura.md)). Testes de vazamento obrigatórios no CI.
-- Clientes: OIDC Google (code + PKCE, `state` assinado e de uso único, `nonce`, validação de `iss`/`aud`/`exp`/assinatura via JWKS com cache, `email_verified`), handoff code 60 s, sessão opaca 30 dias deslizantes, cookie `HttpOnly; Secure; SameSite=Lax; Path=/`, rotação no login, revogação em lista (`customer_sessions`), logout global por cliente. Nunca confiar em e-mail vindo do front.
+- **Clientes das lojas** (etapa A, docs/05 §2): OIDC Google com client próprio das lojas.
+  - **Proteção do fluxo:** code + PKCE S256. State, nonce e vínculo ao navegador são aleatórios, de uso único e guardados em SHA-256 na tabela `customer_auth_flows` (sem Redis; seguro com vários workers).
+  - **id_token:** RS256 validado pelas chaves do Google, com `iss`, `aud`, `exp`, `iat`, nonce e `email_verified`.
+  - **Handoff:** 60 s, preso a loja, host e navegador.
+  - **Sessão:** opaca, 30 dias deslizantes, guardada só como hash, rotacionada no login e revogada ao bloquear. Cookie `__Host-mb_sess` (HttpOnly, Secure, Lax, Path=/, sem Domain), porque clientes chegam por links de WhatsApp e Instagram. Todo POST com cookie exige `Origin` da própria loja, já que Lax não barra subdomínios irmãos.
+  - **E-mail:** nunca vem do front.
 - Admins: Google OIDC (mesmo fluxo, host `painel.`) ou senha Argon2id + 2FA TOTP opcional (`pyotp`) para `mb_*` e `tenant_owner`; JWT 15 min + refresh rotativo com detecção de reuso.
 - CSRF: `SameSite=Lax` + checagem `Origin`/`Sec-Fetch-Site` em toda mutação + header `X-Requested-With: mucommerce` exigido pelo cliente JS.
 - CORS: só `painel.muhbianco.com.br` → `api-commerce…`; storefront é same-origin.

@@ -8,7 +8,7 @@ Base: `https://<host>/api/v1` (também montado em `/api/latest`, como na `api-ag
 
 | Tipo | Como | Onde |
 |------|------|------|
-| `customer_session` | cookie `mb_sess` HttpOnly, Secure, SameSite=Lax, host-only (domínio do tenant); valor opaco → `customer_sessions` (Redis + tabela) | storefront `/me`, `/cart`, `/checkout` |
+| `customer_session` | cookie `__Host-mb_sess` (HttpOnly, Secure, SameSite=Lax, Path=/, sem Domain), só no host da loja; valor opaco, a tabela `customer_sessions` guarda o SHA-256. O web da loja repassa o mesmo token em `X-Customer-Session`, aceito só com o token interno do web. POST com cookie exige `Origin` da própria loja | `/me/*`, catálogo de lojas fechadas, e depois `/cart` e `/checkout` |
 | `admin_jwt` | Bearer JWT HS256 (15 min) + refresh opaco rotativo (cookie no `painel.`) | `/admin`, `/ops` |
 | `internal` | header `X-Internal-Token` (segredo por consumidor: `WEB_INTERNAL_TOKEN`, `AGENTS_INTERNAL_TOKEN`, `TRAEFIK_INTERNAL_TOKEN`) + `X-Tenant-Host` ou `X-Tenant-Key` quando aplicável | `/internal` |
 | `webhook_<provider>` | assinatura do provedor (MP `x-signature`), segmento secreto no path (`tenant_key`, `payment_id`), verificação ativa | `/webhooks` |
@@ -40,28 +40,69 @@ Base: `https://<host>/api/v1` (também montado em `/api/latest`, como na `api-ag
 
 `*` visível na landing mesmo em `whitelist` (flag `events.public_listing`). `**` depende de `access_mode`: `public` → livre; `login_required` → sessão; `whitelist` → sessão + `customer_tenant_access.approved`.
 
-## 2. Autenticação Google (cliente)
+## 2. Autenticação Google (cliente) — implementado na etapa A
 
-| Método | Rota | Auth | Payload | Retorno | Idem | Eventos | Erros |
-|--------|------|------|---------|---------|------|---------|-------|
-| GET | `/auth/google/start` | público (Host tenant) | `?return_to=/loja` (path relativo apenas) | 302 para Google: `client_id`, `redirect_uri=https://api-commerce.muhbianco.com.br/api/v1/auth/google/callback`, `scope=openid email profile`, `state` (assinado: tenant_id, host, return_to, nonce_id, exp 10 min), `code_challenge` S256 (verifier salvo em Redis por `state`) | — | — | 404 tenant, 429 |
-| GET | `/auth/google/callback` | público (host central) | `?code&state` | valida `state` (assinatura, exp, uso único), troca `code` + `code_verifier`, valida `id_token` (assinatura JWKS, `iss`, `aud`, `exp`, `nonce`, `email_verified=true`), upsert `customers`/`customer_identities`, cria **handoff code** (Redis, 60 s, uso único, vinculado ao host) → 302 `https://<host>/auth/complete?hc=…` | — | `customer.created` (1ª vez) | 400 invalid_state, 401 invalid_token |
-| POST | `/auth/complete` | público (Host tenant) | `{hc}` | troca handoff por sessão; `Set-Cookie mb_sess` host-only; `{customer:{id,name,email_masked}, access:{status}}` | — | `customer.session.created` | 400 invalid_handoff |
-| GET | `/auth/session` | customer_session | — | `{customer, access, expires_at}` | — | — | 401 |
-| POST | `/auth/logout` | customer_session | — | revoga sessão; limpa cookie | — | — | |
-| POST | `/auth/phone/start` | customer_session | `{phone_e164}` | pede OTP via `api-agents` (YCloud); `{challenge_id, expires_in}` | — | — | 429, 502 |
-| POST | `/auth/phone/confirm` | customer_session | `{challenge_id, code}` | marca `phone_verified_at`; reavalia acesso | — | `customer.phone_verified` | 400 invalid_code |
+O cliente da loja **não** é conta MuhBianco. A api-commerce roda o OIDC do Google com um client só das lojas (`GOOGLE_CUSTOMER_CLIENT_ID`/`_SECRET`). O navegador fala só com o web da loja; o web chama a API pelo lado do servidor. Assim o cookie nasce no host da própria loja e o login fica preso ao navegador que o começou.
 
-Sessão: 30 dias deslizantes, revogável (`customer_sessions.revoked_at`), rotação do id a cada login; `SameSite=Lax` + checagem `Origin` em POST.
+**Rotas:**
+- **`GET /auth/google/start?next=&tv=&pv=`** (web da loja): cria o cookie de vínculo `__Host-mb_oidc` (10 min) → **`POST /internal/customer-auth/google/start`** (token web + `X-Tenant-Host`), com `{return_to, binding, terms_version?, privacy_version?}` → `{authorize_url}` → 302 para o Google.
+  - O fluxo é guardado em `customer_auth_flows`, com state, nonce e vínculo em SHA-256 e o verifier PKCE por 10 min.
+  - `return_to` só aceita caminho relativo da loja.
+  - Erros: 403 `feature_disabled` (flag `customer_login` desligada), 503 `login_unavailable` (client Google não configurado), 429.
+- **`GET /api/v1/auth/google/callback`** (só no host `api-commerce.`):
+  1. consome o state uma vez (UPDATE condicional) e faz commit **antes** de chamar o Google;
+  2. troca o code com o verifier e valida o id_token: RS256 com as chaves do Google (httpx, cache pelo `max-age`), `iss`, `aud`, `exp`, `iat`, nonce e `email_verified`;
+  3. reconfere a loja (ativa, host ativo, flag ligada) e vincula ou cria `customers`/`customer_identities`: pelo `sub`, senão pelo e-mail verificado.
+  - Sucesso → handoff de 60 s em uso único → 302 `https://<host>/auth/complete?hc=…`.
+  - Erro → 302 `https://<host>/entrar?erro=<motivo>&next=…`. Motivos: `cancelado`, `login_invalido`, `email_nao_verificado`, `google_indisponivel`, `loja_indisponivel`, `login_indisponivel`, `conta_indisponivel`.
+  - State inválido ou reusado → 400 com página "Login expirado".
+- **`GET /auth/complete?hc=`** (web da loja) → **`POST /internal/customer-auth/complete`** `{hc, binding, previous_session?}`.
+  - Consome o handoff só para a mesma loja, o mesmo host e o mesmo vínculo; abre a sessão (30 dias deslizantes); revoga a anterior (`rotated`) e registra os aceites legais.
+  - Resposta: `{session_token, expires_at, return_to, customer:{id,name,email_masked,phone_verified}, access_status}`.
+  - O web grava `__Host-mb_sess` e manda para `return_to`, ou para `/acesso-pendente` em loja `whitelist` sem aprovação.
+  - Erros: 400 `invalid_handoff`.
+- **`GET /me/session`** (sessão da loja) → `{customer, access_status}`. 401 sem sessão desta loja.
+- **`POST /me/logout`** `{all?}` → 204: revoga esta sessão, ou todas nesta loja. O web usa `POST /auth/sair` (mesma origem).
 
-## 3. Autorização/whitelist da loja
+## 3. Acesso à loja (whitelist), WhatsApp e documentos legais
 
-| Método | Rota | Auth | Payload | Retorno | Idem | Eventos | Erros |
-|--------|------|------|---------|---------|------|---------|-------|
-| GET | `/me/access` | customer_session | — | `{status: approved|pending|blocked|none, requested_at, message}` | — | — | |
-| POST | `/me/access/request` | customer_session | `{message?, phone_e164?}` | cria `customer_tenant_access(pending)`; sync → Chatwoot (contato + conversa "Solicitação de acesso") | Idempotency-Key opcional | `customer.access.requested` | 409 already_approved, 429 |
-| GET | `/admin/tenants/{t}/customers` | admin_jwt (`customers:read`) | `?status=&q=` | lista com acesso, canais, último pedido | — | — | |
-| POST | `/admin/tenants/{t}/customers/{c}/access` | admin_jwt (`customers:approve`) | `{status: approved|blocked|revoked, note}` | acesso atualizado; espelha `liberar_loja` no Chatwoot | — | `customer.access.approved|revoked` | 409 |
+**Regra do catálogo (`check_catalog_access`):**
+- `public` → livre.
+- Sem sessão desta loja → 401 `login_required`.
+- Cliente bloqueado → 403 `access_blocked`.
+- `login_required` → qualquer sessão.
+- `whitelist`: aprovado → livre; pendente → 403 `access_pending`; sem pedido ou revogado → 403 `access_required`.
+
+A landing esconde blocos de catálogo de quem não pode vê-lo.
+
+**Cliente:**
+- **`GET /me/access`** → `{status: approved|pending|blocked|revoked|none, requested_at}`.
+- **`POST /me/access/request`** `{message?}` → pendente, com evento `customer.access.requested`. Repetir enquanto pendente só atualiza a mensagem. Erros: 409 `already_approved`, 403 `access_blocked`, 429.
+- **`GET /me/phone`** → `{phone_masked, verified}`.
+- **`POST /me/phone/start`** `{phone}` (flag `customer_phone_otp`) → `{whatsapp_url, expires_at}`.
+  - Confirmação reversa: link `wa.me` para o número oficial com `CONFIRMAR <código>`; o código vale 10 min e fica guardado em SHA-256.
+  - No máximo 3 códigos a cada 15 min por cliente.
+  - Erros: 503 `phone_unavailable` (api-agents fora do ar), 422, 429.
+
+**api-agents:**
+- **`GET /api/v1/internal/commerce/whatsapp-entry`** (lado api-agents, token compartilhado) → `{phone}` do remetente oficial ativo de menor carga.
+- **`POST /internal/agents/phone-confirmations`** `{token, phone}` (token interno `agents`) → `{tenant_name}` ou 404. O api-agents chama quando recebe um `CONFIRMAR` que não é dele.
+  - O número tem que bater, aceitando a variante sem o 9º dígito.
+  - O número passa para o cliente que o comprovou.
+
+**Painel:**
+- **`GET /admin/tenants/{t}/customers?status=&q=&cursor=`** (`customers:read`, keyset).
+- **`GET …/customers/{c}`**.
+- **`POST …/customers/{c}/access`** `{status: approved|blocked|revoked, note}` (`customers:approve`).
+  - Transições explícitas; bloquear e revogar exigem motivo.
+  - Bloquear derruba as sessões do cliente na loja.
+  - Evento `customer.access.<status>`.
+- **`GET|POST /admin/tenants/{t}/legal-documents`** (`settings:write`): cada publicação vira uma versão nova e imutável. O mesmo texto não cria versão.
+
+**Vitrine:**
+- **`GET /storefront/policies`**: versões vigentes.
+- **`GET /storefront/policies/{terms|privacy}`**: texto, sem o autor.
+- O `/entrar` mostra as versões vigentes e as envia no início do login; ao concluir, grava um `consents` por versão existente, com data, IP e user agent.
 
 ## 4. Carrinho
 
