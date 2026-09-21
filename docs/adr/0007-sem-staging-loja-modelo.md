@@ -20,7 +20,9 @@ O hel1 é uma VPS única (8 vCPU / 16 GB, dezenas de containers), e ainda não h
 - **Feature flag por tenant** em toda funcionalidade nova. Ela é ligada primeiro só na loja modelo. Rollback = desligar a flag.
 - **Migrations expand/contract**: só adicionar no deploy da feature; remover/renomear em deploy posterior. Rodam antes do `StackUpdate` (`infra/scripts/commerce-migrate.sh <tag>`).
 - **Imagens por sha** (`COMMERCE_TAG`), nunca `:latest`: rollback = voltar o tag anterior.
-- **Backup testado** antes de dados reais: dump diário + offsite + drill de restore (`docs/runbooks/backup-restore.md`).
+- **Recuperação**: snapshots da VM feitos pelo operador (decisão de 21/09: sem backup agendado por
+  banco por enquanto). Antes de migration irreversível, dump manual com
+  `infra/backup/mariadb_backup.sh`; restore testado em `docs/runbooks/backup-restore.md`.
 - Deploy fora de horário de pico. Verificação na loja modelo (`/healthz`, vitrine, `outbox ping`).
 
 ## Consequências

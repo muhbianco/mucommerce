@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # One-time install of the commerce DB backup on hel1 (idempotent). Run as root on the host.
 #
-#   infra/backup/install.sh
+#   infra/backup/install.sh [--cron]
 #
 # 1. mucommerce_backup@localhost with a generated password stored only in
 #    /root/.mucommerce-backup.cnf (0600). The SQL goes through stdin, so the password never
 #    shows up in argv/ps or on the terminal.
-# 2. /etc/cron.d/mucommerce-backup (only if absent: OFFSITE_REMOTE is edited there later).
+# 2. with --cron: /etc/cron.d/mucommerce-backup (only if absent: OFFSITE_REMOTE is edited there).
+#    Off by default since 21/09/2026: recovery is by VM snapshot; dumps are manual.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -26,7 +27,9 @@ else
 fi
 mariadb -e "GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON \`mucommerce\`.* TO 'mucommerce_backup'@'localhost';"
 
-if [ ! -e "$CRON" ]; then
+if [ "${1:-}" != "--cron" ]; then
+  echo "no cron installed (pass --cron to schedule the daily dump)"
+elif [ ! -e "$CRON" ]; then
   install -m 644 "$DIR/mucommerce-backup.cron" "$CRON"
   echo "cron installed: $CRON"
 else

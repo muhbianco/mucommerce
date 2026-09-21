@@ -3,6 +3,10 @@
 Tudo roda como root no hel1, a partir do checkout `/usr/src/mucommerce`. Nenhum comando abaixo
 imprime segredo; arquivos de credencial ficam em `/root` com modo 600.
 
+> **21/09/2026:** sem backup agendado por decisão do operador; a recuperação é por snapshot da VM.
+> O dump abaixo fica para uso manual (antes de migration irreversível) e o cron foi removido.
+> Para voltar a agendar: `infra/backup/install.sh --cron` + offsite (passo 5).
+
 ## Instalação (uma vez)
 
 1. **Usuário de backup e cron**: `infra/backup/install.sh` (idempotente; senha gerada no host, vai ao MariaDB por stdin e fica só em `/root/.mucommerce-backup.cnf`). Equivalente manual:

@@ -1,7 +1,9 @@
 # Backup e restore — mucommerce
 
-Produção é o único ambiente (ADR 0007), então o backup testado é pré-requisito para dados reais.
-Procedimento completo, instalação e drill: [docs/runbooks/backup-restore.md](../../docs/runbooks/backup-restore.md).
+**Decisão de 21/09/2026:** sem backup agendado por enquanto; a recuperação é por snapshot da VM
+(feito pelo operador). Estes scripts ficam para dump manual (antes de migration irreversível) e para
+reativar o agendamento quando fizer sentido (`install.sh --cron`).
+Procedimento completo e drill: [docs/runbooks/backup-restore.md](../../docs/runbooks/backup-restore.md).
 
 | Item | Estratégia | RPO / RTO |
 |------|------------|-----------|
