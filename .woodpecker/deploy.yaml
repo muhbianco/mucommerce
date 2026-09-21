@@ -8,6 +8,14 @@ when:
 
 depends_on: [ci]
 
+# Histórico real (o clone padrão é parcial, depth 1): a guarda de ordem do hel1-deploy usa ancestralidade.
+clone:
+  git:
+    image: woodpeckerci/plugin-git:2.10.1
+    settings:
+      depth: 50
+      partial: false
+
 steps:
   build-api:
     image: muhrilobianco/ci-deployer:1
