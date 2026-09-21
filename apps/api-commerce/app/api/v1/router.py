@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     ops_outbox,
     ops_tenants,
     storefront,
+    storefront_catalog,
 )
 
 SUMMARY = "v1 — fundação: tenancy, autenticação de staff, ops, endpoints internos."
@@ -53,6 +54,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_inventory.router,
     internal.router,
     storefront.router,
+    storefront_catalog.router,
 )
 
 router = APIRouter()
