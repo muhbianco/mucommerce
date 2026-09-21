@@ -23,7 +23,7 @@ from app.tenancy.dns import DnsVerifier, instructions_for
 from app.tenancy.models import DomainKind, DomainPurpose, DomainRole, TenantDomain, TenantStatus
 from app.tenancy.service import TenantService
 
-router = APIRouter(prefix="/ops/tenants", tags=["Ops â€” Tenants"])
+router = APIRouter(prefix="/ops/tenants", tags=["Ops — Tenants"])
 
 TenantId = Annotated[str, Path(min_length=36, max_length=36)]
 
@@ -63,7 +63,7 @@ async def list_tenants(
     "",
     response_model=TenantRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Cria tenant (draft) com flags, settings e subdomÃ­nio de plataforma",
+    summary="Cria tenant (draft) com flags, settings e subdomínio de plataforma",
 )
 @idempotent("ops.tenant.create", status_code=201)
 async def create_tenant(
@@ -130,7 +130,7 @@ async def put_features(
 @router.put(
     "/{tenant_id}/settings/{key}",
     response_model=dict[str, object],
-    summary="Atualiza uma configuraÃ§Ã£o",
+    summary="Atualiza uma configuração",
 )
 async def put_setting(
     request: Request,
@@ -145,7 +145,7 @@ async def put_setting(
     return await service.set_setting(tenant, key, body.value, admin_actor(request, user))
 
 
-@router.get("/{tenant_id}/domains", response_model=list[DomainRead], summary="DomÃ­nios do tenant")
+@router.get("/{tenant_id}/domains", response_model=list[DomainRead], summary="Domínios do tenant")
 async def list_domains(
     session: DbSession, _: PlatformOperator, tenant_id: TenantId
 ) -> list[DomainRead]:
@@ -160,7 +160,7 @@ async def list_domains(
     "/{tenant_id}/domains",
     response_model=DomainRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Registra domÃ­nio e devolve instruÃ§Ãµes de DNS",
+    summary="Registra domínio e devolve instruções de DNS",
 )
 async def add_domain(
     request: Request,
@@ -195,7 +195,7 @@ async def verify_domain(
     await service.get_or_404(tenant_id)
     domain = await service.repo.get_domain(tenant_id, domain_id)
     if domain is None:
-        raise NotFoundError("DomÃ­nio nÃ£o encontrado.")
+        raise NotFoundError("Domínio não encontrado.")
     check = await service.verify_domain(domain, DnsVerifier())
     return DomainCheckRead(
         domain=_domain_read(domain, with_instructions=True),
@@ -210,7 +210,7 @@ async def verify_domain(
 @router.delete(
     "/{tenant_id}/domains/{domain_id}",
     response_model=DomainRead,
-    summary="Desativa um domÃ­nio (sai do Traefik)",
+    summary="Desativa um domínio (sai do Traefik)",
 )
 async def disable_domain(
     request: Request,
@@ -223,6 +223,6 @@ async def disable_domain(
     tenant = await service.get_or_404(tenant_id)
     domain = await service.repo.get_domain(tenant_id, domain_id)
     if domain is None:
-        raise NotFoundError("DomÃ­nio nÃ£o encontrado.")
+        raise NotFoundError("Domínio não encontrado.")
     await service.disable_domain(tenant, domain, admin_actor(request, user))
     return _domain_read(domain)

@@ -9,7 +9,7 @@ a configuração da `api-commerce`:
 
 ```yaml
 # adicionar em services.traefik.command (stack traefik)
-- "--providers.http.endpoint=http://commerce_api:8000/api/v1/internal/edge/traefik"
+- "--providers.http.endpoint=http://commerce-api:8000/api/v1/internal/edge/traefik"
 - "--providers.http.pollInterval=15s"
 - "--providers.http.pollTimeout=5s"
 - "--providers.http.headers.X-Internal-Token=${INTERNAL_TOKEN_TRAEFIK}"

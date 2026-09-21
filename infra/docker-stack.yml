@@ -1,15 +1,19 @@
 # =============================================================================
 # mucommerce — Stack Portainer (Docker Swarm + Traefik) — hel1
 # Stack: commerce            Rede: chatbot-net (Chatwoot, Redis, MinIO, api-agents)
-# Imagens: muhrilobianco/commerce_api:<tag>, muhrilobianco/commerce_web:<tag>
+# Imagens: muhrilobianco/commerce_api:${COMMERCE_TAG}, muhrilobianco/commerce_web:${COMMERCE_TAG}
+#   COMMERCE_TAG = sha curto do commit buildado na VPS; nunca `latest` em produção.
 #
-# Secrets vêm do Env do Portainer (${VAR}); este arquivo pode ir no StackFileContent sem merge.
-# Migrations NÃO rodam no boot: executar o job `commerce_migrate` antes do StackUpdate:
-#   docker run --rm --network chatbot-net --env-file <env> muhrilobianco/commerce_api:<tag> \
-#     sh -c "python -m app.cli db ensure && alembic upgrade head"
+# Secrets e COMMERCE_TAG vêm do Env do Portainer (${VAR}). O StackUpdate SUBSTITUI o Env
+# inteiro: reenviar todas as chaves (ver skill deploy), senão a stack sobe sem segredos.
+# Migrations NÃO rodam no boot: `infra/scripts/commerce-migrate.sh <tag>` antes do StackUpdate.
 #
-# Hosts estáticos (labels): loja.muhbianco.com.br, painel.muhbianco.com.br -> web
-#                           api-commerce.muhbianco.com.br -> api
+# Serviços com prefixo `commerce-`: o nome curto do serviço vira alias DNS na chatbot-net, e
+# nomes genéricos (`api`, `web`) já capturaram tráfego de outras stacks.
+#
+# Hosts estáticos (labels): loja.muhbianco.com.br, painel.muhbianco.com.br -> commerce-web
+#                           api-commerce.muhbianco.com.br -> commerce-api
+# /metrics, /readyz e /api/*/internal/* não têm rota pública (só a rede interna alcança).
 # Hosts de tenant chegam pelo providers.http do Traefik (infra/traefik/README.md).
 # =============================================================================
 
@@ -42,16 +46,16 @@ x-api-env: &api_env
   API_PUBLIC_HOST: api-commerce.muhbianco.com.br
   EDGE_CNAME_TARGET: edge.muhbianco.com.br
   EDGE_PUBLIC_IPS: ${EDGE_PUBLIC_IPS}
-  EDGE_WEB_UPSTREAM: http://commerce_web:3000
-  EDGE_API_UPSTREAM: http://commerce_api:8000
+  EDGE_WEB_UPSTREAM: http://commerce-web:3000
+  EDGE_API_UPSTREAM: http://commerce-api:8000
   CHATWOOT_PUBLIC_URL: https://chatwoot.muhbianco.com.br
   SENTRY_DSN: ${SENTRY_DSN}
   OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT}
   METRICS_ENABLED: "true"
 
 services:
-  api:
-    image: muhrilobianco/commerce_api:latest
+  commerce-api:
+    image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
     environment:
       <<: *api_env
     extra_hosts:
@@ -78,7 +82,8 @@ services:
       labels:
         - traefik.enable=true
         - traefik.swarm.network=chatbot-net
-        - traefik.http.routers.commerce_api.rule=Host(`api-commerce.muhbianco.com.br`)
+        # /healthz (liveness) stays public; readiness, metrics and /internal do not.
+        - traefik.http.routers.commerce_api.rule=Host(`api-commerce.muhbianco.com.br`) && !PathPrefix(`/metrics`) && !PathPrefix(`/readyz`) && !PathRegexp(`^/api/(v1|latest)/internal`)
         - traefik.http.routers.commerce_api.entrypoints=websecure
         - traefik.http.routers.commerce_api.tls.certresolver=letsencryptresolver
         - traefik.http.routers.commerce_api.priority=20
@@ -96,8 +101,8 @@ services:
         - traefik.http.middlewares.commerce_headers.headers.customFrameOptionsValue=DENY
         - traefik.http.middlewares.commerce_headers.headers.customResponseHeaders.X-Robots-Tag=noindex, nofollow
 
-  worker:
-    image: muhrilobianco/commerce_api:latest
+  commerce-worker:
+    image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
     command:
       - celery
       - -A
@@ -131,8 +136,8 @@ services:
           cpus: "0.05"
           memory: 128M
 
-  beat:
-    image: muhrilobianco/commerce_api:latest
+  commerce-beat:
+    image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
     command:
       - celery
       - -A
@@ -161,12 +166,12 @@ services:
           cpus: "0.10"
           memory: 128M
 
-  web:
-    image: muhrilobianco/commerce_web:latest
+  commerce-web:
+    image: muhrilobianco/commerce_web:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
     environment:
       NODE_ENV: production
       PORT: "3000"
-      COMMERCE_API_INTERNAL_URL: http://commerce_api:8000
+      COMMERCE_API_INTERNAL_URL: http://commerce-api:8000
       INTERNAL_TOKEN_WEB: ${INTERNAL_TOKEN_WEB}
       PANEL_HOST: painel.muhbianco.com.br
       PLATFORM_BASE_DOMAIN: loja.muhbianco.com.br
@@ -199,7 +204,7 @@ services:
         - traefik.http.services.commerce_web.loadbalancer.server.port=3000
         - traefik.http.services.commerce_web.loadbalancer.passHostHeader=true
         # /api dos hosts estáticos vai para a API (mesmo host = cookies first-party)
-        - traefik.http.routers.commerce_web_api.rule=(Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)) && PathPrefix(`/api`)
+        - traefik.http.routers.commerce_web_api.rule=(Host(`loja.muhbianco.com.br`) || Host(`painel.muhbianco.com.br`)) && PathPrefix(`/api`) && !PathRegexp(`^/api/(v1|latest)/internal`)
         - traefik.http.routers.commerce_web_api.entrypoints=websecure
         - traefik.http.routers.commerce_web_api.tls.certresolver=letsencryptresolver
         - traefik.http.routers.commerce_web_api.priority=20

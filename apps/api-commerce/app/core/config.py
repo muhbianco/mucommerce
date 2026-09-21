@@ -86,8 +86,8 @@ class Settings(BaseSettings):
     api_public_host: str = "api-commerce.muhbianco.com.br"
     edge_cname_target: str = "edge.muhbianco.com.br"
     edge_public_ips: str = ""  # comma separated A-record targets the tenant must point to
-    edge_web_upstream: str = "http://commerce_web:3000"
-    edge_api_upstream: str = "http://commerce_api:8000"
+    edge_web_upstream: str = "http://commerce-web:3000"
+    edge_api_upstream: str = "http://commerce-api:8000"
     edge_cert_resolver: str = "letsencryptresolver"
     chatwoot_public_url: str = "https://chatwoot.muhbianco.com.br"
     tenant_cache_ttl_seconds: int = 60
