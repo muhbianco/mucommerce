@@ -1,6 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { lookupStorefrontContext } from "@/lib/context-cache";
+import { callRefresh, refreshOnce } from "@/lib/panel/refresh";
+import {
+  ACCESS_COOKIE,
+  cookieOptions,
+  EXPIRED_COOKIE,
+  needsRenewal,
+  REFRESH_COOKIE,
+  REFRESH_TTL_SECONDS,
+  type TokenPair,
+  withCookies,
+} from "@/lib/panel/token";
 import { classifyHost, isPanelPath, normalizeHost, panelRewritePath, requiresSession } from "@/lib/tenant";
 
 const SESSION_COOKIE = "mb_sess";
@@ -21,6 +32,65 @@ function unavailable(request: NextRequest): NextResponse {
   return response;
 }
 
+const PANEL_LOGIN = "/painel/entrar";
+
+function isPrefetch(request: NextRequest): boolean {
+  return (
+    request.headers.get("next-router-prefetch") === "1" ||
+    request.headers.get("purpose") === "prefetch"
+  );
+}
+
+/**
+ * Panel host: every path lives under /painel, never indexed. Renews the session before the
+ * access token expires (single-flight, see lib/panel/refresh.ts) and ends it only when the API
+ * rejects the refresh token; an API outage keeps the cookies.
+ */
+async function panel(request: NextRequest, headers: Headers): Promise<NextResponse> {
+  const { pathname } = request.nextUrl;
+  const target = panelRewritePath(pathname);
+  const access = request.cookies.get(ACCESS_COOKIE)?.value;
+  const refresh = request.cookies.get(REFRESH_COOKIE)?.value;
+
+  let renewed: TokenPair | null = null;
+  if (target !== PANEL_LOGIN && refresh && needsRenewal(access) && !isPrefetch(request)) {
+    const forwardedFor = request.headers.get("x-forwarded-for");
+    const result = await refreshOnce(refresh, (token) => callRefresh(token, forwardedFor));
+    if (result.kind === "rejected") {
+      const response = NextResponse.redirect(new URL("/entrar", request.url));
+      response.cookies.set(ACCESS_COOKIE, "", EXPIRED_COOKIE);
+      response.cookies.set(REFRESH_COOKIE, "", EXPIRED_COOKIE);
+      response.headers.set("X-Robots-Tag", "noindex, nofollow");
+      return response;
+    }
+    if (result.kind === "renewed") {
+      renewed = result.pair;
+      headers.set(
+        "cookie",
+        withCookies(headers.get("cookie"), {
+          [ACCESS_COOKIE]: renewed.access_token,
+          [REFRESH_COOKIE]: renewed.refresh_token,
+        }),
+      );
+    }
+  }
+
+  let response: NextResponse;
+  if (target === pathname) {
+    response = NextResponse.next({ request: { headers } });
+  } else {
+    const url = request.nextUrl.clone();
+    url.pathname = target;
+    response = NextResponse.rewrite(url, { request: { headers } });
+  }
+  if (renewed) {
+    response.cookies.set(ACCESS_COOKIE, renewed.access_token, cookieOptions(renewed.expires_in));
+    response.cookies.set(REFRESH_COOKIE, renewed.refresh_token, cookieOptions(REFRESH_TTL_SECONDS));
+  }
+  response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   const rules = {
     panelHost: process.env.PANEL_HOST ?? "painel.muhbianco.com.br",
@@ -37,13 +107,7 @@ export async function middleware(request: NextRequest) {
 
   if (kind === "unknown") return notFound(request);
 
-  if (kind === "panel") {
-    const target = panelRewritePath(pathname);
-    if (target === pathname) return NextResponse.next({ request: { headers } });
-    const url = request.nextUrl.clone();
-    url.pathname = target;
-    return NextResponse.rewrite(url, { request: { headers } });
-  }
+  if (kind === "panel") return panel(request, headers);
 
   // The panel only exists on the panel host.
   if (isPanelPath(pathname)) return notFound(request);

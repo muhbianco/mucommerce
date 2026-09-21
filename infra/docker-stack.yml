@@ -178,6 +178,9 @@ services:
       - chatbot-net
     deploy:
       mode: replicated
+      # Keep 1: the panel's refresh single-flight (lib/panel/refresh.ts) is per process, and the
+      # API revokes the whole session family on refresh-token reuse. Scaling out needs sticky
+      # sessions or a reuse grace window in the API first.
       replicas: 1
       restart_policy:
         condition: on-failure
