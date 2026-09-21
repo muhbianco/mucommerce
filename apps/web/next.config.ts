@@ -7,7 +7,8 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https://storage.s3.muhbianco.com.br https://*.mlstatic.com",
   "font-src 'self' data:",
-  "connect-src 'self' https://api.mercadopago.com",
+  // Panel image uploads POST straight to the storage host (presigned policy).
+  "connect-src 'self' https://api.mercadopago.com https://storage.s3.muhbianco.com.br",
   "frame-src https://sdk.mercadopago.com https://www.mercadopago.com.br",
   "base-uri 'self'",
   "form-action 'self'",
