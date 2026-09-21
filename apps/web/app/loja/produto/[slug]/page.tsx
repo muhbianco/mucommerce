@@ -1,0 +1,159 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
+
+import { getStorefrontContext } from "@/lib/server-context";
+import { storefrontApi } from "@/lib/storefront-api";
+import {
+  AVAILABILITY_LABEL,
+  formatPrice,
+  isIndexable,
+  jsonLd,
+  type ProductDetail,
+  SCHEMA_AVAILABILITY,
+  storeOrigin,
+} from "@/lib/storefront";
+
+import { StoreImage } from "../../../_store/store-image";
+import { StoreShell } from "../../../_store/store-shell";
+import styles from "../../../_store/store.module.css";
+
+// Metadata and page share one API call per request. `cache` compares arguments by identity,
+// so the key is the slug (a string), not the per-call parsed context object.
+const loadProduct = cache(async (slug: string) => {
+  const context = await getStorefrontContext();
+  if (!context) return { kind: "not_found" as const };
+  return storefrontApi<ProductDetail>(context, `/catalog/products/${encodeURIComponent(slug.slice(0, 160))}`);
+});
+
+function shareImage(product: ProductDetail): string | undefined {
+  const renditions = product.images[0]?.renditions ?? [];
+  const fitting = renditions.filter((r) => r.width <= 1200);
+  return (fitting[fitting.length - 1] ?? renditions[renditions.length - 1])?.url;
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const context = await getStorefrontContext();
+  if (!context) return {};
+  const { slug } = await params;
+  const result = await loadProduct(slug);
+  if (result.kind !== "ok") return { robots: { index: false } };
+  const product = result.data;
+  const title = product.seo.title || `${product.name} · ${context.tenant.name}`;
+  const description =
+    product.seo.description || product.short_description || `${product.name} em ${context.tenant.name}.`;
+  const url = `${storeOrigin(context)}/loja/produto/${product.slug}`;
+  const image = shareImage(product);
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url, siteName: context.tenant.name, type: "website", images: image ? [image] : undefined },
+    robots: isIndexable(context) ? { index: true, follow: true } : { index: false, follow: false },
+  };
+}
+
+export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
+  const context = await getStorefrontContext();
+  if (!context) notFound();
+  const { slug } = await params;
+  const result = await loadProduct(slug);
+  if (result.kind === "login_required") redirect("/loja");
+  if (result.kind !== "ok") notFound();
+  const product = result.data;
+  const origin = storeOrigin(context);
+  const url = `${origin}/loja/produto/${product.slug}`;
+  const category = product.categories[0];
+
+  const structured = [
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: product.name,
+      sku: product.sku,
+      description: product.seo.description || product.short_description || undefined,
+      image: product.images.map((image) => image.renditions[image.renditions.length - 1]?.url).filter(Boolean),
+      brand: { "@type": "Brand", name: context.tenant.name },
+      offers: {
+        "@type": "Offer",
+        url,
+        price: (product.price.amount_cents / 100).toFixed(2),
+        priceCurrency: product.price.currency,
+        availability: SCHEMA_AVAILABILITY[product.availability],
+        ...(product.price.promo_ends_at ? { priceValidUntil: product.price.promo_ends_at.slice(0, 10) } : {}),
+      },
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "Produtos", item: `${origin}/loja` },
+        ...(category
+          ? [{ "@type": "ListItem", position: 2, name: category.name, item: `${origin}/loja/categoria/${category.slug}` }]
+          : []),
+        { "@type": "ListItem", position: category ? 3 : 2, name: product.name, item: url },
+      ],
+    },
+  ];
+
+  const [cover, ...others] = product.images;
+  return (
+    <StoreShell context={context}>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
+      <p className={styles.breadcrumb}>
+        <Link href="/loja">Produtos</Link>
+        {category ? (
+          <>
+            {" › "}
+            <Link href={`/loja/categoria/${category.slug}`}>{category.name}</Link>
+          </>
+        ) : null}
+      </p>
+      <div className={styles.product}>
+        <div>
+          {cover ? (
+            <StoreImage image={cover} alt={product.name} sizes="(min-width: 760px) 460px, 100vw" priority className={styles.photo} />
+          ) : (
+            <div className={styles.photo} aria-hidden="true" />
+          )}
+          {others.length ? (
+            <div className={styles.thumbs}>
+              {others.map((image, i) => (
+                <StoreImage key={i} image={image} alt={`${product.name} (${i + 2})`} sizes="120px" className={styles.photo} />
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div>
+          <h1>{product.name}</h1>
+          <p className={styles.price} style={{ fontSize: "1.4rem" }}>
+            {formatPrice(product.price)}
+            {product.price.compare_at_cents ? (
+              <span className={styles.compare}>
+                {formatPrice({ ...product.price, amount_cents: product.price.compare_at_cents })}
+              </span>
+            ) : null}
+          </p>
+          <p>
+            <span className={product.availability === "sold_out" ? styles.soldOut : styles.tag}>
+              {AVAILABILITY_LABEL[product.availability]}
+            </span>
+          </p>
+          {product.short_description ? <p>{product.short_description}</p> : null}
+          {product.variants.length > 1 ? (
+            <ul>
+              {product.variants.map((variant) => (
+                <li key={variant.id}>
+                  {variant.name}: {formatPrice(variant.price)} · {AVAILABILITY_LABEL[variant.availability]}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {product.description_md ? <div className={styles.description}>{product.description_md}</div> : null}
+          <p className="muted">Pedidos online chegam em breve.</p>
+        </div>
+      </div>
+    </StoreShell>
+  );
+}
