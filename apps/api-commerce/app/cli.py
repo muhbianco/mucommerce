@@ -9,6 +9,7 @@ python -m app.cli admin grant --email E --tenant-slug S --role owner [--create -
 python -m app.cli tenant seed-platform # tenant `muhbianco` served only at loja.muhbianco.com.br
 python -m app.cli tenant disable-domain <hostname>  # take a host out of the edge (audited)
 python -m app.cli outbox ping          # emits `system.ping`; its delivery proves the outbox runs
+python -m app.cli media smoke --tenant S  # upload → WebP → public HEAD → delete; exit 1 on fail
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import json
 import sys
+from dataclasses import asdict
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -30,9 +34,11 @@ from app.core.exceptions import ConflictError
 from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.logging import configure_logging, get_logger
 from app.core.scopes import PlatformRole, TenantRole
+from app.core.storage import StorageUnavailableError, get_storage
 from app.identity.models import TenantMembership
 from app.identity.repository import AdminUserRepository
 from app.identity.service import AdminAuthService
+from app.media.smoke import run_media_smoke
 from app.models.base import utcnow
 from app.tenancy.models import (
     DomainKind,
@@ -298,6 +304,23 @@ async def outbox_ping() -> int:
     return 0
 
 
+async def media_smoke(tenant_slug: str, timeout_s: float) -> int:
+    try:
+        storage = get_storage()
+    except StorageUnavailableError:
+        logger.error("Storage is not configured (STORAGE_* env)")
+        return 2
+    factory = _session_factory(settings.database_url)
+    timeout = httpx.Timeout(settings.storage_timeout_seconds, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as http:
+        result = await run_media_smoke(
+            factory, storage, http, tenant_slug=tenant_slug, timeout_s=timeout_s
+        )
+    # One JSON line on stdout for infra/scripts/smoke.sh; details also go to the log.
+    print(json.dumps({"check": "media", **asdict(result)}, ensure_ascii=False))
+    return 0 if result.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging(settings.log_level)
     register_tenant_filter()
@@ -329,6 +352,11 @@ def main(argv: list[str] | None = None) -> int:
 
     outbox_cmd = sub.add_parser("outbox").add_subparsers(dest="cmd", required=True)
     outbox_cmd.add_parser("ping")
+
+    media_cmd = sub.add_parser("media").add_subparsers(dest="cmd", required=True)
+    smoke = media_cmd.add_parser("smoke")
+    smoke.add_argument("--tenant", required=True, help="tenant slug (e.g. muhbianco)")
+    smoke.add_argument("--timeout", type=float, default=60.0, help="seconds to wait for WebP")
 
     args = parser.parse_args(argv)
 
@@ -362,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(disable_domain(args.hostname))
     if args.group == "outbox" and args.cmd == "ping":
         return asyncio.run(outbox_ping())
+    if args.group == "media" and args.cmd == "smoke":
+        return asyncio.run(media_smoke(args.tenant, args.timeout))
     parser.error("unknown command")
 
 
