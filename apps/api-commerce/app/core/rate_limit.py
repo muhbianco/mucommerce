@@ -60,6 +60,12 @@ rate_limiter = RateLimiter()
 
 
 def client_ip(request: Request) -> str:
+    """Client address as seen by Traefik.
+
+    Safe only because Traefik runs without `forwardedHeaders.insecure`/`trustedIPs`: it drops
+    any X-Forwarded-For sent by the client and writes the real peer address. If a CDN or
+    another proxy is ever put in front, trust only its hops here instead of the first entry.
+    """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip()

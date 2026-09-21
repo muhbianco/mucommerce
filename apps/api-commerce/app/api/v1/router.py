@@ -26,10 +26,17 @@ TAGS_METADATA: list[dict[str, object]] = [
     {"name": "Infraestrutura", "description": "Health checks."},
 ]
 
+# Public list of the endpoint routers: `include_router` keeps routes behind a lazy wrapper,
+# so tests (tags, guard introspection) walk these instead of `router.routes`.
+ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
+    auth.router,
+    ops_tenants.router,
+    ops_outbox.router,
+    admin_tenants.router,
+    internal.router,
+    storefront.router,
+)
+
 router = APIRouter()
-router.include_router(auth.router)
-router.include_router(ops_tenants.router)
-router.include_router(ops_outbox.router)
-router.include_router(admin_tenants.router)
-router.include_router(internal.router)
-router.include_router(storefront.router)
+for endpoint_router in ENDPOINT_ROUTERS:
+    router.include_router(endpoint_router)

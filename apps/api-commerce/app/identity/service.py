@@ -11,12 +11,12 @@ from app.core.exceptions import AuthenticationError, InactiveUserError
 from app.core.logging import get_logger
 from app.core.scopes import scopes_for_tenant_role
 from app.core.security import (
+    check_password,
     create_access_token,
     encode_access_token,
     generate_opaque_token,
     hash_password,
     hash_token,
-    verify_password,
 )
 from app.identity.models import AdminRefreshToken, AdminUser, TenantMembership
 from app.identity.repository import AdminUserRepository
@@ -43,12 +43,9 @@ class AdminAuthService:
         self, email: str, password: str, *, ip: str | None, user_agent: str | None
     ) -> TokenPair:
         user = await self.repo.get_by_email(email)
-        # Same error for unknown e-mail and wrong password: no user enumeration.
-        if (
-            user is None
-            or not user.password_hash
-            or not verify_password(password, user.password_hash)
-        ):
+        # Same error and same Argon2 cost for unknown e-mail and wrong password.
+        password_ok = await check_password(password, user.password_hash if user else None)
+        if user is None or not password_ok:
             raise AuthenticationError()
         if not user.is_active:
             raise InactiveUserError()

@@ -6,11 +6,16 @@ Adding a `TenantScoped` model without a case below fails the suite on purpose.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from fastapi.routing import APIRoute
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import delete, event, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.api.deps import PLATFORM_GUARD_ATTR, TENANT_GUARD_ATTR
+from app.api.v1.router import ENDPOINT_ROUTERS
 from app.core.exceptions import TenantContextMissingError, TenantMismatchError
 from app.core.scopes import TenantRole
 from app.models.all import Base
@@ -137,3 +142,100 @@ async def test_support_role_lacks_settings_scope_but_reads_context(
     headers = await login(client, "suporte@alpha.test")
     response = await client.get(f"/api/v1/admin/tenants/{alpha.id}/context", headers=headers)
     assert response.status_code == 200
+
+
+TENANT_SCOPED_MODELS = sorted(
+    (m.class_ for m in Base.registry.mappers if issubclass(m.class_, TenantScoped)),
+    key=lambda cls: cls.__tablename__,
+)
+V1_ROUTES = [route for r in ENDPOINT_ROUTERS for route in r.routes if isinstance(route, APIRoute)]
+
+
+@pytest.mark.parametrize("model", TENANT_SCOPED_MODELS, ids=lambda cls: cls.__tablename__)
+async def test_every_tenant_scoped_statement_carries_the_tenant_predicate(
+    session_factory: async_sessionmaker[AsyncSession], model: Any
+) -> None:
+    """Generic: SELECT and bulk UPDATE/DELETE on every TenantScoped model get `tenant_id = ?`."""
+    statements: list[str] = []
+
+    def capture(*args: Any) -> None:
+        statements.append(args[2])  # (conn, cursor, statement, parameters, context, executemany)
+
+    async with session_factory() as session:
+        engine = session.bind.sync_engine  # type: ignore[union-attr]
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            bind_session_tenant(session, "0192a1b2-0000-7000-8000-000000000001")
+            no_sync = {"synchronize_session": False}
+            await session.execute(select(model))
+            await session.execute(
+                update(model).values(tenant_id=model.tenant_id).execution_options(**no_sync)
+            )
+            await session.execute(delete(model).execution_options(**no_sync))
+            await session.rollback()
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+    table = model.__tablename__
+    assert len(statements) == 3
+    for sql in statements:
+        assert f"{table}.tenant_id = " in sql, sql
+
+
+async def test_bulk_write_only_touches_the_bound_tenant(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    alpha = await create_tenant(session_factory, "alpha")
+    beta = await create_tenant(session_factory, "beta")
+    async with session_factory() as session:
+        bind_session_tenant(session, alpha.id)
+        await session.execute(
+            update(TenantSetting)
+            .values(schema_version=7)
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(TenantSetting.tenant_id, TenantSetting.schema_version).execution_options(
+                    **{CROSS_TENANT_OPTION: True}
+                )
+            )
+        ).all()
+    assert {version for tenant_id, version in rows if tenant_id == alpha.id} == {7}
+    assert 7 not in {version for tenant_id, version in rows if tenant_id == beta.id}
+
+    async with session_factory() as session:
+        with pytest.raises(TenantContextMissingError):
+            await session.execute(delete(TenantSetting))
+
+
+def _guards(route: APIRoute) -> set[str]:
+    found: set[str] = set()
+    pending = list(route.dependant.dependencies)
+    while pending:
+        dependency = pending.pop()
+        for attr in (PLATFORM_GUARD_ATTR, TENANT_GUARD_ATTR):
+            if getattr(dependency.call, attr, False):
+                found.add(attr)
+        pending.extend(dependency.dependencies)
+    return found
+
+
+def test_every_tenant_panel_route_requires_membership() -> None:
+    routes = [r for r in V1_ROUTES if r.path.startswith("/admin/tenants/{tenant_id}")]
+    assert routes
+    unguarded = [
+        f"{sorted(r.methods)} {r.path}" for r in routes if TENANT_GUARD_ATTR not in _guards(r)
+    ]
+    assert not unguarded, unguarded
+
+
+def test_every_ops_route_requires_a_platform_role() -> None:
+    routes = [r for r in V1_ROUTES if r.path.startswith("/ops/")]
+    assert routes
+    unguarded = [
+        f"{sorted(r.methods)} {r.path}" for r in routes if PLATFORM_GUARD_ATTR not in _guards(r)
+    ]
+    assert not unguarded, unguarded

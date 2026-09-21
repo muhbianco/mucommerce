@@ -16,12 +16,22 @@ def _touches_tenant_scoped(state: ORMExecuteState) -> bool:
     try:
         mappers = state.all_mappers
     except Exception:
-        return False
+        # Fail closed: a statement we cannot inspect is treated as tenant-scoped, so it
+        # needs a bound tenant or an explicit cross_tenant opt-out.
+        return True
     return any(issubclass(mapper.class_, TenantScoped) for mapper in mappers)
 
 
 def _apply_tenant_filter(state: ORMExecuteState) -> None:
-    if not state.is_select or state.is_column_load or state.is_relationship_load:
+    """Scope ORM SELECT and bulk UPDATE/DELETE to the session's tenant.
+
+    `with_loader_criteria` also lands in the WHERE of ORM-enabled `update()`/`delete()`,
+    so a bulk write can no longer touch another tenant's rows. Core/`text()` statements
+    carry no mappers and are not filtered: keep tenant SQL in repositories, on the ORM.
+    """
+    if state.is_column_load or state.is_relationship_load:
+        return
+    if not (state.is_select or state.is_update or state.is_delete):
         return
     if state.execution_options.get(CROSS_TENANT_OPTION):
         return

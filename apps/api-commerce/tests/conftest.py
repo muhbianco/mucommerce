@@ -51,17 +51,28 @@ def _mounted_apps() -> Iterator[FastAPI]:
 
 @pytest.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
+    """In-memory SQLite by default; TEST_DATABASE_URL points it at a real MariaDB (CI runs the
+    leak suite there, where row locks, collations and SQL rendering are the production ones)."""
+    external_url = os.environ.get("TEST_DATABASE_URL")
+    if external_url:
+        engine = create_async_engine(external_url)
+    else:
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
     async with engine.begin() as connection:
+        if external_url:
+            await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     host_cache.clear_memory()
     rate_limiter._memory.clear()
     yield factory
+    if external_url:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 

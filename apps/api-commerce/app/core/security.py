@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import hashlib
 import hmac
 import secrets
@@ -29,6 +31,21 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return _password_hash.verify(plain_password, hashed_password)
     except Exception:  # corrupted hash or unknown scheme
         return False
+
+
+@functools.cache
+def _dummy_hash() -> str:
+    return hash_password(secrets.token_urlsafe(16))
+
+
+async def check_password(plain_password: str, hashed_password: str | None) -> bool:
+    """Argon2 off the event loop. Without a stored hash (unknown user, SSO-only account) it
+    still pays one verification against a dummy hash, so response time does not reveal
+    whether the e-mail exists."""
+    if not hashed_password:
+        await asyncio.to_thread(verify_password, plain_password, _dummy_hash())
+        return False
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
 
 
 @dataclass(frozen=True, slots=True)

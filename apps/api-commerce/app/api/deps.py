@@ -47,6 +47,11 @@ async def get_current_admin(
 
 CurrentAdmin = Annotated[AdminUser, Depends(get_current_admin)]
 
+# Marker attributes on guard dependencies, so the leak suite can prove by introspection that
+# every /ops and /admin/tenants/{tenant_id} route is behind the right guard.
+PLATFORM_GUARD_ATTR = "__platform_guard__"
+TENANT_GUARD_ATTR = "__tenant_guard__"
+
 
 def require_platform_role(required: PlatformRole) -> Callable[..., Awaitable[AdminUser]]:
     async def dependency(user: CurrentAdmin) -> AdminUser:
@@ -54,6 +59,7 @@ def require_platform_role(required: PlatformRole) -> Callable[..., Awaitable[Adm
             raise PermissionDeniedError("Requer papel de plataforma.", required=str(required))
         return user
 
+    setattr(dependency, PLATFORM_GUARD_ATTR, True)
     return dependency
 
 
@@ -87,6 +93,7 @@ def require_tenant_scopes(*scopes: Scope) -> Callable[..., Awaitable[TenantConte
                 )
         return await TenantResolver(session).resolve_by_id(tenant_id)
 
+    setattr(dependency, TENANT_GUARD_ATTR, True)
     return dependency
 
 

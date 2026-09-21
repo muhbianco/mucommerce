@@ -3,6 +3,7 @@ from __future__ import annotations
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core import security
 from app.core.scopes import PlatformRole
 from tests.conftest import TEST_PASSWORD, create_admin
 
@@ -82,4 +83,26 @@ async def test_operator_can_list_tenants_superadmin_only_routes_exist(
 ) -> None:
     response = await client.get("/api/v1/ops/tenants", headers=operator_headers)
     assert response.status_code == 200
-    assert response.json() == []
+    assert response.json() == {"items": [], "next_cursor": None}
+
+
+async def test_unknown_user_pays_one_argon2_verification_like_a_wrong_password(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Regression: an unknown e-mail skipped Argon2 and answered measurably faster."""
+    await create_admin(session_factory, "ops@muhbianco.test", platform_role=PlatformRole.OPERATOR)
+    calls: list[str] = []
+    real_verify = security.verify_password
+
+    def spy(plain: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return real_verify(plain, hashed)
+
+    monkeypatch.setattr(security, "verify_password", spy)
+    for username in ("ops@muhbianco.test", "ghost@muhbianco.test"):
+        response = await client.post(
+            "/api/v1/auth/token", data={"username": username, "password": "nope-nope-nope"}
+        )
+        assert response.status_code == 401
+    assert len(calls) == 2
+    assert all(h.startswith("$argon2") for h in calls)

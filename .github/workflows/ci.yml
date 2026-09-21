@@ -60,6 +60,10 @@ jobs:
           cache-dependency-path: apps/api-commerce/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest -q tests/test_migrations.py
+      - name: Tenant leak suite on MariaDB
+        run: pytest -q tests/test_isolation.py
+        env:
+          TEST_DATABASE_URL: ${{ env.MARIADB_TEST_URL }}
 
   web:
     name: web lint + typecheck + build
