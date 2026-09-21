@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import type { StorefrontContext } from "@/lib/tenant";
+import { type Branding, themeVariables } from "@/lib/theme";
 
 import styles from "./store.module.css";
 
@@ -18,10 +19,10 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
   // Public stores stay cacheable: only closed stores read the session cookie.
   const signedIn =
     context.access_mode !== "public" && Boolean((await cookies()).get(CUSTOMER_SESSION_COOKIE));
-  const branding = context.branding as { primary_color?: string; logo?: Logo | null };
+  const branding = context.branding as Branding & { logo?: Logo | null };
   const logo = branding.logo;
   return (
-    <div style={{ ["--brand-primary" as string]: branding.primary_color ?? "#111111" }}>
+    <div style={{ ...themeVariables(branding), fontFamily: "var(--brand-font)" }}>
       <header className={styles.header}>
         <Link href="/" className={styles.brand}>
           {logo ? (

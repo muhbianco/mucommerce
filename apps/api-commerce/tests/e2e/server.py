@@ -8,7 +8,9 @@ Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http)
 
 - `loja.localhost`           tenant `muhbianco`, public, with published products
 - `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer);
-                             customers sign in with Google (apps/web/e2e/fake-google.mjs)
+                             customers sign in with Google (apps/web/e2e/fake-google.mjs); green
+                             brand colour and serif font
+- `suspensa.loja.localhost`  tenant `suspensa`, suspended (503)
 
 Panel login goes through apps/web/e2e/fake-accounts.mjs, which plays the MuhBianco accounts
 service (api-agents) at MUHBIANCO_ACCOUNTS_INTERNAL_URL. The file lives under tests/ so it never
@@ -153,8 +155,19 @@ async def seed() -> None:
             {"catalog": True, "customer_login": True, "customer_phone_otp": True},
             ACTOR,
         )
+        await service.set_setting(
+            await service.get_or_404(closed_id),
+            "branding",
+            {"primary_color": "#2e7d32", "font": "serif"},
+            ACTOR,
+        )
         await session.commit()
         await _publish_products(session, closed_id)
+        await session.commit()
+
+    async with factory() as session:  # a suspended store answers 503
+        created = await TenantService(session).create(slug="suspensa", name="Suspensa", actor=ACTOR)
+        created.status = TenantStatus.SUSPENDED
         await session.commit()
     await engine.dispose()
 

@@ -34,6 +34,10 @@ class StorefrontV1(_Setting):
 
 class BrandingV1(_Setting):
     primary_color: HexColor = "#111111"
+    # Accent for links and highlights; None = the primary colour.
+    secondary_color: HexColor | None = None
+    # Font family of the storefront (system stack, serif or rounded).
+    font: Literal["system", "serif", "rounded"] = "system"
     logo_url: HttpsUrl | None = None
     # Uploaded logo (media owner `tenant_brand`); wins over `logo_url` once processed.
     logo_media_id: MediaId | None = None

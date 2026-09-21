@@ -64,3 +64,25 @@ test("host desconhecido é 404", async ({ page }) => {
   const response = await page.goto(`${STORE.replace("loja.localhost", "ninguem.localhost")}/`);
   expect(response?.status()).toBe(404);
 });
+
+test("loja suspensa responde 503 com página neutra", async ({ page }) => {
+  const response = await page.goto(STORE.replace("loja.localhost", "suspensa.loja.localhost") + "/");
+  expect(response?.status()).toBe(503);
+  await expect(page.getByRole("heading", { name: "Loja temporariamente indisponível" })).toBeVisible();
+});
+
+test("cada loja usa a própria marca (cor e fonte)", async ({ page }) => {
+  const theme = async (url: string) => {
+    await page.goto(url);
+    return page.locator("header").evaluate((header) => {
+      const shell = getComputedStyle(header.parentElement as HTMLElement);
+      return { primary: shell.getPropertyValue("--brand-primary").trim(), font: shell.fontFamily };
+    });
+  };
+  const modelo = await theme(`${STORE}/`);
+  const fechada = await theme(`${CLOSED_STORE}/`);
+  expect(modelo.primary).toBe("#111111");
+  expect(fechada.primary).toBe("#2e7d32");
+  expect(fechada.font).toContain("Georgia");
+  expect(modelo.font).not.toContain("Georgia");
+});

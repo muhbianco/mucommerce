@@ -109,6 +109,22 @@ export default async function Settings({
             <input type="color" name="primary_color" defaultValue={String(branding.primary_color ?? "#111111")} />
           </label>
           <label>
+            Cor de destaque (links)
+            <input
+              type="color"
+              name="secondary_color"
+              defaultValue={String(branding.secondary_color ?? branding.primary_color ?? "#111111")}
+            />
+          </label>
+          <label>
+            Fonte da loja
+            <select name="font" defaultValue={String(branding.font ?? "system")}>
+              <option value="system">Padrão do aparelho</option>
+              <option value="serif">Serifada (clássica)</option>
+              <option value="rounded">Arredondada</option>
+            </select>
+          </label>
+          <label>
             Logo
             {mediaSelect("logo_media_id", readyBrand, branding.logo_media_id)}
           </label>

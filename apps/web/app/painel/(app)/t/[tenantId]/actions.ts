@@ -297,6 +297,8 @@ export async function saveBranding(form: FormData): Promise<void> {
         value: {
           ...current,
           primary_color: text(form, "primary_color") || "#111111",
+          secondary_color: text(form, "secondary_color") || null,
+          font: ["system", "serif", "rounded"].includes(text(form, "font")) ? text(form, "font") : "system",
           logo_media_id: logo ? id(logo) : null,
         },
       },
