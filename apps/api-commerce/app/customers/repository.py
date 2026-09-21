@@ -6,7 +6,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.customers.models import CustomerAuthFlow
-from app.identity.models import CustomerSession, CustomerTenantAccess
+from app.identity.models import Customer, CustomerSession, CustomerTenantAccess
 from app.models.base import utcnow
 from app.tenancy.context import CROSS_TENANT_OPTION
 
@@ -40,12 +40,48 @@ class CustomerSessionRepository:
 
 
 class AccessRepository:
+    """Access rows of the bound store (TenantScoped), joined with the global customer."""
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
     async def for_customer(self, customer_id: str) -> CustomerTenantAccess | None:
         stmt = select(CustomerTenantAccess).where(CustomerTenantAccess.customer_id == customer_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def with_customer(self, customer_id: str) -> tuple[CustomerTenantAccess, Customer] | None:
+        row = (
+            await self.session.execute(
+                select(CustomerTenantAccess, Customer)
+                .join(Customer, Customer.id == CustomerTenantAccess.customer_id)
+                .where(CustomerTenantAccess.customer_id == customer_id)
+            )
+        ).first()
+        return (row[0], row[1]) if row else None
+
+    async def list_page(
+        self, *, limit: int, before_id: str | None, status: str | None, q: str | None
+    ) -> list[tuple[CustomerTenantAccess, Customer]]:
+        """Newest first (UUIDv7 ids), `limit + 1` rows so the caller knows if there is more."""
+        stmt = (
+            select(CustomerTenantAccess, Customer)
+            .join(Customer, Customer.id == CustomerTenantAccess.customer_id)
+            .order_by(CustomerTenantAccess.id.desc())
+            .limit(limit + 1)
+        )
+        if before_id:
+            stmt = stmt.where(CustomerTenantAccess.id < before_id)
+        if status:
+            stmt = stmt.where(CustomerTenantAccess.status == status)
+        if q:
+            stmt = stmt.where(
+                or_(
+                    Customer.email_normalized.contains(q.lower(), autoescape=True),
+                    Customer.full_name.contains(q, autoescape=True),
+                    Customer.phone_e164.startswith(q, autoescape=True),
+                )
+            )
+        return [(row[0], row[1]) for row in (await self.session.execute(stmt)).all()]
 
 
 async def purge_auth_flows(

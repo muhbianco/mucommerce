@@ -19,7 +19,6 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
-from app.customers import oidc
 from app.customers.sessions import hash_token
 from app.identity.models import (
     AccessStatus,
@@ -31,11 +30,12 @@ from app.identity.models import (
 from app.tenancy.context import CROSS_TENANT_OPTION
 from app.tenancy.models import Tenant
 from app.tenancy.service import Actor, TenantService
+from tests.conftest import CUSTOMER_CLIENT_ID as CLIENT_ID
 from tests.conftest import create_tenant
 from tests.test_catalog import add_ready_image, base, create_product, member_headers
 
 CROSS = {CROSS_TENANT_OPTION: True}
-CLIENT_ID = "store-client.apps.googleusercontent.com"
+pytestmark = pytest.mark.usefixtures("customer_login_configured")
 WEB = {"X-Internal-Token": "web-token-test"}
 BINDING = "b" * 40
 KID = "test-key-1"
@@ -64,13 +64,6 @@ def id_token(nonce: str | None, *, key: Any = _PRIVATE, alg: str = "RS256", **cl
     if nonce is not None:
         payload["nonce"] = nonce
     return jwt.encode(payload | claims, key, algorithm=alg, headers={"kid": KID})
-
-
-@pytest.fixture(autouse=True)
-def google(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "google_customer_client_id", CLIENT_ID)
-    monkeypatch.setattr(settings, "google_customer_client_secret", type(settings.jwt_secret)("s"))
-    oidc.reset_key_cache()
 
 
 @pytest.fixture

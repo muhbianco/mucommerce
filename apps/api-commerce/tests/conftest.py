@@ -24,13 +24,16 @@ os.environ.setdefault("METRICS_ENABLED", "false")
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Mount
 
+from app.core.config import settings
 from app.core.database import get_session, mariadb_engine_options
 from app.core.rate_limit import rate_limiter
 from app.core.scopes import PlatformRole, TenantRole
+from app.customers import oidc
 from app.identity.models import AdminUser
 from app.identity.service import AdminAuthService
 from app.main import app
@@ -157,3 +160,15 @@ async def operator_headers(
 ) -> dict[str, str]:
     await create_admin(session_factory, "ops@muhbianco.test", platform_role=PlatformRole.OPERATOR)
     return await login(client, "ops@muhbianco.test")
+
+
+# ----------------------------------------------------------------------------- store customers
+@pytest.fixture
+def customer_login_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Google client of the stores configured; the cached Google key set is forgotten."""
+    monkeypatch.setattr(settings, "google_customer_client_id", CUSTOMER_CLIENT_ID)
+    monkeypatch.setattr(settings, "google_customer_client_secret", SecretStr("s"))
+    oidc.reset_key_cache()
+
+
+CUSTOMER_CLIENT_ID = "store-client.apps.googleusercontent.com"
