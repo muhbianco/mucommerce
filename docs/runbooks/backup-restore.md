@@ -5,7 +5,7 @@ imprime segredo; arquivos de credencial ficam em `/root` com modo 600.
 
 ## Instalação (uma vez)
 
-1. **Usuário de backup** (admin via unix_socket; senha gerada e gravada direto no arquivo):
+1. **Usuário de backup e cron**: `infra/backup/install.sh` (idempotente; senha gerada no host, vai ao MariaDB por stdin e fica só em `/root/.mucommerce-backup.cnf`). Equivalente manual:
    ```bash
    umask 077
    PASS=$(openssl rand -hex 24)
