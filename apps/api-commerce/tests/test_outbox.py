@@ -34,13 +34,8 @@ class _Recorder:
 async def _relay_and_deliver(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> list[tuple[str, str]]:
-    dispatched: list[tuple[str, str]] = []
-
-    async def dispatcher(event_id: str, consumer: str) -> None:
-        dispatched.append((event_id, consumer))
-
     async with session_factory() as session:
-        await outbox.relay_pending(session, dispatcher)
+        dispatched = await outbox.relay_pending(session)
         await session.commit()
     for event_id, consumer in dispatched:
         async with session_factory() as session:

@@ -27,6 +27,17 @@ Handler = Callable[[AsyncSession, OutboxEvent], Awaitable[None]]
 
 MAX_ATTEMPTS = 8
 BACKOFF_SECONDS = (30, 60, 300, 900, 1800, 3600, 7200, 14400)
+# A dispatched delivery is leased for this long: if its task message is lost (broker
+# restart, worker killed before ack), `claim_due_deliveries` picks it up after the lease
+# instead of leaving it pending forever, and never re-dispatches it while in flight.
+DISPATCH_LEASE_SECONDS = 300
+
+DispatchList = list[tuple[str, str]]  # (event_id, consumer)
+
+
+def _locks_rows(session: AsyncSession) -> bool:
+    """Row locks (FOR UPDATE / SKIP LOCKED) exist on MariaDB, not on SQLite (tests)."""
+    return session.bind is not None and session.bind.dialect.name in {"mysql", "mariadb"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +84,7 @@ async def emit(
         .where(OutboxEvent.aggregate_id == aggregate_id)
         .execution_options(**{CROSS_TENANT_OPTION: True})
     )
-    if session.bind is not None and session.bind.dialect.name in {"mysql", "mariadb"}:
+    if _locks_rows(session):
         seq_stmt = seq_stmt.with_for_update()
     last_seq = (await session.execute(seq_stmt)).scalar_one()
     request_id = request_id_var.get()
@@ -91,17 +102,13 @@ async def emit(
     return event
 
 
-async def relay_pending(
-    session: AsyncSession,
-    dispatcher: Callable[[str, str], Awaitable[None]],
-    *,
-    limit: int = 200,
-) -> int:
-    """Create per-consumer deliveries for pending events and hand them to the dispatcher.
+async def relay_pending(session: AsyncSession, *, limit: int = 200) -> DispatchList:
+    """Create per-consumer deliveries for pending events and return what to dispatch.
 
-    The dispatcher is either the Celery task `.delay` (production) or a direct
-    call (eager mode). Marks the event `dispatched` before dispatching, so a
-    crash re-dispatches at most once and consumers stay idempotent anyway.
+    The caller must COMMIT before dispatching: a consumer task that starts before the
+    commit would not see its delivery row. Each delivery is created leased, so a
+    dispatch that never reaches a worker is retried by `claim_due_deliveries`.
+    Concurrent relays skip each other's rows (SKIP LOCKED) instead of double-relaying.
     """
     now = utcnow()
     stmt = (
@@ -112,22 +119,27 @@ async def relay_pending(
         .limit(limit)
         .execution_options(**{CROSS_TENANT_OPTION: True})
     )
+    if _locks_rows(session):
+        stmt = stmt.with_for_update(skip_locked=True)
     events = list((await session.execute(stmt)).scalars())
-    dispatched = 0
+    lease_until = now + timedelta(seconds=DISPATCH_LEASE_SECONDS)
+    to_dispatch: DispatchList = []
     for event in events:
         consumers = registry.for_event(event.event_type)
         if not consumers:
             event.status = OutboxStatus.DONE
             continue
         for consumer in consumers:
-            session.add(OutboxDelivery(event_id=event.id, consumer=consumer.name))
+            session.add(
+                OutboxDelivery(
+                    event_id=event.id, consumer=consumer.name, next_attempt_at=lease_until
+                )
+            )
+            to_dispatch.append((event.id, consumer.name))
         event.status = OutboxStatus.DISPATCHED
         event.attempts += 1
-        await session.flush()
-        for consumer in consumers:
-            await dispatcher(event.id, consumer.name)
-            dispatched += 1
-    return dispatched
+    await session.flush()
+    return to_dispatch
 
 
 async def deliver(session: AsyncSession, event_id: str, consumer_name: str) -> str:
@@ -148,8 +160,14 @@ async def deliver(session: AsyncSession, event_id: str, consumer_name: str) -> s
     try:
         await consumer.handler(session, event)
         session.add(ProcessedEvent(consumer=consumer_name, event_id=event_id))
+        delivery = await _get_or_create_delivery(session, event_id, consumer_name)
+        delivery.status = DeliveryStatus.DONE
+        delivery.processed_at = utcnow()
+        delivery.attempts += 1
         await session.flush()
     except IntegrityError:
+        # Another worker processed the event (or created the delivery) concurrently.
+        # Nothing of ours is kept; the delivery lease re-dispatches it if still needed.
         await session.rollback()
         return "duplicate"
     except Exception as exc:  # consumer failure: drop its partial work, keep bookkeeping
@@ -183,11 +201,6 @@ async def deliver(session: AsyncSession, event_id: str, consumer_name: str) -> s
             )
         return str(delivery.status)
 
-    delivery = await _get_or_create_delivery(session, event_id, consumer_name)
-    delivery.status = DeliveryStatus.DONE
-    delivery.processed_at = utcnow()
-    delivery.attempts += 1
-    await session.flush()
     await _settle_event(session, event)
     return str(delivery.status)
 
@@ -224,18 +237,31 @@ async def _settle_event(session: AsyncSession, event: OutboxEvent) -> None:
         event.status = OutboxStatus.DONE
 
 
-async def due_retries(session: AsyncSession, *, limit: int = 200) -> list[OutboxDelivery]:
+async def claim_due_deliveries(session: AsyncSession, *, limit: int = 200) -> DispatchList:
+    """Pending deliveries whose backoff or dispatch lease expired, claimed for dispatch.
+
+    Covers failed attempts waiting for backoff, manual DLQ retries (`retry_failed`)
+    and dispatches whose task never ran. Claiming pushes `next_attempt_at` one lease
+    ahead, so the next beat tick does not dispatch the same delivery again while its
+    task is in flight. As with `relay_pending`, commit before dispatching.
+    """
     now = utcnow()
     stmt = (
         select(OutboxDelivery)
         .where(OutboxDelivery.status == DeliveryStatus.PENDING)
-        .where(OutboxDelivery.attempts > 0)
         .where(OutboxDelivery.next_attempt_at <= now)
         .order_by(OutboxDelivery.next_attempt_at)
         .limit(limit)
         .execution_options(**{CROSS_TENANT_OPTION: True})
     )
-    return list((await session.execute(stmt)).scalars())
+    if _locks_rows(session):
+        stmt = stmt.with_for_update(skip_locked=True)
+    due = list((await session.execute(stmt)).scalars())
+    lease_until = now + timedelta(seconds=DISPATCH_LEASE_SECONDS)
+    for delivery in due:
+        delivery.next_attempt_at = lease_until
+    await session.flush()
+    return [(delivery.event_id, delivery.consumer) for delivery in due]
 
 
 async def retry_failed(session: AsyncSession, event_id: str) -> int:

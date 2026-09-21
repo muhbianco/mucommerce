@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -13,8 +14,18 @@ register_tenant_filter()
 
 
 def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
-    """Celery workers are sync; each task gets its own loop and its own engine."""
-    return asyncio.run(coro)
+    """Celery workers are sync; each task gets its own loop and its own engine.
+
+    In eager mode (no broker: dev/tests) a task can be called from inside a running
+    loop, where `asyncio.run` refuses to start; the coroutine then runs on a helper
+    thread with its own loop. Workers never hit that branch.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 async def with_session[T](fn: Callable[[AsyncSession], Awaitable[T]]) -> T:

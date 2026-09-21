@@ -4,6 +4,7 @@ python -m app.cli db ensure            # CREATE DATABASE IF NOT EXISTS (migratio
 python -m app.cli db upgrade           # alembic upgrade head (migration user)
 python -m app.cli admin bootstrap      # first superadmin from BOOTSTRAP_ADMIN_* env
 python -m app.cli tenant seed-platform # tenant `muhbianco` + loja + staging.loja
+python -m app.cli outbox ping          # emits `system.ping`; its delivery proves the outbox runs
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import sys
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.audit import outbox
 from app.core.bootstrap import ensure_database_exists, upgrade_head
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
@@ -119,6 +121,23 @@ async def seed_platform_tenant(session: AsyncSession | None = None) -> int:
     return 0
 
 
+async def outbox_ping() -> int:
+    """Emit a no-op event; audit_projector consumes it (outbox_deliveries + processed_events)."""
+    factory = _session_factory(settings.database_url)
+    async with factory() as session:
+        event = await outbox.emit(
+            session,
+            aggregate_type="system",
+            aggregate_id="ping",
+            event_type="system.ping",
+            payload={"emitted_at": utcnow().isoformat()},
+            tenant_id=None,
+        )
+        await session.commit()
+    logger.info("Outbox ping emitted", extra={"event_id": event.id})
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     configure_logging(settings.log_level)
     register_tenant_filter()
@@ -141,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
     tenant = sub.add_parser("tenant").add_subparsers(dest="cmd", required=True)
     tenant.add_parser("seed-platform")
 
+    outbox_cmd = sub.add_parser("outbox").add_subparsers(dest="cmd", required=True)
+    outbox_cmd.add_parser("ping")
+
     args = parser.parse_args(argv)
 
     if args.group == "db" and args.cmd == "ensure":
@@ -156,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(admin_bootstrap(args.email, args.password, args.name))
     if args.group == "tenant" and args.cmd == "seed-platform":
         return asyncio.run(seed_platform_tenant())
+    if args.group == "outbox" and args.cmd == "ping":
+        return asyncio.run(outbox_ping())
     parser.error("unknown command")
 
 

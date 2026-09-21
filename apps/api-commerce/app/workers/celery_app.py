@@ -38,7 +38,7 @@ celery_app.conf.update(
     task_eager_propagates=True,
     timezone="UTC",
     # USER api cannot write celerybeat-schedule under WORKDIR /app.
-    beat_schedule_filename="/tmp/celerybeat-schedule",
+    beat_schedule_filename="/tmp/celerybeat-schedule",  # noqa: S108  (private container /tmp)
     beat_schedule={
         "relay-outbox": {"task": "app.workers.tasks.relay_outbox", "schedule": 5.0},
         "retry-due-deliveries": {

@@ -8,6 +8,7 @@ from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
 from app.tenancy.service import TenantService
+from app.workers import consumers as _consumers  # noqa: F401  (registers outbox consumers)
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async, with_session
 
@@ -24,30 +25,34 @@ def deliver_event(self: object, event_id: str, consumer: str) -> str:
     return run_async(with_session(_run))
 
 
-async def _dispatch(event_id: str, consumer: str) -> None:
-    deliver_event.delay(event_id, consumer)
+def _dispatch(to_dispatch: outbox.DispatchList) -> None:
+    """Enqueue deliveries. Only call after the transaction that created them committed."""
+    for event_id, consumer in to_dispatch:
+        deliver_event.delay(event_id, consumer)
 
 
 @celery_app.task(name="app.workers.tasks.relay_outbox")
 def relay_outbox() -> int:
-    async def _run(session: AsyncSession) -> int:
-        return await outbox.relay_pending(session, _dispatch)
+    async def _run(session: AsyncSession) -> outbox.DispatchList:
+        return await outbox.relay_pending(session)
 
-    count = run_async(with_session(_run))
-    if count:
-        logger.info("Outbox relayed", extra={"dispatched": count})
-    return count
+    to_dispatch = run_async(with_session(_run))  # committed on return
+    _dispatch(to_dispatch)
+    if to_dispatch:
+        logger.info("Outbox relayed", extra={"dispatched": len(to_dispatch)})
+    return len(to_dispatch)
 
 
 @celery_app.task(name="app.workers.tasks.retry_due_deliveries")
 def retry_due_deliveries() -> int:
-    async def _run(session: AsyncSession) -> int:
-        due = await outbox.due_retries(session)
-        for delivery in due:
-            deliver_event.delay(delivery.event_id, delivery.consumer)
-        return len(due)
+    async def _run(session: AsyncSession) -> outbox.DispatchList:
+        return await outbox.claim_due_deliveries(session)
 
-    return run_async(with_session(_run))
+    to_dispatch = run_async(with_session(_run))  # committed on return
+    _dispatch(to_dispatch)
+    if to_dispatch:
+        logger.info("Outbox retries dispatched", extra={"dispatched": len(to_dispatch)})
+    return len(to_dispatch)
 
 
 @celery_app.task(name="app.workers.tasks.verify_domains")
