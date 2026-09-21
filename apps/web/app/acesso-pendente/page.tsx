@@ -6,6 +6,7 @@ import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE, safeStorePath } from "@/lib/customer-cookies";
 import { getStorefrontContext } from "@/lib/server-context";
 
+import { PhoneConfirm } from "../_store/phone-confirm";
 import { StoreShell } from "../_store/store-shell";
 import { requestAccess } from "./actions";
 
@@ -25,11 +26,11 @@ const NOTICES: Record<string, string> = {
 export default async function PendingAccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; ok?: string }>;
+  searchParams: Promise<{ next?: string; ok?: string; tel?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context) notFound();
-  const { next, ok } = await searchParams;
+  const { next, ok, tel } = await searchParams;
   const target = safeStorePath(next ?? "/loja");
   if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect(`/entrar?next=${encodeURIComponent(target)}`);
 
@@ -67,6 +68,7 @@ export default async function PendingAccessPage({
           </form>
         </>
       )}
+      <PhoneConfirm context={context} back={`/acesso-pendente?next=${encodeURIComponent(target)}`} error={tel} />
       <form action="/auth/sair" method="post">
         <button type="submit" className="muted">
           Sair

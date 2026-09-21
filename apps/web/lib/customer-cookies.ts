@@ -10,6 +10,8 @@
 export const CUSTOMER_SESSION_COOKIE = "__Host-mb_sess";
 export const CUSTOMER_BINDING_COOKIE = "__Host-mb_oidc";
 export const BINDING_MAX_AGE = 600;
+/** Pending "CONFIRMAR <código>" wa.me link, 10 minutes (the challenge's lifetime). */
+export const WHATSAPP_LINK_COOKIE = "__Host-mb_wa";
 
 export function customerCookie(maxAge: number) {
   return { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge };

@@ -149,7 +149,9 @@ async def seed() -> None:
     async with factory() as session:  # fresh session: `domains` is loaded by get_or_404
         service = TenantService(session)
         await service.set_features(
-            await service.get_or_404(closed_id), {"catalog": True, "customer_login": True}, ACTOR
+            await service.get_or_404(closed_id),
+            {"catalog": True, "customer_login": True, "customer_phone_otp": True},
+            ACTOR,
         )
         await session.commit()
         await _publish_products(session, closed_id)

@@ -38,6 +38,7 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
         </Link>
         <span className={styles.spacer} />
         {context.features.catalog ? <Link href="/loja">Produtos</Link> : null}
+        {signedIn ? <Link href="/conta">Minha conta</Link> : null}
         {signedIn ? (
           <form action="/auth/sair" method="post">
             <button type="submit" className={styles.linkButton}>

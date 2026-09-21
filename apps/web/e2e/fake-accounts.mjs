@@ -45,6 +45,12 @@ createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   if (req.method === "GET" && url.pathname === "/healthz") return send(res, 200, { ok: true });
 
+  // api-agents: the official number store customers send "CONFIRMAR <código>" to.
+  if (req.method === "GET" && url.pathname === "/api/v1/internal/commerce/whatsapp-entry") {
+    if (req.headers["x-internal-token"] !== "e2e-agents-token") return send(res, 401, {});
+    return send(res, 200, { phone: "5511940000000" });
+  }
+
   if (req.method === "GET" && url.pathname === "/api/v1/auth/google/login") {
     const state = url.searchParams.get("client_state");
     const challenge = url.searchParams.get("code_challenge");

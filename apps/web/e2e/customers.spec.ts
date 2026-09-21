@@ -88,6 +88,26 @@ test("loja publica os termos; o login mostra a versão e a página de políticas
   await expect(page.getByText(/Termos da Loja Fechada/)).toBeVisible();
 });
 
+test("cliente confirma o WhatsApp mandando CONFIRMAR ao número oficial", async ({ page }) => {
+  await customerSignsIn(page, { sub: "e2e-caio", email: "caio.e2e@example.com", name: "Caio E2E" });
+  await page.getByLabel("Celular com DDD").fill("(11) 98888-7777");
+  await page.getByRole("button", { name: "Confirmar WhatsApp" }).click();
+  const open = page.getByRole("link", { name: "Abrir WhatsApp e enviar a mensagem" });
+  await expect(open).toHaveAttribute("href", /^https:\/\/wa\.me\/5511940000000\?text=CONFIRMAR/);
+  const whatsapp = (await open.getAttribute("href")) ?? "";
+  const code = decodeURIComponent(new URL(whatsapp).searchParams.get("text") ?? "").replace("CONFIRMAR ", "");
+
+  // What api-agents does when the message reaches the official number (9th digit may be missing).
+  const confirmed = await page.request.post("http://127.0.0.1:8791/api/v1/internal/agents/phone-confirmations", {
+    headers: { "X-Internal-Token": "e2e-agents-token" },
+    data: { token: code, phone: "551188887777" },
+  });
+  expect(confirmed.status()).toBe(200);
+
+  await page.goto(`${CLOSED_STORE}/acesso-pendente?next=%2Floja`);
+  await expect(page.getByText(/Confirmado: \+5511 •••• 7777/)).toBeVisible();
+});
+
 test("código de retorno forjado ou reusado volta para o login", async ({ page }) => {
   await page.goto(`${CLOSED_STORE}/auth/complete?hc=forjado-forjado-forjado`);
   await expect(page).toHaveURL(/\/entrar\?erro=sessao_expirada$/);

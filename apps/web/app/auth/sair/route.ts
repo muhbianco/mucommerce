@@ -3,19 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE, customerCookie } from "@/lib/customer-cookies";
 import { relativeRedirect } from "@/lib/relative-redirect";
-
-/** The POST came from a page of this same store host (Sec-Fetch-Site, else Origin vs Host). */
-function sameStoreOrigin(request: NextRequest): boolean {
-  if (request.headers.get("sec-fetch-site") === "same-origin") return true;
-  const origin = request.headers.get("origin");
-  const host = request.headers.get("host");
-  if (!origin || !host) return false;
-  try {
-    return new URL(origin).host === host;
-  } catch {
-    return false;
-  }
-}
+import { sameStoreOrigin } from "@/lib/same-origin";
 
 /** Sign out of this store. POST from the store's own pages only (Origin check). */
 export async function POST(request: NextRequest): Promise<NextResponse> {
