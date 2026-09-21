@@ -461,7 +461,14 @@ class TenantService:
         return domain
 
     async def verify_domain(self, domain: TenantDomain, verifier: DnsVerifier) -> DnsCheck:
-        """One verification round. Called by the beat job and by the ops "verify now" button."""
+        """One verification round. Called by the beat job and by the ops "verify now" button.
+
+        Ownership is proven once: after the TXT has been seen (`verified_at`), activation only
+        waits for the A/CNAME, even if the customer edits or removes the TXT meanwhile. Same
+        rule as `recheck_active_domain`, which only watches the target of an active host.
+        """
+        if domain.status == DomainStatus.DISABLED:
+            raise ConflictError("Domínio desativado.", code="domain_disabled")
         check = await verifier.check(domain.hostname, domain.verification_token)
         domain.last_check_at = utcnow()
         previous = domain.status
@@ -471,15 +478,22 @@ class TenantService:
 
         if check.txt_ok and domain.verified_at is None:
             domain.verified_at = utcnow()
-        if check.txt_ok and check.target_ok:
+        owned = domain.verified_at is not None
+        if owned and check.target_ok:
             domain.status = DomainStatus.ACTIVE
             domain.failed_checks = 0
             domain.last_error = None
-        elif check.txt_ok:
+        elif owned:
             domain.status = DomainStatus.VERIFIED
-            domain.last_error = "TXT ok; A/CNAME ainda não aponta para a plataforma"
+            domain.last_error = (
+                "; ".join(check.errors) or "TXT ok; A/CNAME ainda não aponta para a plataforma"
+            )
         else:
-            domain.last_error = "; ".join(check.errors) or "TXT de verificação não encontrado"
+            domain.last_error = "; ".join(check.errors) or (
+                "TXT encontrado, mas o valor não confere com o indicado no painel"
+                if check.observed_txt
+                else "TXT de verificação não encontrado"
+            )
             age = utcnow() - domain.created_at
             if age > timedelta(hours=settings.domain_verify_max_age_hours):
                 domain.status = DomainStatus.FAILED

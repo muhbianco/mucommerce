@@ -35,6 +35,7 @@ async def test_subdomain_with_cname_is_ok_but_wrong_txt_fails() -> None:
     )
     check = await verifier.check("www.lunares.com.br", "tok")
     assert check.txt_ok is False
+    assert check.observed_txt == ["mb-verify=other"]
     assert check.target_ok is True
     assert check.observed_cname == "edge.test"
 

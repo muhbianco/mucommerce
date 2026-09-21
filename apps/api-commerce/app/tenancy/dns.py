@@ -28,6 +28,7 @@ class DnsInstructions:
 class DnsCheck:
     txt_ok: bool = False
     target_ok: bool = False
+    observed_txt: list[str] = field(default_factory=list)
     observed_a: list[str] = field(default_factory=list)
     observed_cname: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -76,7 +77,8 @@ class DnsVerifier:
         expected_txt = f"{TXT_PREFIX}{token}"
         try:
             txts = await self._query(f"{VERIFY_LABEL}.{hostname}", "TXT")
-            result.txt_ok = any(t.replace('" "', "") == expected_txt for t in txts)
+            result.observed_txt = [t.replace('" "', "") for t in txts]
+            result.txt_ok = expected_txt in result.observed_txt
         except RuntimeError as exc:
             result.errors.append(str(exc))
 
