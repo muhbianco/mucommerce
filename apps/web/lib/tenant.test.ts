@@ -7,6 +7,7 @@ import {
   normalizeHost,
   panelRewritePath,
   requiresSession,
+  resolveRequestHost,
 } from "./tenant";
 
 const rules = { panelHost: "painel.muhbianco.com.br", platformBaseDomain: "loja.muhbianco.com.br" };
@@ -21,6 +22,23 @@ describe("normalizeHost", () => {
     expect(normalizeHost("[::1]")).toBeNull();
     expect(normalizeHost("bad_host.com")).toBeNull();
     expect(normalizeHost("-x.com")).toBeNull();
+  });
+});
+
+describe("resolveRequestHost", () => {
+  it("routes on Host for requests from outside, ignoring X-Forwarded-Host", () => {
+    expect(resolveRequestHost("painel.muhbianco.com.br", "lunares.com.br")).toBe("painel.muhbianco.com.br");
+    expect(resolveRequestHost("Lunares.com.br:443", null)).toBe("lunares.com.br");
+  });
+  it("recovers the browser host on Next's own fetch after a Server Action redirect", () => {
+    expect(resolveRequestHost("localhost:3000", "painel.muhbianco.com.br")).toBe("painel.muhbianco.com.br");
+    expect(resolveRequestHost("127.0.0.1:3000", "lunares.com.br, proxy.internal")).toBe("lunares.com.br");
+    expect(resolveRequestHost("[::1]:3000", "painel.muhbianco.com.br")).toBe("painel.muhbianco.com.br");
+  });
+  it("keeps a loopback Host when the forwarded one is missing or garbage", () => {
+    expect(resolveRequestHost("localhost:3000", null)).toBe("localhost");
+    expect(resolveRequestHost("localhost:3000", "bad_host.com")).toBe("localhost");
+    expect(resolveRequestHost(null, "painel.muhbianco.com.br")).toBeNull();
   });
 });
 

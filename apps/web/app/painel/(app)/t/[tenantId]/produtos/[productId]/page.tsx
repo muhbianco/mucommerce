@@ -135,7 +135,7 @@ export default async function ProductPage({
                       <input name="position" type="number" defaultValue={media.position} style={{ width: "5rem" }} />
                     </label>
                     <button type="submit" className={styles.buttonGhost}>
-                      Salvar
+                      Salvar imagem
                     </button>
                   </form>
                   <form action={deleteMedia}>
@@ -249,7 +249,7 @@ export default async function ProductPage({
             </label>
             {canWrite ? (
               <button type="submit" className={styles.button}>
-                Salvar
+                Salvar dados
               </button>
             ) : null}
           </fieldset>

@@ -12,7 +12,7 @@ import {
   type TokenPair,
   withCookies,
 } from "@/lib/panel/token";
-import { classifyHost, isPanelPath, normalizeHost, panelRewritePath, requiresSession } from "@/lib/tenant";
+import { classifyHost, isPanelPath, panelRewritePath, requiresSession, resolveRequestHost } from "@/lib/tenant";
 
 const SESSION_COOKIE = "mb_sess";
 const TENANT_HEADERS = ["x-tenant-id", "x-tenant-slug", "x-tenant-host", "x-tenant-context", "x-host-kind"];
@@ -96,7 +96,7 @@ export async function middleware(request: NextRequest) {
     panelHost: process.env.PANEL_HOST ?? "painel.muhbianco.com.br",
     platformBaseDomain: process.env.PLATFORM_BASE_DOMAIN ?? "loja.muhbianco.com.br",
   };
-  const host = normalizeHost(request.headers.get("host"));
+  const host = resolveRequestHost(request.headers.get("host"), request.headers.get("x-forwarded-host"));
   const kind = classifyHost(host, rules);
   const { pathname } = request.nextUrl;
 

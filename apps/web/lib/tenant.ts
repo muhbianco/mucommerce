@@ -49,6 +49,27 @@ export function normalizeHost(raw: string | null | undefined): string | null {
   return host;
 }
 
+// Next.js's own origin (`__NEXT_PRIVATE_ORIGIN`): `localhost:<port>` when it binds 0.0.0.0.
+const SELF_HOST = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(:\d+)?$/;
+
+/**
+ * The host a request is for. Traefik routes on Host and passes it through, so for any request
+ * from outside that is the answer. The exception is the page a Server Action redirects to:
+ * Next.js renders it with a fetch to its own origin, and Node's fetch replaces the Host it
+ * forwards with that loopback address, leaving the browser's host only in X-Forwarded-Host.
+ * Resolved by Host, that request is an unknown store and the redirect lands on the 404 page.
+ *
+ * X-Forwarded-Host is read only when Host is loopback, which Traefik never routes here; from
+ * inside the network it grants nothing a caller could not get by sending Host itself.
+ */
+export function resolveRequestHost(
+  host: string | null | undefined,
+  forwardedHost: string | null | undefined,
+): string | null {
+  if (!SELF_HOST.test(host?.trim().toLowerCase() ?? "")) return normalizeHost(host);
+  return normalizeHost(forwardedHost?.split(",")[0]) ?? normalizeHost(host);
+}
+
 export function classifyHost(host: string | null, rules: HostRules): HostKind {
   if (!host) return "unknown";
   if (host === rules.panelHost) return "panel";
