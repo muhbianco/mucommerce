@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, require_tenant_scopes
+from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.core.scopes import Scope
+from app.schemas.tenant import SettingUpdate
 from app.tenancy.context import TenantContext
 from app.tenancy.models import DomainPurpose
 from app.tenancy.repository import TenantRepository
+from app.tenancy.service import TenantService
 
 router = APIRouter(prefix="/admin/tenants/{tenant_id}", tags=["Painel do tenant"])
 
@@ -47,3 +49,37 @@ async def panel_context(
         features=tenant.features,
         settings=tenant.settings,
     )
+
+
+# Keys the tenant edits in the panel. Access mode, fulfillment and checkout stay with MuhBianco
+# ops for now (they change what customers can do, and phase 2 owns fulfillment/checkout).
+TenantEditableSetting = Literal["branding", "landing", "seo"]
+
+
+@router.get(
+    "/settings",
+    response_model=dict[str, dict[str, Any]],
+    summary="Configurações da loja (valores validados)",
+)
+async def get_settings(
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.CATALOG_READ))],
+) -> dict[str, dict[str, Any]]:
+    return tenant.settings
+
+
+@router.put(
+    "/settings/{key}",
+    response_model=dict[str, Any],
+    summary="Atualiza marca, landing ou SEO (validado por schema e referências)",
+)
+async def put_setting(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    key: TenantEditableSetting,
+    body: SettingUpdate,
+) -> dict[str, Any]:
+    service = TenantService(session)
+    row = await service.get_or_404(tenant.id)
+    return await service.set_setting(row, key, body.value, admin_actor(request, user))

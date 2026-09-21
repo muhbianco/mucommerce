@@ -8,12 +8,10 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
 from app.api.deps import DbSession, StorefrontTenant, require_internal
-from app.core.config import settings
 from app.schemas.internal import StorefrontContext
-from app.schemas.internal import StorefrontTenant as StorefrontTenantRead
 from app.tenancy.edge import build_traefik_config
-from app.tenancy.models import DomainPurpose
 from app.tenancy.repository import TenantRepository
+from app.tenancy.storefront_context import build_storefront_context
 
 router = APIRouter(prefix="/internal", tags=["Interno"])
 
@@ -45,24 +43,4 @@ async def traefik_dynamic_config(request: Request, session: DbSession) -> Respon
     dependencies=[Depends(require_internal("web"))],
 )
 async def storefront_context(session: DbSession, tenant: StorefrontTenant) -> StorefrontContext:
-    primary = await TenantRepository(session).primary_domain(tenant.id, DomainPurpose.STOREFRONT)
-    storefront = tenant.settings.get("storefront", {})
-    return StorefrontContext(
-        tenant=StorefrontTenantRead(
-            id=tenant.id,
-            slug=tenant.slug,
-            name=tenant.name,
-            status=tenant.status,
-            timezone=tenant.timezone,
-            locale=tenant.locale,
-            currency=tenant.currency,
-        ),
-        host=tenant.host,
-        primary_host=primary.hostname if primary else None,
-        access_mode=str(storefront.get("access_mode", "whitelist")),
-        features=tenant.features,
-        branding=tenant.settings.get("branding", {}),
-        seo=tenant.settings.get("seo", {}),
-        fulfillment=tenant.settings.get("fulfillment", {}),
-        chatwoot_url=settings.chatwoot_public_url if tenant.feature("chatwoot") else None,
-    )
+    return await build_storefront_context(session, tenant, internal=True)

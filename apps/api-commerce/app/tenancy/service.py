@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -32,6 +34,7 @@ from app.tenancy.models import (
 )
 from app.tenancy.repository import TenantRepository
 from app.tenancy.resolver import invalidate_host_cache
+from app.tenancy.setting_refs import check_setting_references
 from app.tenancy.settings_schemas import validate_setting
 
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
@@ -74,6 +77,20 @@ def classify_kind(host: str) -> DomainKind:
     if len(labels) == 3 and ".".join(labels[-2:]) in _SECOND_LEVEL_SUFFIXES:
         return DomainKind.CUSTOM_APEX
     return DomainKind.CUSTOM_SUBDOMAIN
+
+
+AUDIT_VALUE_MAX_CHARS = 4000
+
+
+def _audit_value(value: Any) -> Any:
+    """Settings go to the audit log whole, except large ones (landing text): a summary."""
+    if value is None:
+        return None
+    size = len(json.dumps(value, ensure_ascii=False))
+    if size <= AUDIT_VALUE_MAX_CHARS:
+        return value
+    digest = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:16]
+    return {"_summary": True, "chars": size, "sha256": digest, "keys": sorted(value)}
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +279,7 @@ class TenantService:
     ) -> dict[str, Any]:
         schema_version, value = validate_setting(key, value)
         bind_session_tenant(self.session, tenant.id)
+        await check_setting_references(self.session, key, value)
         current = await self.repo.settings(tenant.id)
         row = (
             await self.session.execute(
@@ -294,8 +312,8 @@ class TenantService:
             entity_type="tenant_setting",
             entity_id=row.id,
             tenant_id=tenant.id,
-            before={key: current.get(key)},
-            after={key: value},
+            before={key: _audit_value(current.get(key))},
+            after={key: _audit_value(value)},
             ip=actor.ip,
             user_agent=actor.user_agent,
         )

@@ -138,6 +138,13 @@ Prefixo `/admin/tenants/{t}`; auth `admin_jwt`; escopos entre parênteses.
 > - `POST /inventory/adjustments` `{kind: receipt|loss|adjustment|count, reason?, note?, lines:[{variant_id, quantity, unit_cost_cents?}]}`. O `Idempotency-Key` é **obrigatório**, e a operação é tudo ou nada: `409 insufficient_stock` com as linhas que ficariam negativas. `reason` é obrigatório em `loss`/`adjustment`. Custo só em `receipt`. Produto vendido por unidade aceita só quantidade inteira; por peso, até 3 casas.
 > - `GET /inventory/variants/{vid}/movements` (extrato, mais recentes primeiro) e `PUT /inventory/variants/{vid}/min-level`.
 > - Eventos: `inventory.adjusted` e `inventory.low_stock` (só quando cruza o mínimo para baixo). Job diário `audit_inventory_ledger` confere `SUM(qty_milli) == on_hand_milli` e loga divergências.
+
+> **Configurações da loja no painel (F1/S6)**:
+> - `GET /settings` (todas, já validadas) e `PUT /settings/{branding|landing|seo}` (escopo `settings:write`). `storefront` (modo de acesso), `fulfillment` e `checkout` continuam só no `/ops` por enquanto.
+> - `landing` v1: até 12 blocos `hero|featured_products|categories|text|gallery|contact`, **só texto puro** (a vitrine escapa tudo), `extra=forbid`.
+> - Referências são checadas na escrita: imagens da marca (`logo_media_id`, `og_image_media_id`) precisam ser `tenant_brand`, as da landing precisam ser `landing`, e produtos e categorias precisam ser do tenant e não arquivados. Senão `422` com os ids.
+> - O contexto da vitrine (público e interno) resolve essas imagens em `branding.logo {url,width,height}` (≤600 px) e `seo.og_image_url` (≤1200 px) quando prontas. A landing não entra no contexto (vai por header dentro do Next); a vitrine busca por endpoint próprio (S7).
+> - Landing grande entra no audit como resumo (`chars`, `sha256`), não o texto inteiro.
 | GET | `/inventory/balances` | `inventory:read` | `?item_type&low_stock=true` | — | |
 | GET | `/inventory/movements` | `inventory:read` | `?item_id&from&to&type` | — | |
 | POST | `/inventory/adjustments` | `inventory:adjust` | `{items:[{item_type,item_id,qty_delta|qty_counted,reason,note}]}` → movimentos `adjustment|count|loss` | **obrigatório** | `inventory.adjusted`, `inventory.low_stock` |

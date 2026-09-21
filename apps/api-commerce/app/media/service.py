@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
@@ -79,6 +79,27 @@ def rendition_urls(media: MediaAsset) -> list[dict[str, Any]]:
         for name, info in renditions.items()
     ]
     return sorted(items, key=lambda item: item["width"], reverse=True)
+
+
+def pick_rendition(media: MediaAsset, *, max_width: int) -> dict[str, Any] | None:
+    """Largest rendition not wider than `max_width` (else the smallest one)."""
+    urls = rendition_urls(media)  # largest first
+    if not urls:
+        return None
+    fitting = [item for item in urls if item["width"] <= max_width]
+    return fitting[0] if fitting else urls[-1]
+
+
+async def ready_media_by_ids(session: AsyncSession, media_ids: list[str]) -> dict[str, MediaAsset]:
+    """Ready images among `media_ids` (tenant-scoped session), by id."""
+    if not media_ids:
+        return {}
+    stmt = (
+        select(MediaAsset)
+        .where(MediaAsset.id.in_(media_ids))
+        .where(MediaAsset.status == MediaStatus.READY)
+    )
+    return {m.id: m for m in (await session.execute(stmt)).scalars()}
 
 
 def _clean_filename(name: str | None) -> str | None:
