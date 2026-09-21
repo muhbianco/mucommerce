@@ -137,3 +137,28 @@ class ExternalServiceError(DomainError):
     status_code = 502
     error_code = "external_service_error"
     message = "Falha ao falar com um serviço externo."
+
+
+class CustomerLoginUnavailableError(DomainError):
+    status_code = 503
+    error_code = "login_unavailable"
+    message = "O login de clientes não está disponível nesta loja agora."
+
+
+class InvalidLoginStateError(DomainError):
+    """The Google callback came with an unknown, reused or expired state."""
+
+    status_code = 400
+    error_code = "invalid_state"
+    message = "Este link de login expirou. Volte à loja e entre de novo."
+
+
+class InvalidHandoffError(DomainError):
+    status_code = 400
+    error_code = "invalid_handoff"
+    message = "Login expirado ou já usado. Entre de novo."
+
+
+class CsrfOriginError(PermissionDeniedError):
+    error_code = "csrf_origin"
+    message = "Requisição recusada: origem diferente da loja."

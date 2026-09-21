@@ -189,6 +189,9 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "chatwoot": False,
     "payments.mercadopago": False,
     "payments.infinitepay": False,
+    # Phase A: store customers sign in with Google; phone check by WhatsApp code.
+    "customer_login": False,
+    "customer_phone_otp": False,
     "sales_agent": False,
     "whatsapp_owned": False,
 }

@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.exceptions import (
     AuthenticationError,
+    CsrfOriginError,
     FeatureDisabledError,
     InactiveUserError,
     LoginRequiredError,
@@ -188,6 +189,27 @@ async def require_customer(viewer: OptionalCustomer) -> Viewer:
 
 setattr(require_customer, CUSTOMER_GUARD_ATTR, True)
 CurrentCustomer = Annotated[Viewer, Depends(require_customer)]
+
+
+async def require_same_origin(
+    request: Request,
+    tenant: StorefrontTenant,
+    x_internal_token: Annotated[str | None, Header()] = None,
+) -> None:
+    """CSRF guard for cookie-authenticated POSTs from the browser.
+
+    SameSite=Lax does not stop requests from sibling subdomains of the platform domain, so the
+    request must also come from the store's own origin (Origin header, or the browser's
+    `Sec-Fetch-Site: same-origin`). The store's web calls with its token and checks on its side.
+    """
+    if _is_web(x_internal_token):
+        return
+    origin = request.headers.get("origin")
+    if origin and tenant.host and origin == settings.storefront_origin(tenant.host):
+        return
+    if request.headers.get("sec-fetch-site") == "same-origin":
+        return
+    raise CsrfOriginError()
 
 
 def storefront_access_mode(tenant: TenantContext) -> str:

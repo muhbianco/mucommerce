@@ -9,6 +9,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "staging", "production"]
 
+GOOGLE_ISSUER = "https://accounts.google.com"
+
 
 class Settings(BaseSettings):
     """Configuration read from the environment (and `.env` in development).
@@ -111,6 +113,22 @@ class Settings(BaseSettings):
     muhbianco_accounts_internal_url: str = "http://api_agents:8000"
     muhbianco_accounts_timeout_seconds: float = 5.0
 
+    # --- store customers: Google sign-in run by this API (not MuhBianco accounts) ------
+    # OAuth "Web" client of the stores; empty = customer sign-in unavailable.
+    google_customer_client_id: str = ""
+    google_customer_client_secret: SecretStr = SecretStr("")
+    # Central callback registered in Google; empty = https://<api_public_host>/api/v1/auth/google/callback
+    google_customer_redirect_uri: str = ""
+    # Google's endpoints (from https://accounts.google.com/.well-known/openid-configuration).
+    # Overridable only outside production, for the E2E fake provider.
+    google_oidc_issuer: str = GOOGLE_ISSUER
+    google_oidc_authorize_url: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    google_oidc_token_url: str = "https://oauth2.googleapis.com/token"  # noqa: S105 (a URL)
+    google_oidc_jwks_url: str = "https://www.googleapis.com/oauth2/v3/certs"
+    google_oidc_timeout_seconds: float = 5.0
+    # Where the handoff lands after the central callback; `{host}` is the store host.
+    storefront_origin_template: str = "https://{host}"
+
     # --- cors -----------------------------------------------------------------------
     cors_origins: str = ""
 
@@ -140,6 +158,17 @@ class Settings(BaseSettings):
                 raise ValueError(f"Missing required production settings: {', '.join(missing)}")
             if self.run_migrations_on_startup:
                 raise ValueError("RUN_MIGRATIONS_ON_STARTUP must be false in production")
+            # The fake OIDC provider of the E2E suite must never be trusted in production.
+            google = (
+                self.google_oidc_issuer == GOOGLE_ISSUER
+                and self.google_oidc_authorize_url.startswith("https://accounts.google.com/")
+                and self.google_oidc_token_url.startswith("https://oauth2.googleapis.com/")
+                and self.google_oidc_jwks_url.startswith("https://www.googleapis.com/")
+            )
+            if not google:
+                raise ValueError("GOOGLE_OIDC_* must point to Google in production")
+            if not self.storefront_origin_template.startswith("https://"):
+                raise ValueError("STOREFRONT_ORIGIN_TEMPLATE must be https in production")
         if len(self.jwt_secret.get_secret_value()) < 32 and self.environment != "development":
             raise ValueError("JWT_SECRET must have at least 32 characters")
         return self
@@ -202,6 +231,22 @@ class Settings(BaseSettings):
             and self.storage_access_key.get_secret_value()
             and self.storage_secret_key.get_secret_value()
         )
+
+    @property
+    def customer_login_configured(self) -> bool:
+        return bool(
+            self.google_customer_client_id and self.google_customer_client_secret.get_secret_value()
+        )
+
+    @property
+    def customer_redirect_uri(self) -> str:
+        return (
+            self.google_customer_redirect_uri
+            or f"https://{self.api_public_host}/api/v1/auth/google/callback"
+        )
+
+    def storefront_origin(self, host: str) -> str:
+        return self.storefront_origin_template.format(host=host).rstrip("/")
 
     @property
     def dns_resolver_list(self) -> list[str]:

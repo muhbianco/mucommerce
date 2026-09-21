@@ -14,7 +14,12 @@ from httpx import AsyncClient
 from sqlalchemy import delete, event, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.deps import CATALOG_ACCESS_GUARD_ATTR, PLATFORM_GUARD_ATTR, TENANT_GUARD_ATTR
+from app.api.deps import (
+    CATALOG_ACCESS_GUARD_ATTR,
+    CUSTOMER_GUARD_ATTR,
+    PLATFORM_GUARD_ATTR,
+    TENANT_GUARD_ATTR,
+)
 from app.api.v1.router import ENDPOINT_ROUTERS
 from app.core.exceptions import TenantContextMissingError, TenantMismatchError
 from app.core.scopes import TenantRole
@@ -225,7 +230,12 @@ def _guards(route: APIRoute) -> set[str]:
     pending = list(route.dependant.dependencies)
     while pending:
         dependency = pending.pop()
-        for attr in (PLATFORM_GUARD_ATTR, TENANT_GUARD_ATTR, CATALOG_ACCESS_GUARD_ATTR):
+        for attr in (
+            PLATFORM_GUARD_ATTR,
+            TENANT_GUARD_ATTR,
+            CATALOG_ACCESS_GUARD_ATTR,
+            CUSTOMER_GUARD_ATTR,
+        ):
             if getattr(dependency.call, attr, False):
                 found.add(attr)
         pending.extend(dependency.dependencies)
@@ -248,6 +258,15 @@ def test_every_storefront_catalog_route_checks_catalog_access() -> None:
         f"{sorted(r.methods)} {r.path}"
         for r in routes
         if CATALOG_ACCESS_GUARD_ATTR not in _guards(r)
+    ]
+    assert not unguarded, unguarded
+
+
+def test_every_customer_route_requires_a_session_of_the_store() -> None:
+    routes = [r for r in V1_ROUTES if r.path.startswith("/me/")]
+    assert routes
+    unguarded = [
+        f"{sorted(r.methods)} {r.path}" for r in routes if CUSTOMER_GUARD_ATTR not in _guards(r)
     ]
     assert not unguarded, unguarded
 

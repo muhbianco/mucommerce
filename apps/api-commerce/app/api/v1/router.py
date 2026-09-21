@@ -8,6 +8,7 @@ from app.api.v1.endpoints import (
     admin_media,
     admin_tenants,
     auth,
+    customer_auth,
     internal,
     ops_outbox,
     ops_tenants,
@@ -39,6 +40,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     },
     {"name": "Interno", "description": "Consumidores de serviço: Traefik, Next.js, api-agents."},
     {"name": "Vitrine (público)", "description": "Resolvido pelo Host do tenant."},
+    {
+        "name": "Clientes",
+        "description": "Login Google dos clientes das lojas, sessão e pedido de acesso.",
+    },
     {"name": "Infraestrutura", "description": "Health checks."},
 ]
 
@@ -55,6 +60,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     internal.router,
     storefront.router,
     storefront_catalog.router,
+    customer_auth.router,
 )
 
 router = APIRouter()
