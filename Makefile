@@ -12,7 +12,7 @@ PIP := $(VENV)/bin/pip
 ALEMBIC := $(VENV)/bin/alembic
 endif
 
-.PHONY: dev-infra dev-infra-down api-install api-migrate api-run api-worker api-beat api-test api-lint web-install web-dev web-build web-test
+.PHONY: dev-infra dev-infra-down api-install api-migrate api-run api-worker api-beat api-test api-lint web-install web-dev web-build web-test web-e2e
 
 dev-infra:
 	docker compose -f compose.dev.yml up -d
@@ -54,3 +54,8 @@ web-build:
 
 web-test:
 	cd $(WEB_DIR) && pnpm lint && pnpm typecheck && pnpm test
+
+# Playwright against web + api-commerce (SQLite) + fake MuhBianco login; no Docker. Locally:
+#   E2E_BROWSER_CHANNEL=msedge make web-e2e   (uses the installed Edge, no browser download)
+web-e2e:
+	cd $(WEB_DIR) && E2E_PYTHON=$(CURDIR)/$(PY) pnpm e2e

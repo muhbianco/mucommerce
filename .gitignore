@@ -35,3 +35,9 @@ tmp/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Playwright (apps/web/e2e)
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/e2e/test-results/
+apps/web/e2e/playwright-report/
