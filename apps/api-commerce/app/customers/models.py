@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UtcDateTime, UUIDPrimaryKeyMixin
@@ -40,4 +40,24 @@ class CustomerAuthFlow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Legal document versions shown on the "Entrar" page; recorded as consent on completion.
     terms_version: Mapped[str | None] = mapped_column(String(32))
     privacy_version: Mapped[str | None] = mapped_column(String(32))
+    ip: Mapped[str | None] = mapped_column(String(45))
+
+
+class CustomerPhoneChallenge(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A pending "CONFIRMAR <token>" for a customer's WhatsApp (see app/customers/phone.py).
+
+    Global: api-agents confirms it with no store in hand. The token is stored as SHA-256.
+    """
+
+    __tablename__ = "customer_phone_challenges"
+    __table_args__ = (Index("ix_customer_phone_challenges_customer", "customer_id", "created_at"),)
+
+    tenant_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("tenants.id"), nullable=False, index=True
+    )
+    customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), nullable=False)
+    phone_e164: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     ip: Mapped[str | None] = mapped_column(String(45))

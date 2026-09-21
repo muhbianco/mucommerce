@@ -27,9 +27,11 @@ from app.api.deps import (
 from app.core.config import settings
 from app.core.exceptions import InvalidLoginStateError, NotFoundError
 from app.core.hosts import InvalidHostnameError, normalize_hostname
+from app.core.phone import mask_phone
 from app.core.rate_limit import rate_limit
 from app.customers.access_service import CustomerAccessService
 from app.customers.auth_service import CustomerAuthService, mask_email
+from app.customers.phone import PhoneVerificationService
 from app.customers.repository import CustomerSessionRepository
 from app.identity.models import Customer
 from app.models.base import utcnow
@@ -89,6 +91,29 @@ class AccessRequestBody(StrictModel):
 
 class LogoutBody(StrictModel):
     all: bool = False
+
+
+class PhoneStartBody(StrictModel):
+    phone: Annotated[str, Field(min_length=8, max_length=32)]
+
+
+class PhoneStartRead(BaseModel):
+    whatsapp_url: str
+    expires_at: datetime
+
+
+class PhoneRead(BaseModel):
+    phone_masked: str | None
+    verified: bool
+
+
+class PhoneConfirmBody(StrictModel):
+    token: Annotated[str, Field(min_length=8, max_length=64)]
+    phone: Annotated[str, Field(min_length=8, max_length=32)]
+
+
+class PhoneConfirmRead(BaseModel):
+    tenant_name: str
 
 
 def customer_read(customer: Customer) -> CustomerRead:
@@ -246,3 +271,52 @@ async def request_access(
         tenant, viewer.customer_id, message=body.message, ip=ip
     )
     return AccessRead(status=row.status, requested_at=row.requested_at)
+
+
+# ------------------------------------------------------------------ WhatsApp phone confirmation
+@router.get(
+    "/me/phone", response_model=PhoneRead, summary="WhatsApp do cliente e se está confirmado"
+)
+async def my_phone(session: DbSession, viewer: CurrentCustomer) -> PhoneRead:
+    customer = await session.get(Customer, viewer.customer_id)
+    if customer is None:
+        raise NotFoundError("Cliente não encontrado.")
+    return PhoneRead(
+        phone_masked=mask_phone(customer.phone_e164),
+        verified=customer.phone_verified_at is not None,
+    )
+
+
+@router.post(
+    "/me/phone/start",
+    response_model=PhoneStartRead,
+    summary="Gera o link do WhatsApp para confirmar o número (CONFIRMAR <código>)",
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(rate_limit("customer_phone_start", limit=10, window_seconds=3600)),
+    ],
+)
+async def start_phone(
+    session: DbSession,
+    tenant: StorefrontTenant,
+    viewer: CurrentCustomer,
+    body: PhoneStartBody,
+    ip: ClientIp,
+) -> PhoneStartRead:
+    started = await PhoneVerificationService(session).start(
+        tenant, viewer.customer_id, body.phone, ip=ip
+    )
+    return PhoneStartRead(whatsapp_url=started.whatsapp_url, expires_at=started.expires_at)
+
+
+@router.post(
+    "/internal/agents/phone-confirmations",
+    response_model=PhoneConfirmRead,
+    summary="api-agents recebeu CONFIRMAR <código> de um número: confirma se o código é daqui",
+    dependencies=[Depends(require_internal("agents"))],
+)
+async def confirm_phone(session: DbSession, body: PhoneConfirmBody) -> PhoneConfirmRead:
+    confirmed = await PhoneVerificationService(session).confirm(body.token, body.phone)
+    if confirmed is None:
+        raise NotFoundError("Código não encontrado.")
+    return PhoneConfirmRead(tenant_name=confirmed.tenant_name)
