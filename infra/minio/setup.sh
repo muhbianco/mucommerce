@@ -4,9 +4,10 @@
 #
 #   sh infra/minio/setup.sh
 #
-# Needs /root/.minio-root.env (mode 600) with one line: MC_HOST_hel1=http://<root-user>:<root-pass>@minio:9000
-# Writes the service-account keys to /root/.mucommerce-minio.env (mode 600) and never prints them;
-# copy MINIO_ACCESS_KEY / MINIO_SECRET_KEY from there into the Portainer Env of stack `commerce`.
+# Needs /root/.minio-root.env (mode 600) with MINIO_ROOT_USER and MINIO_ROOT_PASSWORD (the MinIO
+# server's own variable names). Writes the service-account keys to /root/.mucommerce-minio.env
+# (mode 600) and never prints them; copy MINIO_ACCESS_KEY / MINIO_SECRET_KEY from there into the
+# Portainer Env of stack `commerce`.
 set -eu
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,13 +15,21 @@ ALIAS="hel1"
 PUBLIC_BUCKET="commerce-public"
 PRIVATE_BUCKET="commerce-private"
 MC_IMAGE="${MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z}"
-MC_ENV_FILE="${MC_ENV_FILE:-/root/.minio-root.env}"
+ROOT_ENV_FILE="${ROOT_ENV_FILE:-/root/.minio-root.env}"
 SA_ENV_FILE="${SA_ENV_FILE:-/root/.mucommerce-minio.env}"
 
-[ -r "$MC_ENV_FILE" ] || { echo "missing $MC_ENV_FILE (MC_HOST_$ALIAS=...)" >&2; exit 2; }
+[ -r "$ROOT_ENV_FILE" ] || { echo "missing $ROOT_ENV_FILE" >&2; exit 2; }
+
+# mc takes its alias from MC_HOST_<alias>. Build it (URL-encoded) in a private temp file so the
+# root credentials never reach argv/ps or the terminal.
+MC_RUN_ENV="$(mktemp)"
+trap 'rm -f "$MC_RUN_ENV"' EXIT
+chmod 600 "$MC_RUN_ENV"
+ROOT_ENV_FILE="$ROOT_ENV_FILE" ALIAS="$ALIAS" python3 "$DIR/mc_host_env.py" > "$MC_RUN_ENV"
+ROOT_USER="$(ROOT_ENV_FILE="$ROOT_ENV_FILE" python3 "$DIR/mc_host_env.py" --user)"
 
 mc() {
-  docker run --rm --network chatbot-net --env-file "$MC_ENV_FILE" -v "$DIR":/work:ro "$MC_IMAGE" "$@"
+  docker run --rm --network chatbot-net --env-file "$MC_RUN_ENV" -v "$DIR":/work:ro "$MC_IMAGE" "$@"
 }
 
 mc mb --ignore-existing "$ALIAS/$PUBLIC_BUCKET"
@@ -45,9 +54,8 @@ if [ -s "$SA_ENV_FILE" ]; then
 else
   access_key="commerce$(openssl rand -hex 6)"
   secret_key="$(openssl rand -hex 24)"
-  root_user="$(sed -n "s#^MC_HOST_$ALIAS=[a-z]*://\([^:]*\):.*#\1#p" "$MC_ENV_FILE")"
   mc admin user svcacct add --access-key "$access_key" --secret-key "$secret_key" \
-    --policy /work/policy-commerce-sa.json "$ALIAS" "$root_user" > /dev/null
+    --policy /work/policy-commerce-sa.json "$ALIAS" "$ROOT_USER" > /dev/null
   umask 077
   printf 'MINIO_ACCESS_KEY=%s\nMINIO_SECRET_KEY=%s\n' "$access_key" "$secret_key" > "$SA_ENV_FILE"
   echo "service account created; keys in $SA_ENV_FILE"
