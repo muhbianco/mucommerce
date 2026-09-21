@@ -34,8 +34,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       json: { code, code_verifier: saved.verifier, purpose: "panel" },
     });
   } catch (error) {
-    if (!(error instanceof ApiError)) throw error;
-    return fail(request, error.status >= 500 ? "sso_indisponivel" : "sso");
+    // Network failure or timeout reaching the API is an outage, not a bad login.
+    const outage = !(error instanceof ApiError) || error.status >= 500;
+    if (outage) console.error("panel sso exchange failed", error instanceof Error ? error.name : error);
+    return fail(request, outage ? "sso_indisponivel" : "sso");
   }
 
   // 200 page instead of a redirect: see continuePage (SameSite=Strict session cookies).
