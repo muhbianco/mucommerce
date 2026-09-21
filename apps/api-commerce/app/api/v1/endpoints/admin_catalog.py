@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Query, Request, Response, status
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
+from app.api.v1.endpoints.admin_media import media_read
 from app.audit.idempotency import idempotent
 from app.catalog.models import Category
 from app.catalog.schemas import (
@@ -24,6 +25,9 @@ from app.catalog.schemas import (
 from app.catalog.service import CatalogService, ProductView, price_of_variant, product_price
 from app.core.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Page, decode_cursor, encode_cursor
 from app.core.scopes import Scope
+from app.media.models import MediaAsset, MediaOwner
+from app.media.repository import MediaRepository
+from app.media.service import rendition_urls
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
 
@@ -48,6 +52,14 @@ def _price(price: object) -> PriceRead:
     return PriceRead.model_validate(price, from_attributes=True)
 
 
+def _cover_url(media: list[MediaAsset]) -> str | None:
+    for item in media:
+        urls = rendition_urls(item)
+        if urls:
+            return str(urls[-1]["url"])  # smallest
+    return None
+
+
 def _product_read(view: ProductView) -> ProductRead:
     now = utcnow()
     product = view.product
@@ -63,6 +75,7 @@ def _product_read(view: ProductView) -> ProductRead:
         position=product.position,
         published_at=product.published_at,
         updated_at=product.updated_at,
+        cover_url=_cover_url([m for m in view.media if m.status == "ready"]),
         short_description=product.short_description,
         description_md=product.description_md,
         promo_price_cents=product.promo_price_cents,
@@ -99,6 +112,7 @@ def _product_read(view: ProductView) -> ProductRead:
             )
             for v in view.variants
         ],
+        media=[media_read(m) for m in view.media],
     )
 
 
@@ -128,6 +142,10 @@ async def list_products(
         limit=limit, before_id=before_id, status=status_filter, q=q, category_id=category_id
     )
     now = utcnow()
+    page = rows[:limit]
+    covers = await MediaRepository(session).ready_for_owners(
+        MediaOwner.PRODUCT, [p.id for p in page]
+    )
     items = [
         ProductSummary(
             id=p.id,
@@ -141,8 +159,9 @@ async def list_products(
             position=p.position,
             published_at=p.published_at,
             updated_at=p.updated_at,
+            cover_url=_cover_url(covers.get(p.id, [])),
         )
-        for p in rows[:limit]
+        for p in page
     ]
     next_cursor = encode_cursor(id=rows[limit - 1].id) if len(rows) > limit else None
     return Page[ProductSummary](items=items, next_cursor=next_cursor)

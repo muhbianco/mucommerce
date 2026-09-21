@@ -17,6 +17,7 @@ from app.identity.models import (
     CustomerTenantAccess,
     TenantMembership,
 )
+from app.media.models import MediaAsset
 from app.models.base import Base
 from app.tenancy.models import (
     Tenant,
@@ -38,6 +39,7 @@ __all__ = [
     "CustomerSession",
     "CustomerTenantAccess",
     "IdempotencyKey",
+    "MediaAsset",
     "OutboxDelivery",
     "OutboxEvent",
     "ProcessedEvent",

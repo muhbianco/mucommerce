@@ -63,6 +63,7 @@ Todas as tabelas abaixo têm `id`, `tenant_id` (exceto as marcadas **global**), 
 > - Categorias: no máximo 2 níveis e 200 ativas por tenant; arquivar exige não ter subcategorias ativas e desfaz os vínculos com produtos.
 > - Variante com `price_cents` próprio ignora a promoção do produto; a que herda o preço herda a promoção. Janela de promoção `[início, fim)`.
 > - `product_tags`, `product_options*` e modificadores ficam para E05-02/E05-09.
+> - `media_assets` (migration `0005_media_assets`): `owner_type ∈ product|tenant_brand|landing`, `owner_id` nulo para donos do tenant, `declared_mime/declared_bytes`, `upload_key` (privado), `public_prefix`, `renditions JSON` (`{nome: {key, width, height, bytes}}`), `attempts`, `failure_reason`, `processed_at`; índices `(tenant_id, owner_type, owner_id, position)` e `(status, updated_at)` (job de manutenção). `product_variants.media_id` segue sem FK (limpo pelo serviço ao apagar a mídia).
 
 ### inventory
 - **inventory_items** (view lógica): item = `product_variant` ou `raw_material`. Tabelas físicas:

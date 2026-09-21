@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.catalog.pricing import MAX_PRICE_CENTS
+from app.media.schemas import MediaRead
 from app.schemas.common import StrictModel
 
 Money = Annotated[int, Field(ge=0, le=MAX_PRICE_CENTS)]
@@ -159,6 +160,8 @@ class ProductSummary(BaseModel):
     position: int
     published_at: datetime | None
     updated_at: datetime
+    # Smallest rendition of the first ready image (list thumbnails).
+    cover_url: str | None = None
 
 
 class ProductRead(ProductSummary):
@@ -183,6 +186,7 @@ class ProductRead(ProductSummary):
     created_at: datetime
     category_ids: list[str]
     variants: list[VariantRead]
+    media: list[MediaRead]
 
 
 class CategoryCreate(StrictModel):

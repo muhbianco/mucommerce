@@ -4,8 +4,11 @@
 Portainer replaces the whole stack Env on update, and the MCP only sees masked values, so a
 stack with `${VAR}` secrets (commerce) has to be updated from the host with the API token.
 
-  portainer-stack-update.py --stack commerce --yaml infra/docker-stack.yml       --set-env COMMERCE_TAG=<sha> [--prune] [--dry-run]
+  portainer-stack-update.py --stack commerce --yaml infra/docker-stack.yml       --set-env COMMERCE_TAG=<sha> [--env-file /root/.mucommerce-minio.env] [--prune] [--dry-run]
   portainer-stack-update.py --stack api-agents        # redeploy live YAML + Env as-is, repull
+
+`--env-file` merges KEY=VALUE lines from a host file (e.g. the MinIO service-account keys
+written by infra/minio/setup.sh) into the stack Env, so secrets go file → Portainer directly.
 
 Prints only stack id, env KEY names, which ${VARS} the YAML needs, sha256 of the YAML
 and the HTTP status. Never prints env values or YAML content.
@@ -51,6 +54,7 @@ def main() -> int:
     ap.add_argument("--stack", required=True)
     ap.add_argument("--yaml", type=pathlib.Path)
     ap.add_argument("--set-env", action="append", default=[])
+    ap.add_argument("--env-file", action="append", default=[], type=pathlib.Path)
     ap.add_argument("--prune", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
@@ -71,8 +75,17 @@ def main() -> int:
     live_yaml = file_data.get("StackFileContent", "")
     yaml_text = args.yaml.read_text(encoding="utf-8") if args.yaml else live_yaml
 
-    for item in args.set_env:
+    assignments = list(args.set_env)
+    for env_file in args.env_file:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                assignments.append(line)
+    for item in assignments:
         key, _, value = item.partition("=")
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+            print(f"ABORT: invalid env key {key!r}")
+            return 3
         for e in env:
             if e["name"] == key:
                 e["value"] = value
@@ -110,6 +123,9 @@ def main() -> int:
     code, after = req("GET", f"/api/stacks/{stack_id}")
     keys_after = sorted(e["name"] for e in (after.get("Env") or []))
     print(f"env_keys_after={keys_after}")
+    added = sorted(set(keys_after) - {e["name"] for e in (stack.get("Env") or [])})
+    if added:
+        print(f"env_keys_added={added}")
     if keys_after != sorted(present):
         print("WARNING: env keys changed after update")
         return 4

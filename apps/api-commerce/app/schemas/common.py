@@ -33,3 +33,5 @@ class HealthResponse(BaseModel):
 class ReadinessResponse(HealthResponse):
     database: bool
     redis: bool | None = None
+    # Reported, not gating: the catalog keeps working when only uploads are down.
+    storage: bool | None = None

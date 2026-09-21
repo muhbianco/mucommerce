@@ -26,6 +26,7 @@ from tests.conftest import create_admin, create_tenant, login
 
 COVERED_TENANT_SCOPED_TABLES = {
     "categories",
+    "media_assets",
     "products",
     "product_variants",
     "product_categories",

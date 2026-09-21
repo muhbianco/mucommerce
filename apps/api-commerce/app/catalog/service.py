@@ -4,7 +4,7 @@ Rules that live here (and nowhere else):
 - every product has a default variant, created with it and sharing its SKU;
 - SKU is unique per tenant across products and variants, and immutable;
 - a slug is unique per tenant, generated from the name when omitted;
-- publishing needs a price above zero and an active variant (S4 adds "≥1 ready image");
+- publishing needs a price above zero, an active variant and at least one ready image;
 - categories nest at most two levels; archiving one with active children is refused.
 
 Writes are audited; product lifecycle changes also go to the outbox (the product is the
@@ -13,7 +13,7 @@ aggregate; categories are not).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -42,6 +42,8 @@ from app.catalog.schemas import (
 )
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.slugs import next_free_slug, slugify
+from app.media.models import MediaAsset, MediaOwner, MediaStatus
+from app.media.repository import MediaRepository
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
 from app.tenancy.repository import TenantRepository
@@ -68,6 +70,7 @@ class ProductView:
     product: Product
     variants: list[ProductVariant]
     category_ids: list[str]
+    media: list[MediaAsset] = field(default_factory=list)
 
 
 def product_price(product: Product, now: datetime) -> EffectivePrice:
@@ -160,7 +163,8 @@ class CatalogService:
         product = await self._product_or_404(product_id)
         variants = (await self.repo.variants_for([product.id])).get(product.id, [])
         categories = (await self.repo.category_ids_for([product.id])).get(product.id, [])
-        return ProductView(product, variants, categories)
+        media = await MediaRepository(self.session).for_owner(MediaOwner.PRODUCT, product.id)
+        return ProductView(product, variants, categories, list(media))
 
     async def update_product(self, product_id: str, data: ProductUpdate) -> ProductView:
         product = await self._product_or_404(product_id)
@@ -246,6 +250,8 @@ class CatalogService:
             problems.append("price")
         if not any(v.status == VariantStatus.ACTIVE for v in view.variants):
             problems.append("active_variant")
+        if not any(m.status == MediaStatus.READY for m in view.media):
+            problems.append("media")
         if problems:
             raise ConflictError("Produto ainda não pode ser publicado.", missing=problems)
         before = product.status

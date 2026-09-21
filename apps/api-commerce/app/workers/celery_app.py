@@ -20,7 +20,7 @@ celery_app = Celery(
     "api_commerce",
     broker=settings.celery_broker_url or None,
     backend=settings.celery_result_backend or None,
-    include=["app.workers.tasks"],
+    include=["app.workers.tasks", "app.workers.media"],
 )
 
 celery_app.conf.update(
@@ -31,6 +31,8 @@ celery_app.conf.update(
         "app.workers.tasks.retry_due_deliveries": {"queue": QUEUE_OUTBOX},
         "app.workers.tasks.verify_domains": {"queue": QUEUE_PROVISIONING},
         "app.workers.tasks.recheck_active_domains": {"queue": QUEUE_PROVISIONING},
+        "app.workers.media.process_media": {"queue": QUEUE_MEDIA},
+        "app.workers.media.sweep_media": {"queue": QUEUE_MEDIA},
     },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -55,6 +57,7 @@ celery_app.conf.update(
             "task": "app.workers.tasks.recheck_active_domains",
             "schedule": 1800.0,
         },
+        "sweep-media": {"task": "app.workers.media.sweep_media", "schedule": 120.0},
         "purge-expired-records": {
             "task": "app.workers.tasks.purge_expired_records",
             "schedule": 86400.0,

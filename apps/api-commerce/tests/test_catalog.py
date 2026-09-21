@@ -16,6 +16,7 @@ from app.catalog.pricing import check_promotion, effective_price, variant_price
 from app.core.exceptions import TenantContextMissingError, ValidationError
 from app.core.scopes import TenantRole
 from app.core.slugs import next_free_slug, slugify
+from app.media.models import MediaAsset, MediaStatus
 from app.tenancy.context import CROSS_TENANT_OPTION, bind_session_tenant
 from app.tenancy.models import Tenant
 from app.tenancy.repository import TenantRepository
@@ -153,6 +154,26 @@ async def create_product(
     return dict(response.json())
 
 
+async def add_ready_image(
+    session_factory: async_sessionmaker[AsyncSession], tenant: Tenant, product_id: str
+) -> None:
+    """A processed image, written directly (the upload pipeline is covered in test_media)."""
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        session.add(
+            MediaAsset(
+                owner_type="product",
+                owner_id=product_id,
+                status=MediaStatus.READY,
+                declared_mime="image/jpeg",
+                declared_bytes=1,
+                upload_key=f"incoming/{tenant.id}/x",
+                renditions={"orig": {"key": "tenants/x/orig.webp", "width": 10, "height": 10}},
+            )
+        )
+        await session.commit()
+
+
 # ----------------------------------------------------------------------------- products
 async def test_create_generates_sku_slug_and_default_variant(
     client: AsyncClient, shop: tuple[Tenant, dict[str, str]]
@@ -272,7 +293,9 @@ async def test_patch_is_partial_and_guards_required_fields(
 
 
 async def test_publish_needs_price_and_keeps_first_publication_time(
-    client: AsyncClient, shop: tuple[Tenant, dict[str, str]]
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: tuple[Tenant, dict[str, str]],
 ) -> None:
     tenant, headers = shop
     product = await create_product(client, tenant, headers, base_price_cents=0)
@@ -280,7 +303,8 @@ async def test_publish_needs_price_and_keeps_first_publication_time(
 
     blocked = await client.post(f"{url}/publish", headers=headers)
     assert blocked.status_code == 409
-    assert blocked.json()["error"]["details"] == {"missing": ["price"]}
+    assert blocked.json()["error"]["details"] == {"missing": ["price", "media"]}
+    await add_ready_image(session_factory, tenant, product["id"])
 
     await client.patch(url, json={"base_price_cents": 2500}, headers=headers)
     published = await client.post(f"{url}/publish", headers=headers)
@@ -298,10 +322,13 @@ async def test_publish_needs_price_and_keeps_first_publication_time(
 
 
 async def test_last_active_variant_of_a_published_product_stays_active(
-    client: AsyncClient, shop: tuple[Tenant, dict[str, str]]
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: tuple[Tenant, dict[str, str]],
 ) -> None:
     tenant, headers = shop
     product = await create_product(client, tenant, headers)
+    await add_ready_image(session_factory, tenant, product["id"])
     url = f"{base(tenant)}/products/{product['id']}"
     variant_url = f"{url}/variants/{product['variants'][0]['id']}"
     await client.post(f"{url}/publish", headers=headers)
@@ -415,6 +442,7 @@ async def test_product_writes_are_audited_and_emitted(
 ) -> None:
     tenant, headers = shop
     product = await create_product(client, tenant, headers)
+    await add_ready_image(session_factory, tenant, product["id"])
     url = f"{base(tenant)}/products/{product['id']}"
     await client.patch(url, json={"name": "Brownie 2"}, headers=headers)
     await client.patch(url, json={"name": "Brownie 2"}, headers=headers)  # no-op: no event

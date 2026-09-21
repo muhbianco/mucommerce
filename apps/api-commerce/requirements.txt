@@ -16,3 +16,7 @@ dnspython==2.8.0
 uuid6==2025.0.1
 prometheus-fastapi-instrumentator==8.1.0
 sentry-sdk[fastapi,celery]==2.69.2
+# Object storage (MinIO): official S3 SDK, far smaller than boto3, has presigned POST policies.
+minio==7.2.20
+# Image validation and WebP variants for product media.
+Pillow==12.3.0

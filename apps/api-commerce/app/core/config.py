@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     dns_resolvers: str = "1.1.1.1,8.8.8.8"
     domain_verify_max_age_hours: int = 48
 
+    # --- object storage (MinIO, S3 API) -----------------------------------------------
+    # Empty endpoint = storage not configured: media routes answer 503, readiness omits it.
+    storage_endpoint: str = ""  # internal S3 API, e.g. http://minio:9000
+    # Public S3 API origin: browsers POST uploads here and read public media from it.
+    storage_public_url: str = ""  # e.g. https://storage.s3.muhbianco.com.br
+    storage_region: str = "us-east-1"
+    storage_access_key: SecretStr = SecretStr("")
+    storage_secret_key: SecretStr = SecretStr("")
+    storage_public_bucket: str = "commerce-public"
+    storage_private_bucket: str = "commerce-private"
+    storage_timeout_seconds: float = 20.0
+
     # --- cors -----------------------------------------------------------------------
     cors_origins: str = ""
 
@@ -175,6 +187,15 @@ class Settings(BaseSettings):
             host.strip().lower()
             for host in (self.platform_base_domain, self.panel_host, self.api_public_host)
             if host.strip()
+        )
+
+    @property
+    def storage_configured(self) -> bool:
+        return bool(
+            self.storage_endpoint
+            and self.storage_public_url
+            and self.storage_access_key.get_secret_value()
+            and self.storage_secret_key.get_secret_value()
         )
 
     @property

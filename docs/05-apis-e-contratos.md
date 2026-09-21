@@ -123,6 +123,15 @@ Prefixo `/admin/tenants/{t}`; auth `admin_jwt`; escopos entre parênteses.
 > - Variantes: só `PATCH /products/{id}/variants/{vid}` (`name`, `price_cents`, `cost_cents`, `status`) nesta fatia; criação de variantes por opções = E05-09.
 > - Categorias: `GET` devolve lista plana (raízes primeiro, por posição); reorder = `PATCH` de `position`.
 > - Eventos de outbox só do agregado produto: `product.created|updated|published|unpublished|archived`.
+
+> **Mídia (F1/S4)** — difere da tabela acima:
+> - `POST /media/uploads` devolve um **POST assinado** (policy com `key`, `Content-Type` e `content-length-range` até o tamanho declarado, ≤10 MiB), não um PUT: o PUT assinado não limita tamanho. Destino: `commerce-private/incoming/{tenant}/{media}` (lifecycle apaga em 2 dias). O browser envia direto ao storage; a API nunca recebe os bytes.
+> - Aceita JPEG, PNG e WebP pelo **formato real** (cabeçalho), até 24 MP. SVG e GIF são recusados nesta fatia.
+> - `POST /media/{id}/complete` → `202`; grava `media.uploaded` no outbox, cujo consumidor enfileira `process_media` na fila `commerce.media` (worker próprio, 1 processo). Variantes WebP `orig` (≤2400), `w1200`, `w600`, `w320`, sem EXIF (orientação aplicada), em `commerce-public/tenants/{tenant}/media/{id}/{sha256[:16]}/*.webp` com `Cache-Control: public, max-age=31536000, immutable`.
+> - Estados `pending → processing → ready|failed`; `GET /media/{id}` serve de polling. `sweep_media` (beat, 2 min) reenfileira processamento perdido (até 5 tentativas) e apaga uploads nunca confirmados após 24 h.
+> - `DELETE /media/{id}` apaga a linha e emite `media.deleted`; o consumidor `media_janitor` remove os objetos (idempotente). Produto publicado não pode ficar sem imagem pronta (`409`).
+> - Até 12 imagens por dono. Donos: `product` (exige flag `catalog`), `tenant_brand`, `landing` (sem `owner_id`).
+> - Eventos: `media.uploaded|ready|failed|deleted`. `publish` de produto passa a exigir ≥1 imagem `ready`.
 | GET | `/inventory/balances` | `inventory:read` | `?item_type&low_stock=true` | — | |
 | GET | `/inventory/movements` | `inventory:read` | `?item_id&from&to&type` | — | |
 | POST | `/inventory/adjustments` | `inventory:adjust` | `{items:[{item_type,item_id,qty_delta|qty_counted,reason,note}]}` → movimentos `adjustment|count|loss` | **obrigatório** | `inventory.adjusted`, `inventory.low_stock` |

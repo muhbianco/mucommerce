@@ -8,6 +8,7 @@ from app import __version__
 from app.core.config import settings
 from app.core.database import check_database_health
 from app.core.redis import get_redis
+from app.core.storage import get_storage
 from app.schemas.common import HealthResponse, ReadinessResponse
 
 router = APIRouter(tags=["Infraestrutura"])
@@ -21,7 +22,10 @@ async def healthz() -> HealthResponse:
 
 @router.get("/readyz", response_model=ReadinessResponse, summary="Readiness")
 async def readyz(response: Response) -> ReadinessResponse:
-    """Dependencies reachable: DB `SELECT 1` and Redis `PING` (when configured), 2 s budget."""
+    """Dependencies reachable: DB `SELECT 1` and Redis `PING` (when configured), 2 s budget.
+
+    Storage (HEAD on the public bucket) is reported but does not gate readiness.
+    """
     try:
         database_ok = await asyncio.wait_for(check_database_health(), timeout=2.0)
     except Exception:
@@ -35,6 +39,15 @@ async def readyz(response: Response) -> ReadinessResponse:
         except Exception:
             redis_ok = False
 
+    storage_ok: bool | None = None
+    if settings.storage_configured:
+        try:
+            storage_ok = await asyncio.wait_for(
+                get_storage().bucket_exists(settings.storage_public_bucket), timeout=2.0
+            )
+        except Exception:
+            storage_ok = False
+
     ready = database_ok and redis_ok is not False
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -44,4 +57,5 @@ async def readyz(response: Response) -> ReadinessResponse:
         environment=settings.environment,
         database=database_ok,
         redis=redis_ok,
+        storage=storage_ok,
     )
