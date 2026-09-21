@@ -60,11 +60,11 @@ Saída (n8n, api-agents): `webhook_deliveries` com HMAC `X-MB-Signature: t=<ts>,
 
 | Item | Estratégia | RPO / RTO alvo |
 |------|------------|----------------|
-| MariaDB `mucommerce` | `mariadb-dump --single-transaction --routines` diário 03:00 (UTC-3) → MinIO `backups/` (lifecycle 30 d) + cópia offsite semanal (Hetzner Storage Box/B2 via `rclone`); binlog habilitado com retenção 7 d para PITR | RPO 24 h (dump) / 15 min (binlog); RTO 2 h |
-| MinIO `commerce-*` | `mc mirror --watch` para offsite semanal + versionamento no bucket | RPO 7 d (mídia é reprocessável a partir do original) |
+| MariaDB `mucommerce` | **Sem agendamento** por decisão do dono (21/09/2026): a recuperação é o snapshot da VM hel1. `infra/backup/` (dump `--single-transaction`, `restore_test.sh`) fica para uso manual e `install.sh --cron` religa o diário. Rever antes do 1º tenant pagante | RPO = intervalo entre snapshots |
+| MinIO `commerce-*` | Versionamento no bucket; versões antigas e delete markers expiram em 7 dias (`infra/minio/setup.sh`); snapshot da VM | Restauração de objeto sobrescrito ou apagado em até 7 d |
 | Chatwoot Postgres | `pg_dump` diário (já deveria existir — verificar) | RPO 24 h |
 | Redis | efêmero (fila/cache); outbox garante reentrega | — |
-| Restore drill | mensal em staging: restaurar dump do dia anterior, rodar `alembic current`, smoke de leitura; registrar tempo | — |
+| Restore drill | sob demanda (sem staging, ADR 0007): `infra/backup/restore_test.sh` restaura num schema descartável `mucommerce_restore_check`, compara contagens e apaga; hoje a recuperação padrão é o snapshot da VM feito pelo dono | — |
 
 Backup pré-deploy quando a migration for irreversível (`infra/scripts/pre_migrate_backup.sh`).
 
@@ -96,7 +96,7 @@ DLQ = `outbox_events.status=failed` e `webhook_deliveries.status=failed`, visív
 ## 10. Deploy, ambientes, migrations, rollback
 
 - **Repos/CI** (desde 21/09/2026: Woodpecker na hel1, `ci.muhbianco.com.br`, stack em `hel1-ops`): `.woodpecker/ci.yaml` roda `api-lint-test` (ruff, mypy, pytest SQLite), `api-mariadb` (migrations + tenancy + concorrência em MariaDB 10.11 de serviço), `web` (eslint, tsc, vitest, `next build`) e `gitleaks`; `.woodpecker/deploy.yaml` (push no `main`) builda `muhrilobianco/commerce_api|commerce_web:<sha12>` no dockerd do host, roda a migração one-shot e o StackUpdate com `COMMERCE_TAG` (`infra/scripts/deploy.sh`), espera os 5 serviços na tag e faz smoke em `/healthz`. Sem staging (ADR 0007): o gate é o CI + migração expand-first.
-- **Ambientes**: `dev` (docker compose: MariaDB, Redis, MinIO, mailpit, `FakeProvider`, Chatwoot opcional), `staging` no hel1 (stack `commerce-staging`, DB `mucommerce_staging`, hosts `staging.loja.muhbianco.com.br`, `staging.painel…`, MP sandbox), `prod` (stack `commerce`).
+- **Ambientes**: `dev` (docker compose: MariaDB, Redis, MinIO, mailpit, `FakeProvider`, Chatwoot opcional) e `prod` (stack `commerce`). **Sem staging** (ADR 0007): a loja modelo `loja.muhbianco.com.br` (tenant `muhbianco`) recebe cada módulo primeiro, por flag. Depois de cada deploy, `infra/scripts/smoke.sh <tag>` (checagens públicas, `readyz` interno e `media smoke` ponta a ponta).
 - **Pipeline prod** (Woodpecker; o fluxo manual da skill de deploy fica como break-glass): push no `main` → CI → build/push → **`commerce_migrate` one-shot** (`docker run --rm --network chatbot-net -e MIGRATE_DB_… muhrilobianco/commerce_api:<tag> alembic upgrade head`) → Portainer `StackUpdate` caminho A/B → verificação (`docker service ls`, `readyz`, smoke de checkout com `FakeProvider` desabilitado em prod → usar pedido de R$ 1,00 em MP sandbox do tenant `muhbianco`).
 - **Zero downtime**: `update_config: order: start-first`, `healthcheck`, migrations expand/contract, uvicorn graceful shutdown, Celery `warm shutdown`.
 - **Rollback**: `StackUpdate` com a imagem anterior (tags imutáveis, não só `latest`); `alembic downgrade -1` só para migrations reversíveis e sem dados novos; caso contrário forward-fix + backup pré-deploy. Runbook em `docs/runbooks/rollback.md`.
@@ -110,8 +110,8 @@ DLQ = `outbox_events.status=failed` e `webhook_deliveries.status=failed`, visív
 | Integração DB | migrations `upgrade head` + `downgrade -1` em MariaDB real; FKs compostas; locks de reserva sob concorrência (asyncio gather de 20 checkouts para 5 unidades → exatamente 5 aprovados) | pytest + MariaDB service |
 | Tenancy | fixture 2 tenants × dados completos; para cada rota autenticada (introspecção do router) tentar acessar recurso do outro tenant → 404/[]; Host desconhecido → 404; `X-Tenant-Host` sem token → 401 | pytest parametrizado |
 | Providers | contrato `PaymentProvider` com `FakeProvider`; MP/InfinitePay com `respx` gravando respostas reais de sandbox/doc; webhook inválido/duplicado/tardio; `payment_check` falso | pytest + respx |
-| Chatwoot | client contra `respx` + teste de contrato semanal contra staging real (Platform API cria account descartável) | pytest, job agendado |
+| Chatwoot | client contra `respx` + teste de contrato contra o Chatwoot de produção com account descartável criada e apagada pela Platform API | pytest, job agendado |
 | Outbox | evento gravado na mesma transação; relay idempotente; consumidor com falha → retry → DLQ | pytest |
-| E2E | Playwright: login Google mockado (OIDC fake em dev), acesso pendente → aprovado, carrinho, checkout Pix Fake, timeline; Dashboard App em Chatwoot de staging | Playwright |
-| Segurança | ZAP baseline em staging; dependabot; `pip-audit`/`npm audit` no CI; teste de headers/CSP | CI |
-| Carga | k6: 50 checkouts/min por 10 min em staging; webhook burst 100/s | k6 |
+| E2E | Playwright contra compose efêmero no CI: login fake (SSO/OIDC), acesso pendente → aprovado, carrinho, checkout Pix Fake, timeline; Dashboard App com Chatwoot do compose | Playwright |
+| Segurança | ZAP baseline contra o compose efêmero do CI; dependabot; `pip-audit`/`npm audit` no CI; teste de headers/CSP | CI |
+| Carga | k6: 50 checkouts/min por 10 min contra o compose efêmero (ou tenant `mb-smoke` em janela combinada); webhook burst 100/s | k6 |

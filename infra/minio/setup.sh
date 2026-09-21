@@ -47,6 +47,15 @@ if ! mc ilm rule ls "$ALIAS/$PRIVATE_BUCKET" 2>/dev/null | grep -q "incoming/"; 
   mc ilm rule add --prefix "incoming/" --expire-days 2 "$ALIAS/$PRIVATE_BUCKET"
 fi
 
+# Versioning keeps every overwritten/deleted object forever unless told otherwise: old versions
+# stay restorable for 7 days, then go, and delete markers left with no versions are cleaned up.
+# Flags from mc cmd/ilm-rule-add.go at the pinned release; skipped when the rule already exists.
+for bucket in "$PUBLIC_BUCKET" "$PRIVATE_BUCKET"; do
+  if ! mc --json ilm rule ls "$ALIAS/$bucket" 2>/dev/null | grep -q '"NoncurrentDays"'; then
+    mc ilm rule add --noncurrent-expire-days 7 --expire-delete-marker "$ALIAS/$bucket"
+  fi
+done
+
 # Service account restricted to the two buckets. Keys are generated here so they never
 # appear in mc's output (which echoes them) or in any log.
 if [ -s "$SA_ENV_FILE" ]; then

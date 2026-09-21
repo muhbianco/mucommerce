@@ -25,7 +25,9 @@ Traefik pede o certificado HTTP-01 por host no primeiro acesso. Aliases (`www`) 
 1. Colocar `INTERNAL_TOKEN_TRAEFIK` no Env da stack `traefik` do Portainer (mesmo valor que a stack `commerce`).
 2. Adicionar as quatro linhas acima no `command` via Portainer (Editor YAML) e Update.
 3. Verificar: `docker service logs traefik_traefik --since 2m | grep -i provider` sem erro; o dashboard
-   lista os routers `<slug8>-<n>-web/-api` quando houver domínio ativo.
+   lista os routers `<host>-<sha8>-web` (e `-api`, `-chat`, `-canonical`) quando houver domínio
+   ativo. O prefixo vem só do hostname (`app/tenancy/edge.py::_host_key`), então incluir ou tirar
+   outro domínio nunca renomeia routers existentes.
 4. Rollback: remover as linhas e Update. Labels e file provider continuam intactos.
 
 ## Comportamento em falha

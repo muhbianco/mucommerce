@@ -11,5 +11,6 @@
 | [0007](0007-sem-staging-loja-modelo.md) | Sem staging: `loja.muhbianco.com.br` é a loja modelo em produção, com flags, expand/contract e backup testado |
 | [0008](0008-read-committed.md) | Sessões da aplicação em `READ COMMITTED` (sem gap locks: evita deadlock no outbox) |
 | [0009](0009-painel-com-conta-muhbianco.md) | Painel entra com a conta MuhBianco (código de uso único + PKCE); lojas criadas no admin do site |
+| [0010](0010-rede-de-agentes.md) | Rede de agentes: modos "agente" e "expor", assinatura multi-instância, credencial por vínculo, WuzAPI isolado só no número do cliente |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

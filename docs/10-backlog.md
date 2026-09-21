@@ -151,18 +151,21 @@ Prioridade: **P0** (bloqueia a fase), **P1** (necessário para aceite da fase), 
 | E10-07 | Relatórios básicos | Custo por produto, variação, desperdício, margem por pedido | P1 | E10-06 | Números batem com ledger (teste) | — | 5 |
 | E10-08 | Painel de produção | Telas de insumos, entradas, receitas, OPs, alertas de mínimo | P0 | E10-05 | e2e | — | 8 |
 
-## E11 — Agentes de venda e WuzAPI (Fase 5)
+## E11 — Rede de agentes: "agente", "expor" e WuzAPI isolado (etapa H, [ADR 0010](adr/0010-rede-de-agentes.md))
 
 | ID | Título | Descrição | Prio | Deps | Aceite | Riscos | Pts |
 |----|--------|-----------|------|------|--------|--------|-----|
-| E11-01 | Endpoints internos do gate de venda | `tenants/by-channel`, `customers/resolve`, `sales/quotes|orders`, tokens por consumidor | P0 | E06-04 | Contract tests; `Idempotency-Key=message_id` | — | 5 |
+| E11-01 | Endpoints de venda do agente | `/internal/agent/v1`: `customers/resolve` (contexto assinado 30 min), `catalog`, `sales/quotes`, `sales/orders` pelo `OrderService.place` (`origin=agent_llm|agent_typebot`), `Idempotency-Key=message_id`, 10 pedidos/h por cliente | P0 | E06-04, E11-10 | Contract tests; pausado/esgotado/whitelist recusados; mensagem duplicada → mesmo pedido | — | 5 |
 | E11-02 | Teste arquitetural "um só caminho de criação de pedido" | Teste que falha se qualquer módulo além de `OrderService.place` inserir em `orders` (grep AST + grant) | P0 | E06-04 | CI | — | 2 |
-| E11-03 | `api-agents`: tools de venda | Catálogo, cotação, pedido, status; persona por tenant; coleta guiada; consentimento com evidência | P0 | E11-01, E09-06 | Pedido via WhatsApp em staging | qualidade do LLM | 13 |
-| E11-04 | `AgentsNotifier` | Eventos de pagamento/status → mensagem no canal via `api-agents` (janela 24 h/templates) | P1 | E11-03 | Cliente recebe confirmação | templates Meta | 5 |
-| E11-05 | Stack WuzAPI | `infra/wuzapi/` (imagem, Postgres `wuzapi` existente, host, HMAC), runbook | P1 | — | Instância sobe, QR pareia | não oficial; bloqueios | 5 |
-| E11-06 | `whatsapp_senders.provider=wuzapi` + `WuzApiClient` | Reimplementação enxuta (send text/media, webhook, HMAC, JID, 9º dígito reaproveitando `core/phone.py`) | P1 | E11-05 | Inbound/outbound em número de teste | — | 8 |
-| E11-07 | Wizard "expor agente" (shared × owned) | Fluxo no painel/site: escolher modo, QR/pair, mute até concluir, escopo DM/grupos; flag `whatsapp_owned` | P1 | E11-06 | Cliente pareia número próprio e o agente responde | — | 8 |
-| E11-08 | Typebot: fluxo de loja opcional | Blocos chamando o gate por HTTP com token | P2 | E11-01 | Pedido via Typebot | — | 3 |
+| E11-03 | `api-agents`: tools de venda (expor) | `store_gateway` único; tools busca/detalhe/cotação/pedido com tenant/cliente injetados; ≤4 iterações por turno, tetos de tokens por turno e por contato; log de modelo/tokens/latência | P0 | E11-01, E11-09 | Conversa simulada cria pedido pelo gate; teste garante que o tool set expor não tem Google/agenda/HTTP livre | qualidade do LLM | 13 |
+| E11-04 | `AgentsNotifier` | Eventos de pagamento/status → mensagem no canal via `api-agents` (janela 24 h/templates); alerta de "novo pedido" ao dono | P1 | E11-03, E09 | Cliente e dono recebem | templates Meta | 5 |
+| E11-05 | Stack WuzAPI isolada | Stack `wuzapi_owned` em `hel1-ops` (imagem por digest, Postgres próprio, rede privada com api-agents, sem rota pública, segredos no host) | P1 | go/no-go do dono | Instância sobe; QR servido pelo api-agents | não oficial; bloqueios no número do cliente | 5 |
+| E11-06 | Números do cliente (`owned_whatsapp_numbers`) + `WuzApiClient` | Tabela própria; webhook HMAC; dedupe por `provider_message_id`; só responde; denylist de números da empresa no declarado e no JID conectado → `blocked`; kill switch; job de órfãos | P1 | E11-05 | Número de teste pareia; número da empresa é bloqueado e deslogado | — | 8 |
+| E11-07 | Wizard de instâncias (agente × expor) | No site do cliente: "+ Novo assistente" → modo (expor só com grant) → label → loja → vínculo → fluxo LLM/Typebot → número → termos → QR | P1 | E11-06, E11-08 | Cliente pareia número próprio e o agente responde | — | 8 |
+| E11-08 | Typebot: fluxo de loja | `start_chat` com `mb_store_token` (HMAC 30 min); blocos HTTP em `store-proxy/{op}` pelo mesmo gateway | P2 | E11-01 | Pedido via Typebot | — | 3 |
+| E11-09 | Assinatura multi-instância | `user_services.instance_slot/mode/label`, UQ nova; buscas por instância (`_get_subscription` e chamadores, `_active_kb_subscription`, `list_catalog`, `resolve_active_route` só `mode=agent`); sender distinto por instância; contract da UQ antiga depois | P0 | — | 2 instâncias com senders/KB/tools separados; enable concorrente no mesmo slot → 1 linha | rota errada se contract vier antes | 8 |
+| E11-10 | Vínculo loja ↔ agente + tools do dono | `agent_credentials`, `agent_link_codes`, redeem interno; leitura (produtos, estoque, relatórios) e controle (pausar/retomar, ajuste de estoque, preço em 2 passos) com audit `agent:<id>` e rate limit | P0 | E11-09, E05 `paused` | "pausa o X"/"+10 no estoque" auditados e idempotentes; expor → 403 em controle; revogada → 401 | — | 8 |
+| E11-11 | Grant "expor" por usuário | `user_feature_grants`; switch no admin do site; revogar pausa instâncias e desloga números; agentes vinculados listados em "Lojas" | P0 | E11-09 | Sem grant → 403 e modo invisível | — | 3 |
 
 ## E12 — Fase 6 (seleção)
 

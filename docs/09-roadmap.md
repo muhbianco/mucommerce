@@ -2,6 +2,24 @@
 
 Sem prazos; estimativas relativas estão no [backlog](10-backlog.md). Não há staging ([ADR 0007](adr/0007-sem-staging-loja-modelo.md)): cada fase termina com deploy em produção atrás de feature flag, aceite verificado na **loja modelo** (`loja.muhbianco.com.br`, tenant `muhbianco`) e runbook de rollback.
 
+## Sequência de execução (revisada em 21/09/2026)
+
+O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, um cenário E2E, um item no smoke pós-deploy (`infra/scripts/smoke.sh`) e o deploy atrás de flag, ligado só na loja modelo. A configuração de plataforma (criar loja, dono, status, módulos, acesso, domínios, provisionamento, agentes) fica no **admin do site** (`admin.html#lojas`); o painel da loja só opera o dia a dia (ADR 0009).
+
+| Etapa | Conteúdo | Fase original |
+|---|---|---|
+| 0 | Fechamento: aceite real da loja modelo (`media smoke`, seed, `access_mode`), flags sem código desligadas, lifecycle MinIO, docs, teardown do WuzAPI na infra da empresa, domínios no admin do site, E2E base | F0/F1 |
+| A | Clientes da loja: Google OIDC próprio, sessões, whitelist, aprovação no painel, OTP via `api-agents`, LGPD, loja suspensa → 503, tema por tenant | F1 fatia 2 |
+| B | Chatwoot: provisionamento pelo admin do site, `liberar_loja` nos dois sentidos, reconciliação, logos | F1 fatia 3 |
+| C | Domínios próprios: `providers.http`, verificação e ativação, redirects, subdomínios de plataforma | F1 fatia 4 |
+| D | Catálogo completo: eventos, variantes/opções/modificadores, tags, estado `paused` | F1 fatia 5 |
+| E | Carrinho, `OrderService.place`, reservas, MP + InfinitePay, e-mails, pedidos, cupons | F2 |
+| F | Chatwoot operacional + Dashboard App | F3 |
+| G | Produção, insumos, custos | F4 |
+| H | Rede de inteligência: assinatura multi-instância, modos "agente" e "expor", WuzAPI isolado no número do cliente ([ADR 0010](adr/0010-rede-de-agentes.md)) | F5 (substituída) |
+| I | MP Connect, frete, fiscal, analytics, DNS-01/CDN, LGPD self-service, "Loja online" como serviço | F6 |
+| Z | Teste do dono → correções → onboarding da Lunares e dos tenants externos | — |
+
 ## Fase 0 — Fundação
 
 **Escopo**: monorepo `mucommerce` (`apps/api-commerce`, `apps/web`, `infra`, `docs`, `.github`), esqueleto FastAPI com convenções da `api-agents` + tenancy, Alembic `0001–0002`, Celery + outbox + `processed_events`, `idempotency_keys`, `audit_log`, CI (lint, testes, build, push), stack Swarm `commerce`, migrate one-shot, bootstrap MariaDB (usuários, 3306 fechada na interface pública), MinIO buckets/policy/service account, Traefik `providers.http`, Next.js esqueleto com middleware de Host, observabilidade base (logs JSON, `/healthz`, `/readyz`, Sentry, métricas), fork Chatwoot migrado (`mb/main`), Redis DBs reservados.
@@ -18,7 +36,7 @@ Sem prazos; estimativas relativas estão no [backlog](10-backlog.md). Não há s
 
 **Escopo**: `/ops` mínimo (criar tenant, features, domínios, associar Chatwoot account existente), provisionamento assíncrono (passos Chatwoot: account/usuário/inbox/atributos/webhook/labels), `tenant_domains` + verificação DNS + emissão TLS, settings de branding/landing/SEO (editor estruturado no painel), catálogo (produto, variante default, categorias, mídia com processamento, estoque simples com ledger e ajustes), eventos (CRUD/publicação/vínculo com produtos), vitrine e página de produto SSR, login Google (callback central + handoff), sessão, `liberar_loja` bidirecional, fluxo "solicitar acesso", OTP de telefone via `api-agents`, `access_mode` por tenant, painel do tenant (produtos, estoque, clientes/acesso, settings), auditoria dessas ações, e-mail de "acesso liberado" via n8n.
 
-**F1 fatia 1 (21/09/2026)**: painel + catálogo + mídia + estoque + vitrine SSR implementados e com CI verde (S1–S9: commits `0c32936`…`d3295cc`). Migrations `0004_catalog`, `0005_media_assets`, `0006_inventory`; ADR 0008 (READ COMMITTED). Falta o go-live na loja modelo (deploy + admin + flags): [runbook](runbooks/f1-go-live-loja-modelo.md).
+**F1 fatia 1 (21/09/2026)**: painel + catálogo + mídia + estoque + vitrine SSR em produção, com login do painel pela conta MuhBianco e lojas geridas no admin do site (ADR 0009, migration `0007`). O aceite da mídia em produção é o `media smoke` da etapa 0 ([runbook](runbooks/f1-go-live-loja-modelo.md)).
 
 **Ordem de entrega** (fatias, cada uma atrás de flag e aceita na loja modelo antes de ligar para outro tenant): 1) painel + catálogo + mídia + estoque + vitrine SSR; 2) identidade Google + whitelist pelo painel; 3) Chatwoot (provisionamento, `liberar_loja`); 4) domínios custom + `edge.` + primeiro tenant externo (`lunares`); 5) P1 restantes.
 
@@ -58,15 +76,30 @@ Sem prazos; estimativas relativas estão no [backlog](10-backlog.md). Não há s
 
 **Riscos/rollback**: flag `manufacturing` por tenant; tabelas aditivas.
 
-## Fase 5 — Agentes de venda, WhatsApp próprio (WuzAPI) e canais conversacionais
+## Fase 5 (etapa H) — Rede de inteligência: agentes "agente" e "expor", WuzAPI isolado
 
-**Escopo**: `api-commerce`: `/internal/tenants/by-channel`, `/internal/customers/resolve`, `/internal/sales/quotes|orders`, `AgentsNotifier`; `api-agents`: `channel_tenant_bindings`, tools de venda (consultar catálogo, cotar, criar pedido, status), persona/prompt por tenant, coleta guiada (itens → entrega → pagamento → consentimento com texto versionado e `message_id` como evidência), handoff humano preservando contexto do pedido, notificações de pagamento/status no canal; `whatsapp_senders.provider ∈ {ycloud, wuzapi}` com `WuzApiClient` novo (HMAC, QR/pair, webhook `/webhooks/wuzapi`), stack WuzAPI em `infra/wuzapi/` (imagem, Postgres existente `wuzapi`, host `wuzapi.muhbianco.com.br`), wizard "expor agente" (modo `shared` no número MuhBianco vs `owned` no número do cliente) com feature flag `whatsapp_owned`; Typebot: fluxo de loja opcional chamando o gate.
+Substitui o desenho anterior (`shared`/`owned`); decisão em [ADR 0010](adr/0010-rede-de-agentes.md).
 
-**Aceite**: pedido por WhatsApp (agente) cria `orders.origin=whatsapp_ycloud` pelo mesmo `OrderService.place` (teste garante que não existe outro caminho de criação: grep/arquitetura + teste de integração); reenvio da mesma mensagem não duplica (`Idempotency-Key=message_id`); pagamento aprovado → cliente recebe confirmação no WhatsApp e operador vê no Chatwoot; operador assume a conversa e o agente pausa (handoff existente); número `owned` via WuzAPI pareia por QR, recebe mensagem, responde, e pedidos seguem o gate; desligar a flag `whatsapp_owned` retorna o tenant ao número compartilhado.
+**Escopo**:
+- **`api-agents`**:
+  - o mesmo serviço pode ser contratado mais de uma vez (`user_services.instance_slot`, `mode ∈ {agent, expor}`); cada instância "agente" usa um sender da empresa diferente;
+  - grant "expor" por usuário no admin do site, escondido por padrão;
+  - vínculo instância ↔ loja por código de uso único, com credencial por vínculo;
+  - `store_gateway` como único cliente do commerce.
+- **`api-commerce`**: `/internal/agent/v1` com leitura (produtos, estoque, relatórios), controle (pausar/retomar, ajuste de estoque, preço em 2 passos) e, depois da etapa E, venda (`customers/resolve`, `sales/quotes`, `sales/orders` pelo `OrderService.place`, `origin=agent_llm|agent_typebot`).
+- **WuzAPI**: stack isolada, sem rota pública, só para o número **do cliente** (tabela própria `owned_whatsapp_numbers`). Denylist dos números da empresa, conferida no número declarado e no JID conectado, e kill switch.
+- **Venda no "expor"**: pode ser por LLM (tools com tenant/cliente injetados pelo servidor, orçamento de tokens) ou por Typebot (`store-proxy` com token HMAC). Os dois passam pelo mesmo gate.
 
-**Dependências**: fases 2–3; YCloud templates aprovados para mensagens fora da janela de 24 h; decisão de negócio sobre termos do WuzAPI.
+**Aceite**:
+- Duas instâncias do mesmo agente para o mesmo usuário, com senders, KB e tools separados.
+- "pausa o produto X" e "+10 no estoque" auditados como `agent:<id>`, sem aplicar duas vezes numa mensagem repetida.
+- Credencial "expor" chamando controle → 403; revogada → 401.
+- Número da empresa no WuzAPI → `blocked` + logout.
+- Venda com produto pausado ou esgotado → recusa; mensagem duplicada → o mesmo pedido.
 
-**Riscos/rollback**: WuzAPI isolado em stack própria e flag; agente com `sales_agent=false` volta ao modo atendimento.
+**Dependências**: H.1–H.3 dependem só da F1 e da etapa D. A venda (H.5) depende da etapa E. O handoff e as notificações dependem da etapa F. O go/no-go do WuzAPI é do dono, depois da apelação na Meta.
+
+**Riscos/rollback**: flags `agents`/`agents_sales` por tenant, revogação de credencial, `WUZAPI_ENABLED=false` ou scale 0 da stack.
 
 ## Fase 6 — InfinitePay avançado, logística, fiscal, analytics/LLM e melhorias
 
@@ -84,7 +117,9 @@ flowchart LR
   F1 --> F2[F2 Carrinho, checkout, pagamentos, pedidos, e-mails]
   F2 --> F3[F3 Chatwoot operacional + Dashboard App]
   F2 --> F4[F4 Producao, insumos, custos]
-  F3 --> F5[F5 Agentes de venda, WuzAPI, canais]
+  F1 --> F5[F5 Rede de agentes: agente/expor, WuzAPI isolado]
+  F2 --> F5
+  F3 --> F5
   F2 --> F6[F6 InfinitePay avancado, logistica, fiscal, analytics]
   F4 --> F6
 ```
