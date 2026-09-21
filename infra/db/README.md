@@ -2,9 +2,8 @@
 
 ## Antes do primeiro deploy (hel1)
 
-1. **Fechar o bind.** Hoje o MariaDB do host escuta em `0.0.0.0:3306`. Trocar para loopback + bridge Docker
-   em `/etc/mysql/mariadb.conf.d/50-server.cnf` e bloquear 3306 na interface pública. Confirmar que
-   `api-agents` e `bolsocoberto` continuam conectando (eles usam o IP da bridge).
+1. **Rede.** A 3306 está fechada na interface pública pela tabela nft `inet mb_guard` (unit
+   `mb-guard`); containers usam `host.docker.internal`/`172.17.0.1` e admins, túnel SSH.
 2. **Criar usuários** com `bootstrap.sql` (substituir as senhas; guardar no Portainer Env como
    `DB_PASSWORD` e `MIGRATE_DB_PASSWORD`).
 3. **Migrar**: o job `commerce_migrate` roda `python -m app.cli db ensure && alembic upgrade head` com
@@ -25,4 +24,5 @@ Manter esse script versionado em `infra/db/grants.sql` quando for adotado; até 
 
 ## Backups
 
-Ver `infra/backup/`. Dump diário + binlog para PITR; restore drill mensal em staging.
+Ver `infra/backup/` e `docs/runbooks/backup-restore.md`: dump diário local + offsite, drill de restore
+num banco descartável (não há staging).

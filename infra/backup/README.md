@@ -1,25 +1,18 @@
 # Backup e restore — mucommerce
 
+Produção é o único ambiente (ADR 0007), então o backup testado é pré-requisito para dados reais.
+Procedimento completo, instalação e drill: [docs/runbooks/backup-restore.md](../../docs/runbooks/backup-restore.md).
+
 | Item | Estratégia | RPO / RTO |
 |------|------------|-----------|
-| MariaDB `mucommerce` | `mariadb_backup.sh` diário (dump lógico gzip + sha256) → MinIO `backups/` (30 dias) + offsite semanal (`OFFSITE_REMOTE` rclone). Binlog do host habilitado (`log_bin`, `expire_logs_days=7`) para PITR. | 24 h (dump) / 15 min (binlog); RTO 2 h |
-| MinIO `commerce-*` | versionamento nos buckets + `mc mirror` semanal para offsite | 7 dias |
+| MariaDB `mucommerce` | `mariadb_backup.sh` diário 06:10 UTC: dump lógico (`--single-transaction`) gzip + sha256 em `/var/backups/mucommerce` (14 dias) + cópia offsite via rclone (`OFFSITE_REMOTE`; retenção no bucket remoto) | 24 h / 2 h |
+| MinIO `commerce-*` | versionamento nos buckets (`infra/minio/setup.sh`); espelho offsite entra junto com a mídia (F1 S4) | 7 dias |
 | Redis | efêmero; o outbox garante reentrega | — |
 
-## Restore (drill mensal em staging)
+| Arquivo | O quê |
+|---|---|
+| `mariadb_backup.sh` | dump + checksum + retenção local + offsite; sai 3 se o offsite não estiver configurado |
+| `restore_test.sh` | restaura num banco descartável, confere tabelas e `alembic_version`, compara contagens e apaga |
+| `mucommerce-backup.cron` | entrada de `/etc/cron.d` |
 
-```bash
-mc cp hel1/backups/mucommerce/mucommerce-<stamp>.sql.gz /tmp/
-sha256sum -c /tmp/mucommerce-<stamp>.sql.gz.sha256
-gunzip -c /tmp/mucommerce-<stamp>.sql.gz | mariadb -h <host> -u mucommerce_migrate -p mucommerce_staging
-cd /usr/src/mucommerce/apps/api-commerce && alembic current   # deve apontar para o head do dump
-```
-
-PITR: aplicar binlogs após o dump com `mariadb-binlog --start-datetime=<stamp> ... | mariadb ...`.
-
-Registrar em `docs/runbooks/restore-drills.md`: data, tamanho, tempo total, problemas.
-
-## Antes de migrations irreversíveis
-
-`ENV_FILE=/root/.mucommerce-backup.env RETENTION_DAYS=90 ./mariadb_backup.sh` e guardar o nome do
-arquivo no ticket do deploy.
+Antes de uma migration irreversível: rodar `mariadb_backup.sh` à mão e anotar o arquivo no deploy.

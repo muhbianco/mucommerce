@@ -1,0 +1,6 @@
+# /etc/cron.d/mucommerce-backup on hel1 (install: install -m 644 infra/backup/mucommerce-backup.cron /etc/cron.d/mucommerce-backup)
+# 06:10 UTC = 03:10 America/Sao_Paulo. Set OFFSITE_REMOTE once the rclone remote exists.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+OFFSITE_REMOTE=
+10 6 * * * root /usr/src/mucommerce/infra/backup/mariadb_backup.sh >> /var/log/mucommerce-backup.log 2>&1
