@@ -78,6 +78,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # MariaDB will not drop an index a foreign key relies on (error 1553): tables go whole, and
+    # the index that now backs a FK is dropped with the FK and the FK recreated as in 0008.
     with op.batch_alter_table("customer_tenant_access") as batch:
         batch.drop_constraint("fk_customer_tenant_access_tenant", type_="foreignkey")
         batch.drop_column("status_changed_by_actor")
@@ -86,8 +88,11 @@ def downgrade() -> None:
         batch.drop_column("requested_at")
 
     with op.batch_alter_table("customer_sessions") as batch:
+        batch.drop_constraint("fk_customer_sessions_tenant_id_tenants", type_="foreignkey")
         batch.drop_index("ix_customer_sessions_tenant_id")
+        batch.create_foreign_key(
+            "fk_customer_sessions_tenant_id_tenants", "tenants", ["tenant_id"], ["id"]
+        )
         batch.drop_column("revoked_reason")
 
-    op.drop_index("ix_customer_auth_flows_tenant_id", table_name="customer_auth_flows")
     op.drop_table("customer_auth_flows")

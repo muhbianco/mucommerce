@@ -62,6 +62,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_customer_phone_challenges_tenant_id", table_name="customer_phone_challenges")
-    op.drop_index("ix_customer_phone_challenges_customer", table_name="customer_phone_challenges")
+    # The whole table: MariaDB will not drop an index a foreign key relies on (error 1553).
     op.drop_table("customer_phone_challenges")
