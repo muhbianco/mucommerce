@@ -19,12 +19,13 @@ import getpass
 import sys
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit import outbox
 from app.audit.writer import audit
 from app.core.bootstrap import ensure_database_exists, upgrade_head
 from app.core.config import settings
+from app.core.database import create_app_engine
 from app.core.exceptions import ConflictError
 from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.logging import configure_logging, get_logger
@@ -48,8 +49,10 @@ logger = get_logger("cli")
 
 
 def _session_factory(url: str) -> async_sessionmaker[AsyncSession]:
-    engine = create_async_engine(url)
-    return async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    engine = create_app_engine(url, pooled=False)
+    return async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
 
 
 MIN_PASSWORD_LENGTH = 12

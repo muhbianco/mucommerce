@@ -12,18 +12,34 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 
+# READ COMMITTED, not MariaDB's default REPEATABLE READ: locking reads then lock only the rows
+# they find, without gap locks. Under REPEATABLE READ, `SELECT ... FOR UPDATE` over a range with
+# no rows (the first outbox event of a new aggregate, whose UUIDv7 id always sorts last) takes a
+# gap lock that two concurrent writers then both need to insert into: a deadlock. The code never
+# relies on repeatable snapshots; every read-modify-write takes an explicit row lock.
+APP_ISOLATION_LEVEL = "READ COMMITTED"
 
-def _build_engine(url: str) -> AsyncEngine:
+
+def mariadb_engine_options() -> dict[str, object]:
+    return {"isolation_level": APP_ISOLATION_LEVEL, "pool_pre_ping": True}
+
+
+def create_app_engine(url: str, *, pooled: bool = True) -> AsyncEngine:
+    """Engine for application sessions (API, workers, CLI): same isolation everywhere."""
     if url.startswith("sqlite"):
         return create_async_engine(url, echo=False)
-    return create_async_engine(
-        url,
-        pool_pre_ping=True,
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
-        pool_recycle=settings.db_pool_recycle_seconds,
-        echo=False,
-    )
+    options = mariadb_engine_options()
+    if pooled:
+        options |= {
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+            "pool_recycle": settings.db_pool_recycle_seconds,
+        }
+    return create_async_engine(url, echo=False, **options)
+
+
+def _build_engine(url: str) -> AsyncEngine:
+    return create_app_engine(url)
 
 
 engine: AsyncEngine = _build_engine(settings.database_url)

@@ -58,6 +58,10 @@ celery_app.conf.update(
             "schedule": 1800.0,
         },
         "sweep-media": {"task": "app.workers.media.sweep_media", "schedule": 120.0},
+        "audit-inventory-ledger": {
+            "task": "app.workers.tasks.audit_inventory_ledger",
+            "schedule": 86400.0,
+        },
         "purge-expired-records": {
             "task": "app.workers.tasks.purge_expired_records",
             "schedule": 86400.0,

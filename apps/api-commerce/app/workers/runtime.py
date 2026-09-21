@@ -5,9 +5,10 @@ from collections.abc import Awaitable, Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
+from app.core.database import create_app_engine
 from app.tenancy.orm_filter import register_tenant_filter
 
 register_tenant_filter()
@@ -30,8 +31,11 @@ def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
 
 async def with_session[T](fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
     """Open a dedicated engine + session for a task, commit on success, dispose after."""
-    engine = create_async_engine(settings.database_url, pool_pre_ping=not settings.is_sqlite)
-    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    # One short-lived engine per task (its own event loop); same isolation as the API.
+    engine = create_app_engine(settings.database_url, pooled=False)
+    factory = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
     try:
         async with factory() as session:
             try:

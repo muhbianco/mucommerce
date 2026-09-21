@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import idempotency, outbox
 from app.core.logging import get_logger
 from app.identity.repository import AdminUserRepository
+from app.inventory.service import audit_ledger
 from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
@@ -112,3 +113,12 @@ def purge_expired_records() -> dict[str, int]:
     purged = run_async(with_session(_run))
     logger.info("Expired records purged", extra=purged)
     return purged
+
+
+@celery_app.task(name="app.workers.tasks.audit_inventory_ledger")
+def audit_inventory_ledger() -> int:
+    """Daily: every balance equals the sum of its movements. Mismatches are logged as errors."""
+    mismatches = run_async(with_session(audit_ledger))
+    if mismatches:
+        logger.error("Inventory ledger audit found mismatches", extra={"count": mismatches})
+    return mismatches

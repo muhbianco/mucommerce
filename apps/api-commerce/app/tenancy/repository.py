@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
-from typing import cast
 
-from sqlalchemy import Executable, Table, select
-from sqlalchemy.dialects.mysql import insert as mysql_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import TenantContextMissingError
 from app.core.ids import new_id
+from app.core.sql import insert_if_missing, is_mariadb
 from app.tenancy.context import CROSS_TENANT_OPTION, session_tenant_id
 from app.tenancy.models import (
     DomainPurpose,
@@ -143,23 +141,13 @@ class TenantRepository:
         tenant_id = session_tenant_id(self.session)
         if tenant_id is None:
             raise TenantContextMissingError()
-        mariadb = self.session.bind is not None and self.session.bind.dialect.name in {
-            "mysql",
-            "mariadb",
-        }
+        mariadb = is_mariadb(self.session)
         values = {"id": new_id(), "tenant_id": tenant_id, "name": name, "next_value": 1}
-        table = cast(Table, TenantSequence.__table__)
-        create: Executable
-        if mariadb:
-            # No-op update on conflict (keeps the current value): MariaDB has no DO NOTHING.
-            create = (
-                mysql_insert(table)
-                .values(**values)
-                .on_duplicate_key_update(next_value=table.c.next_value)
+        await self.session.execute(
+            insert_if_missing(
+                self.session, TenantSequence.__table__, [values], keep_column="next_value"
             )
-        else:
-            create = sqlite_insert(table).values(**values).on_conflict_do_nothing()
-        await self.session.execute(create)
+        )
 
         stmt = (
             select(TenantSequence)

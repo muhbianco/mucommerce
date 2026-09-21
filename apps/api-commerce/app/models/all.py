@@ -17,6 +17,7 @@ from app.identity.models import (
     CustomerTenantAccess,
     TenantMembership,
 )
+from app.inventory.models import InventoryBalance, InventoryMovement, StockAdjustment
 from app.media.models import MediaAsset
 from app.models.base import Base
 from app.tenancy.models import (
@@ -39,6 +40,8 @@ __all__ = [
     "CustomerSession",
     "CustomerTenantAccess",
     "IdempotencyKey",
+    "InventoryBalance",
+    "InventoryMovement",
     "MediaAsset",
     "OutboxDelivery",
     "OutboxEvent",
@@ -46,6 +49,7 @@ __all__ = [
     "Product",
     "ProductCategory",
     "ProductVariant",
+    "StockAdjustment",
     "Tenant",
     "TenantDomain",
     "TenantFeatureFlag",

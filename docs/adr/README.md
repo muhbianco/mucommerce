@@ -9,5 +9,6 @@
 | [0005](0005-payment-provider-modes.md) | `PaymentProvider` com modos `embedded` (MP) e `redirect` (InfinitePay) |
 | [0006](0006-chatwoot-api-fork-minimo.md) | Chatwoot por API + Dashboard App; fork mínimo em `muchatwoot@mb/main` |
 | [0007](0007-sem-staging-loja-modelo.md) | Sem staging: `loja.muhbianco.com.br` é a loja modelo em produção, com flags, expand/contract e backup testado |
+| [0008](0008-read-committed.md) | Sessões da aplicação em `READ COMMITTED` (sem gap locks: evita deadlock no outbox) |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

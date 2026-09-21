@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin_catalog,
+    admin_inventory,
     admin_media,
     admin_tenants,
     auth,
@@ -28,6 +29,10 @@ TAGS_METADATA: list[dict[str, object]] = [
         "description": "Produtos, variantes e categorias do tenant (flag `catalog`).",
     },
     {
+        "name": "Painel — Estoque",
+        "description": "Saldos, ajustes com ledger e alertas de estoque baixo (flag `inventory`).",
+    },
+    {
         "name": "Painel — Mídia",
         "description": "Upload direto para o storage (POST assinado) e variantes WebP.",
     },
@@ -45,6 +50,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_tenants.router,
     admin_catalog.router,
     admin_media.router,
+    admin_inventory.router,
     internal.router,
     storefront.router,
 )

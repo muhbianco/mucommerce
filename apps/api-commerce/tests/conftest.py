@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from starlette.routing import Mount
 
-from app.core.database import get_session
+from app.core.database import get_session, mariadb_engine_options
 from app.core.rate_limit import rate_limiter
 from app.core.scopes import PlatformRole, TenantRole
 from app.identity.models import AdminUser
@@ -55,7 +55,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     leak suite there, where row locks, collations and SQL rendering are the production ones)."""
     external_url = os.environ.get("TEST_DATABASE_URL")
     if external_url:
-        engine = create_async_engine(external_url)
+        engine = create_async_engine(external_url, **mariadb_engine_options())
     else:
         engine = create_async_engine(
             "sqlite+aiosqlite:///:memory:",
@@ -66,7 +66,10 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
         if external_url:
             await connection.run_sync(Base.metadata.drop_all)
         await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    # Same session options as production (app.core.database.SessionFactory).
+    factory = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
     host_cache.clear_memory()
     rate_limiter._memory.clear()
     yield factory

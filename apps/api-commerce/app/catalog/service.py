@@ -42,6 +42,7 @@ from app.catalog.schemas import (
 )
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.slugs import next_free_slug, slugify
+from app.inventory.models import InventoryBalance
 from app.media.models import MediaAsset, MediaOwner, MediaStatus
 from app.media.repository import MediaRepository
 from app.models.base import utcnow
@@ -150,8 +151,12 @@ class CatalogService:
             updated_by_actor=self.actor.id,
         )
         self.session.add(variant)
-        await self.repo.replace_product_categories(product.id, category_ids)
         await self._flush_unique("SKU já usado nesta loja.")
+        # The balance row exists from day one: stock adjustments then only lock existing rows
+        # (no concurrent INSERTs, whose gap locks are what deadlocks upserts on MariaDB).
+        self.session.add(InventoryBalance(variant_id=variant.id, on_hand_milli=0, reserved_milli=0))
+        await self.repo.replace_product_categories(product.id, category_ids)
+        await self.session.flush()
 
         await self._audit(
             "product.created", product, after=_snapshot(product, ("sku", *_PRODUCT_AUDITED))

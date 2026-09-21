@@ -132,6 +132,12 @@ Prefixo `/admin/tenants/{t}`; auth `admin_jwt`; escopos entre parênteses.
 > - `DELETE /media/{id}` apaga a linha e emite `media.deleted`; o consumidor `media_janitor` remove os objetos (idempotente). Produto publicado não pode ficar sem imagem pronta (`409`).
 > - Até 12 imagens por dono. Donos: `product` (exige flag `catalog`), `tenant_brand`, `landing` (sem `owner_id`).
 > - Eventos: `media.uploaded|ready|failed|deleted`. `publish` de produto passa a exigir ≥1 imagem `ready`.
+
+> **Estoque (F1/S5)** (flags `catalog` + `inventory`):
+> - `GET /inventory/balances?low_stock=&q=&cursor=` lista as variantes com estoque controlado (política efetiva `tracked`), por SKU; sem movimento = zero.
+> - `POST /inventory/adjustments` `{kind: receipt|loss|adjustment|count, reason?, note?, lines:[{variant_id, quantity, unit_cost_cents?}]}`. O `Idempotency-Key` é **obrigatório**, e a operação é tudo ou nada: `409 insufficient_stock` com as linhas que ficariam negativas. `reason` é obrigatório em `loss`/`adjustment`. Custo só em `receipt`. Produto vendido por unidade aceita só quantidade inteira; por peso, até 3 casas.
+> - `GET /inventory/variants/{vid}/movements` (extrato, mais recentes primeiro) e `PUT /inventory/variants/{vid}/min-level`.
+> - Eventos: `inventory.adjusted` e `inventory.low_stock` (só quando cruza o mínimo para baixo). Job diário `audit_inventory_ledger` confere `SUM(qty_milli) == on_hand_milli` e loga divergências.
 | GET | `/inventory/balances` | `inventory:read` | `?item_type&low_stock=true` | — | |
 | GET | `/inventory/movements` | `inventory:read` | `?item_id&from&to&type` | — | |
 | POST | `/inventory/adjustments` | `inventory:adjust` | `{items:[{item_type,item_id,qty_delta|qty_counted,reason,note}]}` → movimentos `adjustment|count|loss` | **obrigatório** | `inventory.adjusted`, `inventory.low_stock` |
