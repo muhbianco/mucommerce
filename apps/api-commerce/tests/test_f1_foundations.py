@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.requests import Request
 
@@ -25,10 +25,15 @@ from app.core.exceptions import (
 from app.core.scopes import PlatformRole, Scope, TenantRole, scopes_for_tenant_role
 from app.identity.models import AdminUser, TenantMembership
 from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
-from app.tenancy.models import DEFAULT_FEATURE_FLAGS, DEFAULT_SETTINGS, TenantSetting
+from app.tenancy.models import (
+    DEFAULT_FEATURE_FLAGS,
+    DEFAULT_SETTINGS,
+    TenantFeatureFlag,
+    TenantSetting,
+)
 from app.tenancy.service import Actor, TenantService
 from app.tenancy.settings_schemas import SETTINGS_SCHEMAS, validate_setting
-from tests.conftest import create_admin, create_tenant
+from tests.conftest import TEST_PASSWORD, create_admin, create_tenant
 
 CROSS = {CROSS_TENANT_OPTION: True}
 
@@ -225,10 +230,32 @@ async def test_admin_grant(session_factory: async_sessionmaker[AsyncSession]) ->
     assert await grant(**base, role="owner", create=True, password="curta") == 2
     assert await grant(email="x@test.dev", tenant_slug="nada", role="owner") == 1
     assert await grant(**base, role="dono") == 2
-    assert await grant(**base, role="owner", create=True, password="senha-bem-longa-123") == 0
+    assert await grant(**base, role="owner", create=True, password=TEST_PASSWORD) == 0
     assert await grant(**base, role="owner") == 0  # no-op
     assert await grant(**base, role="ops") == 0  # role change
 
     async with session_factory() as session:
         rows = (await session.execute(select(TenantMembership.role))).scalars().all()
     assert rows == ["ops"]
+
+
+async def test_ops_features_lists_every_known_flag(
+    client: AsyncClient,
+    operator_headers: dict[str, str],
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """A tenant created before a flag existed has no row for it; ops still sees it (off)."""
+    tenant = await create_tenant(session_factory, "antiga")
+    async with session_factory() as session:
+        await session.execute(
+            delete(TenantFeatureFlag)
+            .where(TenantFeatureFlag.key == "catalog")
+            .execution_options(**CROSS)
+        )
+        await session.commit()
+    response = await client.get(
+        f"/api/v1/ops/tenants/{tenant.id}/features", headers=operator_headers
+    )
+    assert response.status_code == 200
+    assert set(response.json()) == set(DEFAULT_FEATURE_FLAGS)
+    assert response.json()["catalog"] is False

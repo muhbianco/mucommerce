@@ -27,7 +27,14 @@ from app.schemas.tenant import (
     TenantStatusChange,
 )
 from app.tenancy.dns import DnsVerifier, instructions_for
-from app.tenancy.models import DomainKind, DomainPurpose, DomainRole, TenantDomain, TenantStatus
+from app.tenancy.models import (
+    DEFAULT_FEATURE_FLAGS,
+    DomainKind,
+    DomainPurpose,
+    DomainRole,
+    TenantDomain,
+    TenantStatus,
+)
 from app.tenancy.service import TenantService
 
 router = APIRouter(prefix="/ops/tenants", tags=["Ops — Tenants"])
@@ -125,7 +132,10 @@ async def get_features(
 ) -> dict[str, bool]:
     service = TenantService(session)
     await service.get_or_404(tenant_id)
-    return await service.repo.feature_flags(tenant_id)
+    stored = await service.repo.feature_flags(tenant_id)
+    # Effective value of every known flag: a flag added after the tenant was created has no
+    # row yet and is off (TenantContext.feature), so the panel still lists it.
+    return {key: stored.get(key, False) for key in DEFAULT_FEATURE_FLAGS}
 
 
 @router.put(
