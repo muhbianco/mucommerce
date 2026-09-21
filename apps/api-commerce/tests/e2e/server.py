@@ -53,7 +53,7 @@ E2E_ENV = {
     "STORAGE_PUBLIC_URL": "http://storage.localhost",
     # Store customers sign in against apps/web/e2e/fake-google.mjs.
     "GOOGLE_CUSTOMER_CLIENT_ID": "e2e-client",
-    "GOOGLE_CUSTOMER_CLIENT_SECRET": "e2e-client-password",
+    "GOOGLE_CUSTOMER_CLIENT_SECRET": "e2e-" + "x" * 20,  # the fake Google does not check it
     "GOOGLE_CUSTOMER_REDIRECT_URI": f"http://api.localhost:{PORT}/api/v1/auth/google/callback",
     "GOOGLE_OIDC_ISSUER": f"http://127.0.0.1:{GOOGLE_PORT}",
     "GOOGLE_OIDC_AUTHORIZE_URL": f"http://127.0.0.1:{GOOGLE_PORT}/o/oauth2/v2/auth",
