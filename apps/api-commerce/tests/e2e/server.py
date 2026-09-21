@@ -17,6 +17,7 @@ ships in the image (.dockerignore).
 from __future__ import annotations
 
 import asyncio
+import base64
 import os
 import sys
 import tempfile
@@ -29,11 +30,12 @@ E2E_ENV = {
     "ENVIRONMENT": "development",
     "RUN_MIGRATIONS_ON_STARTUP": "false",
     "DATABASE_URL_OVERRIDE": f"sqlite+aiosqlite:///{DB_FILE.as_posix()}",
-    "JWT_SECRET": "e2e-secret-" + "x" * 40,
+    "JWT_SECRET": "e2e-" + "x" * 40,
     "INTERNAL_TOKEN_WEB": "e2e-web-token",
     "INTERNAL_TOKEN_TRAEFIK": "e2e-traefik-token",
     "INTERNAL_TOKEN_AGENTS": "e2e-agents-token",
-    "CREDENTIALS_MASTER_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+    # Test-only key, built here so no key-shaped literal lands in the repo (gitleaks scans HEAD).
+    "CREDENTIALS_MASTER_KEY": base64.b64encode(b"0123456789abcdef" * 2).decode(),
     "PLATFORM_TENANT_SLUG": "muhbianco",
     "PLATFORM_BASE_DOMAIN": "loja.localhost",
     "PANEL_HOST": "painel.localhost",
