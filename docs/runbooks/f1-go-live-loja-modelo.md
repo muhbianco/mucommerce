@@ -59,7 +59,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://storage.s3.muhbianco.com.br/com
 - Ajuste de estoque repetido (reenviar o mesmo formulário) não duplica o movimento.
 - Trocar para `whitelist`: `/api/v1/storefront/catalog/products` passa a responder 401, `/loja` redireciona para `/entrar` e a home fica sem produtos. Depois voltar para `public`.
 - `npx lighthouse https://loja.muhbianco.com.br/loja/produto/<slug> --only-categories=seo` ≥ 90, e o mesmo na home. Exige loja `public` e "aparecer no Google" marcado.
-- No dia seguinte, o log do `commerce-beat` mostra `audit_inventory_ledger` sem divergências.
+- No dia seguinte, o log do `commerce-worker` mostra `audit_inventory_ledger` sem "Inventory ledger mismatch".
 
 ## O que esta fatia não tem (próximas)
 
