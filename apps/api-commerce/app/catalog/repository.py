@@ -30,8 +30,10 @@ class CatalogRepository:
         self.session = session
 
     # ------------------------------------------------------------------ products
-    async def get_product(self, product_id: str) -> Product | None:
+    async def get_product(self, product_id: str, *, lock: bool = False) -> Product | None:
         stmt = select(Product).where(Product.id == product_id)
+        if lock:
+            stmt = stmt.with_for_update()  # serializes writers of the same product
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_products(
@@ -72,6 +74,24 @@ class CatalogRepository:
         return (await self.session.execute(product)).first() is not None or (
             await self.session.execute(variant)
         ).first() is not None
+
+    async def skus_starting_with(self, prefix: str) -> set[str]:
+        """SKUs of products and variants that start with `prefix` (variant SKU allocation)."""
+        taken: set[str] = set()
+        for column in (Product.sku, ProductVariant.sku):
+            stmt = select(column).where(column.startswith(prefix, autoescape=True)).limit(1000)
+            taken.update((await self.session.execute(stmt)).scalars())
+        return taken
+
+    async def all_variants(self, product_id: str) -> list[ProductVariant]:
+        """Every variant of the product, archived ones included (the matrix revives them)."""
+        stmt = (
+            select(ProductVariant)
+            .where(ProductVariant.product_id == product_id)
+            .order_by(ProductVariant.position, ProductVariant.id)
+            .limit(1000)
+        )
+        return list((await self.session.execute(stmt)).scalars())
 
     async def product_slugs_like(self, base: str, *, exclude_id: str | None = None) -> set[str]:
         stmt = (

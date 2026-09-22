@@ -15,6 +15,8 @@ from app.catalog.schemas import (
     PauseRequest,
     PriceRead,
     ProductCreate,
+    ProductOptionRead,
+    ProductOptionsUpdate,
     ProductRead,
     ProductSeo,
     ProductStatusFilter,
@@ -94,6 +96,7 @@ def _product_read(view: ProductView) -> ProductRead:
         lead_time_hours=product.lead_time_hours,
         daily_capacity=product.daily_capacity,
         has_variants=product.has_variants,
+        options=[ProductOptionRead(**option) for option in product.options or []],
         seo=ProductSeo.model_validate(product.seo) if product.seo else None,
         archived_at=product.archived_at,
         paused_at=product.paused_at,
@@ -259,6 +262,23 @@ async def unpublish_product(
     product_id: ProductId,
 ) -> ProductRead:
     return _product_read(await _service(request, session, user, tenant).unpublish(product_id))
+
+
+@router.put(
+    "/products/{product_id}/options",
+    response_model=ProductRead,
+    summary="Define as opções (ex.: tamanho, cor) e gera a matriz de variantes",
+)
+async def set_product_options(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogWriteTenant,
+    product_id: ProductId,
+    body: ProductOptionsUpdate,
+) -> ProductRead:
+    view = await _service(request, session, user, tenant).set_options(product_id, body)
+    return _product_read(view)
 
 
 @router.post(

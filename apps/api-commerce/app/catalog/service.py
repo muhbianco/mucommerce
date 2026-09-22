@@ -8,7 +8,10 @@ Rules that live here (and nowhere else):
 - a published product is `active` (for sale) or `paused` (shown as unavailable, with a reason);
   only `active` sells, so a check that forgets `paused` fails closed;
 - categories nest at most two levels; archiving one with active children is refused;
-- tags are given by name and created on first use (slug from the name, one per slug).
+- tags are given by name and created on first use (slug from the name, one per slug);
+- options (≤3, ≤20 values, ≤100 combinations) define the variant matrix: setting them keeps
+  the variants whose combination stays (the default variant becomes the first combination),
+  revives archived ones that come back, creates the rest and archives what dropped out.
 
 Writes are audited; product lifecycle changes also go to the outbox (the product is the
 aggregate; categories are not).
@@ -16,6 +19,7 @@ aggregate; categories are not).
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -39,10 +43,13 @@ from app.catalog.pricing import EffectivePrice, check_promotion, effective_price
 from app.catalog.repository import MAX_CATEGORIES, MAX_TAGS, CatalogRepository
 from app.catalog.schemas import (
     CATEGORY_REQUIRED_FIELDS,
+    MAX_VARIANTS,
     PRODUCT_REQUIRED_FIELDS,
     CategoryCreate,
     CategoryUpdate,
     ProductCreate,
+    ProductOption,
+    ProductOptionsUpdate,
     ProductUpdate,
     VariantUpdate,
 )
@@ -363,6 +370,103 @@ class CatalogService:
         await self._emit(product, "product.updated")
         return view
 
+    # ------------------------------------------------------------------ options / variant matrix
+    async def set_options(self, product_id: str, data: ProductOptionsUpdate) -> ProductView:
+        product = await self._product_or_404(product_id, lock=True)
+        if product.status == ProductStatus.ARCHIVED:
+            raise ConflictError("Produto arquivado não pode ser editado.")
+        options = _checked_options(data.options)
+        if options == (product.options or []):
+            return await self.get_product(product.id)
+
+        names = [option["name"] for option in options]
+        combos: list[dict[str, str] | None] = (
+            [dict(zip(names, values, strict=True)) for values in _matrix(options)]
+            if options
+            else [None]
+        )
+        variants = await self.repo.all_variants(product.id)
+        live = [v for v in variants if v.archived_at is None]
+        # Live variants win over archived ones with the same combination (archived first).
+        by_key = {
+            _combo_key(v.option_values): v
+            for v in sorted(variants, key=lambda v: v.archived_at is None)
+            if v.option_values
+        }
+        default = next((v for v in live if not v.option_values), None)
+
+        plan: list[tuple[dict[str, str] | None, ProductVariant | None]] = []
+        used: set[str] = set()
+        for combo in combos:
+            if combo is None:  # back to a single variant: keep the default, else the first
+                variant = default or (live[0] if live else None)
+            else:
+                variant = by_key.get(_combo_key(combo))
+                if variant is None and default is not None and default.id not in used:
+                    variant = default  # its SKU and stock become this combination's
+            if variant is not None:
+                used.add(variant.id)
+            plan.append((combo, variant))
+        if product.status in PUBLISHED_STATUSES and not any(
+            variant is None
+            or variant.archived_at is not None
+            or variant.status in LIVE_VARIANT_STATUSES
+            for _, variant in plan
+        ):
+            raise ConflictError("Produto publicado precisa de ao menos uma variante ativa.")
+
+        now = utcnow()
+        taken = await self.repo.skus_starting_with(f"{product.sku}-")
+        created: list[ProductVariant] = []
+        for position, (combo, variant) in enumerate(plan):
+            name = " / ".join(combo.values()) if combo else DEFAULT_VARIANT_NAME
+            if variant is None:
+                variant = ProductVariant(
+                    product_id=product.id,
+                    sku=_next_variant_sku(product.sku, taken),
+                    status=VariantStatus.ACTIVE,
+                    created_by_actor=self.actor.id,
+                )
+                self.session.add(variant)
+                created.append(variant)
+            elif variant.archived_at is not None:
+                variant.archived_at = None
+                variant.status = VariantStatus.ACTIVE
+            variant.option_values = combo
+            variant.name = name[:200]
+            variant.position = position
+            variant.updated_by_actor = self.actor.id
+        archived = [v for v in live if v.id not in used]
+        for variant in archived:
+            variant.archived_at = now
+            variant.status = VariantStatus.INACTIVE
+            _clear_pause(variant)
+            variant.updated_by_actor = self.actor.id
+
+        before = product.options or []
+        product.options = options or None
+        product.has_variants = bool(options)
+        product.updated_by_actor = self.actor.id
+        await self._flush_unique("SKU de variante já usado nesta loja; tente de novo.")
+        # The balance row exists from day one, as for the default variant (see create_product).
+        for variant in created:
+            self.session.add(
+                InventoryBalance(variant_id=variant.id, on_hand_milli=0, reserved_milli=0)
+            )
+        await self.session.flush()
+        await self._audit(
+            "product.options_updated",
+            product,
+            before={"options": before},
+            after={
+                "options": options,
+                "created": [v.sku for v in created],
+                "archived": [v.sku for v in archived],
+            },
+        )
+        await self._emit(product, "product.updated")
+        return await self.get_product(product.id)
+
     # ------------------------------------------------------------------ pause
     async def pause_product(self, product_id: str, *, reason: str | None = None) -> ProductView:
         """Keeps the product in the storefront as unavailable. Idempotent: pausing twice is a
@@ -566,8 +670,8 @@ class CatalogService:
         await self._audit_category("category.archived", category, after={"archived": True})
 
     # ------------------------------------------------------------------ helpers
-    async def _product_or_404(self, product_id: str) -> Product:
-        product = await self.repo.get_product(product_id)
+    async def _product_or_404(self, product_id: str, *, lock: bool = False) -> Product:
+        product = await self.repo.get_product(product_id, lock=lock)
         if product is None:
             raise NotFoundError("Produto não encontrado.")
         return product
@@ -707,3 +811,45 @@ def _clear_pause(row: Product | ProductVariant) -> None:
     row.paused_at = None
     row.paused_reason = None
     row.paused_by_actor = None
+
+
+def _checked_options(options: list[ProductOption]) -> list[dict[str, Any]]:
+    """Distinct names and values (case-insensitive) and a matrix of at most MAX_VARIANTS."""
+    names = [o.name.casefold() for o in options]
+    if len(set(names)) != len(names):
+        raise ValidationError("Opções com o mesmo nome.", fields=["options"])
+    combinations = 1
+    for option in options:
+        folded = [v.casefold() for v in option.values]
+        if len(set(folded)) != len(folded):
+            raise ValidationError(
+                "Valores repetidos numa opção.", fields=["options"], option=option.name
+            )
+        combinations *= len(option.values)
+    if combinations > MAX_VARIANTS:
+        raise ValidationError(
+            "Combinações demais.", fields=["options"], combinations=combinations, limit=MAX_VARIANTS
+        )
+    return [{"name": o.name, "values": list(o.values)} for o in options]
+
+
+def _matrix(options: list[dict[str, Any]]) -> list[tuple[str, ...]]:
+    return list(itertools.product(*(option["values"] for option in options)))
+
+
+def _combo_key(values: dict[str, Any] | None) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((k.casefold(), str(v).casefold()) for k, v in (values or {}).items()))
+
+
+def _next_variant_sku(product_sku: str, taken: set[str]) -> str:
+    """`<product SKU>-1`, `-2`… skipping any SKU already in use in the store."""
+    for number in itertools.count(1):
+        candidate = f"{product_sku}-{number}"
+        if len(candidate) > 64:
+            raise ValidationError(
+                "SKU do produto longo demais para gerar variantes.", fields=["sku"]
+            )
+        if candidate not in taken:
+            taken.add(candidate)
+            return candidate
+    raise AssertionError("unreachable")

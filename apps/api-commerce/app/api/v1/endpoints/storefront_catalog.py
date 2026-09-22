@@ -92,6 +92,8 @@ class VariantOption(BaseModel):
     id: str
     sku: str
     name: str
+    # {"Tamanho": "M", "Cor": "Azul"} for products with options; null for a single variant.
+    option_values: dict[str, str] | None
     price: Price
     availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
 
@@ -101,8 +103,14 @@ class ProductSeo(BaseModel):
     description: str | None
 
 
+class OptionRef(BaseModel):
+    name: str
+    values: list[str]
+
+
 class ProductDetail(ProductCard):
     sku: str
+    options: list[OptionRef]
     description_md: str | None
     unit_label: str
     sold_by: str
@@ -237,6 +245,7 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
     return ProductDetail(
         **card.model_dump(),
         sku=product.sku,
+        options=[OptionRef(**option) for option in product.options or []],
         description_md=product.description_md,
         unit_label=product.unit_label,
         sold_by=product.sold_by,
@@ -245,6 +254,7 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
                 id=v.variant.id,
                 sku=v.variant.sku,
                 name=v.variant.name,
+                option_values=v.variant.option_values,
                 price=_price(v.price, tenant.currency),
                 availability=v.availability,
             )

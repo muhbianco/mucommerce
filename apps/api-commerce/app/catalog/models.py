@@ -155,6 +155,8 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     lead_time_hours: Mapped[int | None] = mapped_column(Integer)
     daily_capacity: Mapped[int | None] = mapped_column(Integer)
     has_variants: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # [{"name": "Tamanho", "values": ["P", "M"]}, …]: the variant matrix is their product.
+    options: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     seo: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     published_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

@@ -34,6 +34,9 @@ ProductStatusFilter = Literal["draft", "active", "paused", "inactive", "archived
 
 MAX_CATEGORIES_PER_PRODUCT = 20
 MAX_TAGS_PER_PRODUCT = 20
+MAX_OPTIONS = 3
+MAX_OPTION_VALUES = 20
+MAX_VARIANTS = 100
 
 # A tag is given by name; its slug (and the tag itself, on first use) come from it.
 TagName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
@@ -134,6 +137,25 @@ class VariantUpdate(StrictModel):
     status: Literal["active", "inactive"] | None = None
 
 
+OptionLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+
+
+class ProductOption(StrictModel):
+    name: OptionLabel
+    values: Annotated[list[OptionLabel], Field(min_length=1, max_length=MAX_OPTION_VALUES)]
+
+
+class ProductOptionsUpdate(StrictModel):
+    """The full option list; `[]` goes back to a single variant."""
+
+    options: Annotated[list[ProductOption], Field(max_length=MAX_OPTIONS)]
+
+
+class ProductOptionRead(BaseModel):
+    name: str
+    values: list[str]
+
+
 class TagRef(BaseModel):
     slug: str
     name: str
@@ -201,6 +223,7 @@ class ProductRead(ProductSummary):
     lead_time_hours: int | None
     daily_capacity: int | None
     has_variants: bool
+    options: list[ProductOptionRead] = []
     seo: ProductSeo | None
     archived_at: datetime | None
     paused_at: datetime | None = None
