@@ -132,6 +132,21 @@ class EventRepository:
         )
         return int((await self.session.execute(stmt)).scalar_one_or_none() or 0) // MILLI
 
+    async def lots_for_variants(
+        self, variant_ids: Sequence[str]
+    ) -> dict[str, tuple[Event, EventLot]]:
+        """Event and lot of each ticket variant (variants that are not lots are absent)."""
+        if not variant_ids:
+            return {}
+        stmt = (
+            select(EventLot, Event)
+            .join(Event, Event.id == EventLot.event_id)
+            .where(EventLot.variant_id.in_(list(variant_ids)))
+        )
+        return {
+            lot.variant_id: (event, lot) for lot, event in (await self.session.execute(stmt)).all()
+        }
+
     async def has_lots(self, product_id: str) -> bool:
         stmt = (
             select(EventLot.id)
