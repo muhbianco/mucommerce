@@ -5,10 +5,10 @@ import { FAKE_GOOGLE, STORE } from "./playwright.config";
 // One shared seeded database: the purchase runs in order (cart → checkout → payment).
 test.describe.configure({ mode: "serial" });
 
+const BIA = { sub: "e2e-bia", email: "bia.e2e@example.com", name: "Bia E2E" };
+
 test("carrinho: entra para comprar, escolhe tamanho e adicional, retira na loja", async ({ page }) => {
-  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, {
-    data: { sub: "e2e-bia", email: "bia.e2e@example.com", name: "Bia E2E" },
-  });
+  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
   const product = `${STORE}/loja/produto/camiseta-muhbianco`;
   const buy = page.getByRole("button", { name: "Adicionar ao carrinho" });
   await page.goto(product);
@@ -46,4 +46,30 @@ test("carrinho: entra para comprar, escolhe tamanho e adicional, retira na loja"
   await page.getByRole("radio", { name: "M" }).check();
   await expect(page.getByRole("status")).toContainText("Indisponível");
   await expect(buy).toBeDisabled();
+});
+
+test("checkout: revisa, aceita os termos quando houver e faz o pedido", async ({ page }) => {
+  // A new browser context per test: sign in again as the same customer (the cart is theirs).
+  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
+  await page.goto(`${STORE}/carrinho`);
+  await expect(page).toHaveURL(/\/entrar\?next=%2Fcarrinho$/);
+  await page.getByRole("link", { name: "Entrar com Google" }).click();
+  await expect(page).toHaveURL(`${STORE}/carrinho`);
+  await page.getByRole("link", { name: "Finalizar compra" }).click();
+  await expect(page).toHaveURL(`${STORE}/checkout`);
+  await expect(page.getByText(/Retirada em Loja MuhBianco/)).toBeVisible();
+  await expect(page.getByText(/Total: R\$\s*79,00/)).toBeVisible();
+  const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
+  if (await accept.count()) await accept.check();
+  await page.getByRole("button", { name: "Fazer pedido" }).click();
+
+  await expect(page).toHaveURL(/\/conta\/pedidos\/[0-9a-f-]{36}\?ok=pedido$/);
+  await expect(page.getByRole("heading", { name: /Pedido #\d+/ })).toBeVisible();
+  await expect(page.getByText("Pedido recebido!")).toBeVisible();
+  await expect(page.getByText(/Aguardando pagamento — pague até/)).toBeVisible();
+  await expect(page.getByText(/Total: R\$\s*79,00/)).toBeVisible();
+
+  // The cart became the order: a new, empty cart.
+  await page.goto(`${STORE}/carrinho`);
+  await expect(page.getByText("Seu carrinho está vazio.")).toBeVisible();
 });

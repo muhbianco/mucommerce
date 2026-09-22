@@ -20,6 +20,10 @@ interface CustomerApiInit {
   json?: unknown;
   /** Session token to forward; defaults to the store's session cookie. */
   session?: string | null;
+  /** Extra headers (e.g. Idempotency-Key). */
+  headers?: Record<string, string>;
+  /** Default 8 s; payments wait longer for the provider. */
+  timeoutMs?: number;
 }
 
 /**
@@ -39,6 +43,7 @@ export async function customerApi<T>(path: string, init: CustomerApiInit = {}): 
     "X-Tenant-Host": incoming.get("x-tenant-host") ?? "",
   };
   if (session) requestHeaders["X-Customer-Session"] = session;
+  Object.assign(requestHeaders, init.headers ?? {});
   const forwardedFor = incoming.get("x-forwarded-for");
   if (forwardedFor) requestHeaders["X-Forwarded-For"] = forwardedFor;
   const userAgent = incoming.get("user-agent");
@@ -54,7 +59,7 @@ export async function customerApi<T>(path: string, init: CustomerApiInit = {}): 
     headers: requestHeaders,
     body,
     cache: "no-store",
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(init.timeoutMs ?? 8000),
   });
   if (response.status === 204) return undefined as T;
   const data = (await response.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
