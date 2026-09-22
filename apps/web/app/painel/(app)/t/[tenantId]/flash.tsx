@@ -17,6 +17,8 @@ const OK: Record<string, string> = {
   lote_removido: "Lote removido.",
   entrega: "Entrega salva.",
   checkout: "Checkout salvo.",
+  pagamento: "Meio de pagamento salvo.",
+  pagamento_testado: "Teste feito: veja o resultado no meio de pagamento.",
   arquivado: "Produto arquivado.",
   variante: "Variante atualizada.",
   imagem: "Imagem atualizada.",
@@ -52,6 +54,8 @@ const ERRORS: Record<string, string> = {
   escolha_produtos: "Escolha ao menos um produto para o bloco de destaques.",
   idempotency_in_progress: "Essa operação ainda está em andamento; aguarde.",
   invalid_transition: "Essa mudança não é possível a partir da situação atual.",
+  pagamento_incompleto: "Faltam dados para ativar este meio de pagamento (veja o que falta abaixo).",
+  rate_limited: "Muitas tentativas seguidas. Espere um minuto e tente de novo.",
 };
 
 export function Flash({ ok, erro }: { ok?: string; erro?: string }) {

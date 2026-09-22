@@ -315,3 +315,51 @@ export const MOVEMENT_LABEL: Record<string, string> = {
   sale_commit: "Venda",
   sale_return: "Devolução",
 };
+
+// ------------------------------------------------------------------------------- payments
+export interface PaymentProviderRead {
+  provider: string;
+  flag_on: boolean;
+  enabled: boolean;
+  is_default: boolean;
+  sandbox: boolean;
+  public_config: Record<string, string>;
+  methods: string[] | null;
+  installments_max: number;
+  secrets: Record<string, { masked: string; changed_at: string }>;
+  missing: string[];
+  webhook_url: string;
+  last_test_at: string | null;
+  last_test_ok: boolean | null;
+  last_test_error: string | null;
+  last_webhook_at: string | null;
+}
+
+export interface PaymentProviderSpec {
+  label: string;
+  methods: string[];
+  public: { key: string; label: string }[];
+  secrets: { key: string; label: string }[];
+}
+
+/** What each provider asks the owner for (ours to show; the API validates). */
+export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
+  mercadopago: {
+    label: "Mercado Pago",
+    methods: ["pix", "card"],
+    public: [{ key: "public_key", label: "Public key" }],
+    secrets: [
+      { key: "access_token", label: "Access token" },
+      { key: "webhook_secret", label: "Assinatura secreta dos webhooks" },
+    ],
+  },
+  infinitepay: {
+    label: "InfinitePay",
+    methods: ["link"],
+    public: [{ key: "handle", label: "InfiniteTag (sem o $)" }],
+    secrets: [],
+  },
+  fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
+};
+
+export const PAYMENT_METHOD_LABEL: Record<string, string> = { pix: "Pix", card: "Cartão", link: "Link de pagamento" };

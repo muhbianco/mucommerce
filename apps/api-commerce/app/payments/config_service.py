@@ -148,7 +148,11 @@ class PaymentConfigService:
         config = await self._row(provider_name)
         if provider is None or config is None:
             raise NotFoundError("Meio de pagamento não configurado.")
-        result = await provider.test_credentials(await self.credentials(provider_name, config))
+        creds = await self.credentials(provider_name, config)
+        await self.session.commit()  # no transaction open while the provider answers
+        result = await provider.test_credentials(creds)
+        config = await self._row(provider_name)
+        assert config is not None
         config.last_test_at = utcnow()
         config.last_test_ok = result.ok
         config.last_test_error = None if result.ok else (result.detail or "falhou")[:300]
