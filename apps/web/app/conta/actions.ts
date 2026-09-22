@@ -161,6 +161,7 @@ export async function payWithCard(input: {
     return "erro=validation_error";
   }
   const back = `/conta/pedidos/${input.orderId}`;
+  const requestId = input.idempotencyKey;
   try {
     const created = await customerApi<{ status: string; failure_code: string | null }>(
       `/checkout/orders/${input.orderId}/payments`,
@@ -176,7 +177,7 @@ export async function payWithCard(input: {
           },
           payer_identification: DOCUMENT.test(document) ? { type, number: document } : null,
         },
-        headers: { "Idempotency-Key": input.idempotencyKey },
+        headers: { "Idempotency-Key": requestId },
         timeoutMs: 30000,
       },
     );

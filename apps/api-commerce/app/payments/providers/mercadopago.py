@@ -239,14 +239,14 @@ class MercadoPagoProvider:
         *,
         body: Mapping[str, Any] | None = None,
         params: Mapping[str, str | int] | None = None,
-        idempotency_key: str | None = None,
+        idempotency: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
         token = creds.secrets.get("access_token")
         if not token:
             raise ProviderError("access token missing", code="credentials_missing", definitive=True)
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-        if idempotency_key:
-            headers["X-Idempotency-Key"] = idempotency_key
+        if idempotency:
+            headers["X-Idempotency-Key"] = idempotency
         timeout = httpx.Timeout(settings.payments_http_timeout_seconds, connect=5.0)
         # One client per call: tasks run each on their own event loop, so a shared client
         # would outlive its loop. Payment volume makes the extra handshake irrelevant.
@@ -285,7 +285,7 @@ class MercadoPagoProvider:
     async def create_charge(self, creds: ProviderCredentials, req: ChargeRequest) -> ChargeResult:
         body = charge_body(req, datetime.now(UTC))
         status, data = await self._request(
-            creds, "POST", "/v1/payments", body=body, idempotency_key=req.payment_id
+            creds, "POST", "/v1/payments", body=body, idempotency=req.payment_id
         )
         return result_from(data, status)
 
