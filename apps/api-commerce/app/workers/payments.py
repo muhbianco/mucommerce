@@ -7,10 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.payments import webhooks
+from app.payments.health import payment_anomalies
 from app.payments.jobs import run_reconcile_payments
 from app.payments.refunds import process_one, refund_tenant, run_process_refunds
 from app.workers.celery_app import celery_app
-from app.workers.runtime import run_async, with_factory
+from app.workers.runtime import run_async, with_factory, with_session
 
 logger = get_logger(__name__)
 
@@ -78,3 +79,17 @@ def sweep_refunds() -> int:
     if completed:
         logger.info("Refunds completed", extra={"count": completed})
     return completed
+
+
+@celery_app.task(name="app.workers.payments.payments_health_check")
+def payments_health_check() -> dict[str, int]:
+    """Every 5 minutes: count what is stuck and alert on it (Sentry picks up the error logs)."""
+
+    async def _run(session: AsyncSession) -> dict[str, int]:
+        return await payment_anomalies(session, utcnow())
+
+    found = run_async(with_session(_run))
+    for alert, count in found.items():
+        if count:
+            logger.error("payment_alert", extra={"alert": alert, "count": count})
+    return found

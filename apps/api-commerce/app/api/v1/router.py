@@ -83,6 +83,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     auth.router,
     ops_tenants.router,
     ops_outbox.router,
+    ops_outbox.payments_router,
     admin_tenants.router,
     admin_catalog.router,
     admin_events.router,

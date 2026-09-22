@@ -32,6 +32,7 @@ from app.core.exceptions import (
     NotFoundError,
     TooManyOpenOrdersError,
 )
+from app.core.metrics import ORDERS_PLACED
 from app.customers.addresses import address_snapshot
 from app.customers.legal import Acceptance, LegalService
 from app.identity.models import Customer
@@ -182,6 +183,7 @@ class OrderService:
             },
         )
         await self._emit(order, "order.placed")
+        ORDERS_PLACED.labels(order.origin).inc()
         if order.total_cents == 0:  # free event lot (or a full discount): paid at once
             await self.confirm_payment(order, source="system", reason="free_order")
         return PlacedOrder(order)

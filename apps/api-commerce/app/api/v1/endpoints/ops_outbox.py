@@ -7,10 +7,13 @@ from app.api.deps import DbSession, PlatformOperator
 from app.audit.models import OutboxEvent
 from app.audit.outbox import retry_failed
 from app.core.exceptions import NotFoundError
+from app.models.base import utcnow
+from app.payments.health import payment_anomalies
 from app.schemas.tenant import OutboxEventRead
 from app.tenancy.context import CROSS_TENANT_OPTION
 
 router = APIRouter(prefix="/ops/outbox", tags=["Ops — Outbox / DLQ"])
+payments_router = APIRouter(prefix="/ops/payments", tags=["Ops — Outbox / DLQ"])
 
 
 @router.get("", response_model=list[OutboxEventRead], summary="Eventos do outbox por status")
@@ -41,3 +44,12 @@ async def retry_event(session: DbSession, _: PlatformOperator, event_id: str) ->
     await retry_failed(session, event_id)
     await session.refresh(event)
     return OutboxEventRead.model_validate(event, from_attributes=True)
+
+
+@payments_router.get(
+    "/health",
+    summary="O que está travado em pagamentos, em todas as lojas (mesma conta dos alertas)",
+)
+async def payments_health(session: DbSession, _: PlatformOperator) -> dict[str, object]:
+    now = utcnow()
+    return {"checked_at": now, "anomalies": await payment_anomalies(session, now)}

@@ -34,6 +34,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger
+from app.core.metrics import REFUNDS_COMPLETED
 from app.models.base import utcnow
 from app.orders.models import Order
 from app.orders.state_machine import RefundStatus as OrderRefundStatus
@@ -330,6 +331,7 @@ class RefundService:
             flags[f"{refund.kind}_refunded"] = refund.id
             order.risk_flags = flags
         await self.session.flush()
+        REFUNDS_COMPLETED.labels(refund.method).inc()
         await self._audit("refund.completed", refund, {"status": refund.status})
         await self._emit(refund, "refund.completed")
 

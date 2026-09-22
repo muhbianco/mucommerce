@@ -75,6 +75,16 @@ for path in /metrics /readyz /api/v1/internal/edge/traefik /api/latest/internal/
 done
 body_has "painel robots" "https://$PANEL/robots.txt" "Disallow: /"
 
+# Payment webhooks: the store comes from the key in the URL, so an unknown key answers 404 and
+# never hints that the address exists (an empty body is not accepted either way).
+webhook="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -X POST \
+  -H 'content-type: application/json' -d '{}' \
+  "https://$API/api/v1/webhooks/mercadopago/chave-que-nao-existe" || true)"
+case "$webhook" in
+  404) report ok "webhook loja desconhecida" "404" ;;
+  *) report FAIL "webhook loja desconhecida" "${webhook:-sem resposta}" ;;
+esac
+
 # Customer sign-in: to Google with PKCE S256 once the stores' Google client is configured and the
 # store has `customer_login`; until then the store says so on /entrar (never a 5xx).
 login="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "https://$STORE/auth/google/start?next=%2Floja" || true)"

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
+from app.core.metrics import PAYMENT_WEBHOOKS
 from app.models.base import utcnow
 from app.payments import registry
 from app.payments.config_service import PaymentConfigService
@@ -132,7 +133,9 @@ async def _insert(session: AsyncSession, row: PaymentWebhookInbox) -> InboxResul
         async with session.begin_nested():
             session.add(row)
     except IntegrityError:
+        PAYMENT_WEBHOOKS.labels(row.provider, "duplicate").inc()
         return InboxResult("duplicate", None)
+    PAYMENT_WEBHOOKS.labels(row.provider, row.status).inc()
     return InboxResult(row.status, row.id)
 
 

@@ -41,6 +41,7 @@ from app.core.exceptions import (
     ProviderNotEnabledError,
 )
 from app.core.logging import get_logger
+from app.core.metrics import PAYMENTS_APPROVED, PAYMENTS_STARTED
 from app.identity.models import Customer
 from app.models.base import utcnow
 from app.orders.models import Order
@@ -237,6 +238,7 @@ class PaymentService:
         self._event(payment, "created", None, PaymentStatus.PENDING)
         await self.session.flush()
         await emit_payment(self.session, self.tenant.id, payment, "payment.created")
+        PAYMENTS_STARTED.labels(payment.provider, payment.method).inc()
         return payment, True
 
     async def _charge_request(self, payment: Payment, data: PaymentCreate) -> ChargeRequest:
@@ -339,6 +341,7 @@ class PaymentService:
         await self.session.flush()
         await emit_payment(self.session, self.tenant.id, payment, f"payment.{target}")
         if target == PaymentStatus.APPROVED:
+            PAYMENTS_APPROVED.labels(payment.provider, payment.method).inc()
             await self._approved(payment, order)
         elif target == PaymentStatus.CHARGEBACK:
             await self._chargeback(payment, order)

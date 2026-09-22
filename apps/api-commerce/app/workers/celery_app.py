@@ -45,6 +45,7 @@ celery_app.conf.update(
         "app.workers.payments.reconcile_payments": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.process_refund": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.sweep_refunds": {"queue": QUEUE_PAYMENTS},
+        "app.workers.payments.payments_health_check": {"queue": QUEUE_PAYMENTS},
         "app.workers.notifications.send_notifications": {"queue": QUEUE_NOTIFICATIONS},
     },
     task_acks_late=True,
@@ -84,6 +85,10 @@ celery_app.conf.update(
         "send-notifications": {
             "task": "app.workers.notifications.send_notifications",
             "schedule": 15.0,
+        },
+        "payments-health-check": {
+            "task": "app.workers.payments.payments_health_check",
+            "schedule": 300.0,
         },
         "audit-inventory-ledger": {
             "task": "app.workers.tasks.audit_inventory_ledger",
