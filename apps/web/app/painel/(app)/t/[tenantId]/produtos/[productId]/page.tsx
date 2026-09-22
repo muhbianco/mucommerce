@@ -9,6 +9,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   type Category,
   type Product,
+  PRODUCT_OPTION_ROWS,
   PRODUCT_STATUS_LABEL,
   type TagRef,
   STOCK_POLICIES,
@@ -17,6 +18,7 @@ import {
 import styles from "../../../../../panel.module.css";
 import {
   deleteMedia,
+  setProductOptions,
   setProductStatus,
   setVariantPause,
   updateMediaAlt,
@@ -314,7 +316,45 @@ export default async function ProductPage({
       </section>
 
       <section className={styles.card}>
-        <h2>Variante e estoque</h2>
+        <h2>Opções</h2>
+        <p className="muted">
+          Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com SKU, preço e estoque próprios (até 3 opções e
+          100 combinações). Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
+        </p>
+        <form action={setProductOptions} className={styles.form}>
+          {hidden}
+          {Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => (
+            <div key={i} style={{ display: "contents" }}>
+              <label>
+                Opção {i + 1}
+                <input
+                  name={`option_name_${i}`}
+                  maxLength={40}
+                  defaultValue={product.options[i]?.name ?? ""}
+                  disabled={!canWrite}
+                />
+              </label>
+              <label style={{ flexGrow: 2 }}>
+                Valores (separados por vírgula)
+                <input
+                  name={`option_values_${i}`}
+                  maxLength={900}
+                  defaultValue={product.options[i]?.values.join(", ") ?? ""}
+                  disabled={!canWrite}
+                />
+              </label>
+            </div>
+          ))}
+          {canWrite ? (
+            <button type="submit" className={styles.buttonGhost}>
+              Salvar opções
+            </button>
+          ) : null}
+        </form>
+      </section>
+
+      <section className={styles.card}>
+        <h2>{product.has_variants ? "Variantes e estoque" : "Variante e estoque"}</h2>
         {product.variants.map((variant) => (
           <div key={variant.id}>
             <form action={updateVariant} className={styles.form}>

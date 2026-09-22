@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
 // CSP: Mercado Pago SDK/Bricks and MinIO public bucket are the only third parties (phase 2).
+// `next dev` evaluates client modules with eval(); production builds never do.
+const devEval = process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' https://sdk.mercadopago.com https://http2.mlstatic.com",
+  `script-src 'self' 'unsafe-inline'${devEval} https://sdk.mercadopago.com https://http2.mlstatic.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: https://storage.s3.muhbianco.com.br https://*.mlstatic.com",
   "font-src 'self' data:",

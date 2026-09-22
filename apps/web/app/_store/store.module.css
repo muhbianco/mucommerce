@@ -92,6 +92,24 @@
   color: #991b1b;
 }
 
+.picker fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.picker legend {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.muted {
+  opacity: 0.55;
+}
+
 .nav {
   display: flex;
   flex-wrap: wrap;

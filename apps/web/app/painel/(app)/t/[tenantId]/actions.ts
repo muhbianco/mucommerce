@@ -6,7 +6,13 @@ import { redirect } from "next/navigation";
 
 import { api, ApiError } from "@/lib/panel/api";
 import { localToUtcIso, parseMoney, parseQuantity } from "@/lib/panel/format";
-import type { Media, Product, TenantPanelContext, UploadCreated } from "@/lib/panel/types";
+import {
+  type Media,
+  type Product,
+  PRODUCT_OPTION_ROWS,
+  type TenantPanelContext,
+  type UploadCreated,
+} from "@/lib/panel/types";
 
 // Same contract as app/painel/actions.ts: Server Actions only accept same-origin POSTs (CSRF),
 // the API authorises every call (membership + scope + flag), and outcomes come back as
@@ -136,6 +142,22 @@ export async function setProductStatus(form: FormData): Promise<void> {
       throw new FormError("acao_invalida");
     }
     await api(`${path}/products/${productId}/${action}`, { method: "POST" });
+  });
+}
+
+/** Up to three "name + comma-separated values" rows → the variant matrix (empty rows ignored). */
+export async function setProductOptions(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  await run(`${page}/produtos/${productId}`, "opcoes", async () => {
+    const options = Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => ({
+      name: text(form, `option_name_${i}`),
+      values: text(form, `option_values_${i}`)
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    })).filter((option) => option.name || option.values.length);
+    await api(`${path}/products/${productId}/options`, { method: "PUT", json: { options } });
   });
 }
 

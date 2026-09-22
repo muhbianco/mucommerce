@@ -13,13 +13,14 @@ import {
   jsonLd,
   offSale,
   type ProductDetail,
-  SCHEMA_AVAILABILITY,
+  productOffers,
   storeOrigin,
 } from "@/lib/storefront";
 
 import { StoreImage } from "../../../_store/store-image";
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
+import { VariantPicker } from "../../../_store/variant-picker";
 
 // Metadata and page share one API call per request. `cache` compares arguments by identity,
 // so the key is the slug (a string), not the per-call parsed context object.
@@ -75,14 +76,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
       description: product.seo.description || product.short_description || undefined,
       image: product.images.map((image) => image.renditions[image.renditions.length - 1]?.url).filter(Boolean),
       brand: { "@type": "Brand", name: context.tenant.name },
-      offers: {
-        "@type": "Offer",
-        url,
-        price: (product.price.amount_cents / 100).toFixed(2),
-        priceCurrency: product.price.currency,
-        availability: SCHEMA_AVAILABILITY[product.availability],
-        ...(product.price.promo_ends_at ? { priceValidUntil: product.price.promo_ends_at.slice(0, 10) } : {}),
-      },
+      offers: productOffers(product, url),
     },
     {
       "@context": "https://schema.org",
@@ -150,7 +144,9 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               ))}
             </p>
           ) : null}
-          {product.variants.length > 1 ? (
+          {product.options.length ? (
+            <VariantPicker options={product.options} variants={product.variants} />
+          ) : product.variants.length > 1 ? (
             <ul>
               {product.variants.map((variant) => (
                 <li key={variant.id}>

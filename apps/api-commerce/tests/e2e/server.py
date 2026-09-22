@@ -6,7 +6,8 @@ No Docker, MariaDB, Redis or MinIO: Celery runs eagerly, rate limits and caches 
 memory, and images are written as already processed. Stores (hosts resolve to 127.0.0.1 in
 Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http):
 
-- `loja.localhost`           tenant `muhbianco`, public, with published products
+- `loja.localhost`           tenant `muhbianco`, public, with published products (one with sizes
+                             P/M/G, M paused, tagged `algodão`)
 - `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer);
                              customers sign in with Google (apps/web/e2e/fake-google.mjs); green
                              brand colour and serif font
@@ -73,7 +74,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import uvicorn  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
-from app.catalog.schemas import ProductCreate  # noqa: E402
+from app.catalog.schemas import (  # noqa: E402
+    ProductCreate,
+    ProductOption,
+    ProductOptionsUpdate,
+    VariantUpdate,
+)
 from app.catalog.service import CatalogService  # noqa: E402
 from app.cli import _seed_platform_in_session  # noqa: E402
 from app.core.database import create_app_engine  # noqa: E402
@@ -93,34 +99,59 @@ PRODUCTS = [
 ]
 
 
+async def _ready_image(session: AsyncSession, tenant_id: str, product_id: str) -> None:
+    bind_session_tenant(session, tenant_id)
+    session.add(
+        MediaAsset(
+            owner_type="product",
+            owner_id=product_id,
+            status=MediaStatus.READY,
+            declared_mime="image/png",
+            declared_bytes=1,
+            upload_key=f"incoming/{tenant_id}/{product_id}",
+            width=600,
+            height=600,
+            renditions={
+                "w600": {
+                    "key": f"tenants/{tenant_id}/{product_id}.webp",
+                    "width": 600,
+                    "height": 600,
+                }
+            },
+        )
+    )
+    await session.flush()
+
+
 async def _publish_products(session: AsyncSession, tenant_id: str) -> None:
     context = await TenantResolver(session).resolve_by_id(tenant_id)
     catalog = CatalogService(session, context, ACTOR)
     for name, price in PRODUCTS:
         view = await catalog.create_product(ProductCreate(name=name, base_price_cents=price))
-        product = view.product
-        bind_session_tenant(session, tenant_id)
-        session.add(
-            MediaAsset(
-                owner_type="product",
-                owner_id=product.id,
-                status=MediaStatus.READY,
-                declared_mime="image/png",
-                declared_bytes=1,
-                upload_key=f"incoming/{tenant_id}/{product.id}",
-                width=600,
-                height=600,
-                renditions={
-                    "w600": {
-                        "key": f"tenants/{tenant_id}/{product.id}.webp",
-                        "width": 600,
-                        "height": 600,
-                    }
-                },
-            )
+        await _ready_image(session, tenant_id, view.product.id)
+        await catalog.publish(view.product.id)
+
+
+async def _variant_product(session: AsyncSession, tenant_id: str) -> None:
+    """Sizes P/M/G (G dearer, M paused), always available, tagged: picker, tags and offers."""
+    context = await TenantResolver(session).resolve_by_id(tenant_id)
+    catalog = CatalogService(session, context, ACTOR)
+    view = await catalog.create_product(
+        ProductCreate(
+            name="Camiseta MuhBianco",
+            base_price_cents=5900,
+            stock_policy="unlimited",
+            tags=["algodão"],
         )
-        await session.flush()
-        await catalog.publish(product.id)
+    )
+    product_id = view.product.id
+    await _ready_image(session, tenant_id, product_id)
+    size = ProductOption(name="Tamanho", values=["P", "M", "G"])
+    view = await catalog.set_options(product_id, ProductOptionsUpdate(options=[size]))
+    _, medium, large = view.variants
+    await catalog.update_variant(product_id, large.id, VariantUpdate(price_cents=6900))
+    await catalog.publish(product_id)
+    await catalog.pause_variant(product_id, medium.id, reason="E2E")
 
 
 async def seed() -> None:
@@ -139,6 +170,7 @@ async def seed() -> None:
         await service.set_setting(store, "storefront", {"access_mode": "public"}, ACTOR)
         await session.commit()
         await _publish_products(session, store.id)
+        await _variant_product(session, store.id)
         await session.commit()
 
     async with factory() as session:

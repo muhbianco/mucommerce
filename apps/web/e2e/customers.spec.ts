@@ -111,5 +111,6 @@ test("cliente confirma o WhatsApp mandando CONFIRMAR ao número oficial", async 
 test("código de retorno forjado ou reusado volta para o login", async ({ page }) => {
   await page.goto(`${CLOSED_STORE}/auth/complete?hc=forjado-forjado-forjado`);
   await expect(page).toHaveURL(/\/entrar\?erro=sessao_expirada$/);
-  await expect(page.getByRole("alert")).toHaveText("O login expirou. Entre de novo.");
+  // Not Next's route announcer (also role="alert", empty): the page's own message.
+  await expect(page.getByRole("alert").filter({ hasText: /\S/ })).toHaveText("O login expirou. Entre de novo.");
 });

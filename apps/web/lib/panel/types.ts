@@ -100,6 +100,7 @@ export interface Variant {
   price_cents: number | null;
   cost_cents: number | null;
   status: "active" | "paused" | "inactive";
+  option_values: Record<string, string> | null;
   price: Price;
   paused_reason: string | null;
 }
@@ -132,11 +133,16 @@ export interface Product extends ProductSummary {
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
   tags: TagRef[];
+  has_variants: boolean;
+  options: { name: string; values: string[] }[];
   paused_at: string | null;
   paused_reason: string | null;
   variants: Variant[];
   media: Media[];
 }
+
+/** Rows of the panel's options form (the API allows up to 3 options). */
+export const PRODUCT_OPTION_ROWS = 3;
 
 export interface TagRef {
   slug: string;

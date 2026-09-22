@@ -9,6 +9,7 @@ const OK: Record<string, string> = {
   resume: "Venda retomada.",
   variante_pause: "Variante pausada.",
   variante_resume: "Variante retomada.",
+  opcoes: "Opções salvas; variantes atualizadas.",
   arquivado: "Produto arquivado.",
   variante: "Variante atualizada.",
   imagem: "Imagem atualizada.",

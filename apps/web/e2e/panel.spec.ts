@@ -49,3 +49,30 @@ test("criar produto; publicar sem imagem é recusado; vitrine não mostra", asyn
   const shop = await page.goto(`${STORE}/loja/produto/torta-e2e`);
   expect(shop?.status()).toBe(404);
 });
+
+test("pausar a venda deixa o produto indisponível na vitrine; opções geram variantes", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Produtos" }).first().click();
+  await page.getByRole("link", { name: "Bolo de cenoura" }).click();
+  const productUrl = page.url().split("?")[0] ?? "";
+
+  await page.getByLabel("Motivo (só você vê)").fill("forno em manutenção");
+  await page.getByRole("button", { name: "Pausar venda" }).click();
+  await expect(page.getByText(/Venda pausada: o produto segue/)).toBeVisible();
+  await expect(page.getByText(/forno em manutenção/)).toBeVisible();
+
+  await page.goto(`${STORE}/loja/produto/bolo-de-cenoura`);
+  await expect(page.getByText("Indisponível").first()).toBeVisible();
+
+  await page.goto(productUrl);
+  await page.getByRole("button", { name: "Retomar venda" }).click();
+  await expect(page.getByText("Venda retomada.")).toBeVisible();
+
+  await page.getByLabel("Opção 1").fill("Tamanho");
+  await page.getByLabel("Valores (separados por vírgula)").first().fill("Pequeno, Grande");
+  await page.getByRole("button", { name: "Salvar opções" }).click();
+  await expect(page.getByText("Opções salvas; variantes atualizadas.")).toBeVisible();
+  await expect(page.getByText(/^Pequeno · P\d+$/)).toBeVisible();
+  await expect(page.getByText(/^Grande · P\d+-1$/)).toBeVisible();
+});

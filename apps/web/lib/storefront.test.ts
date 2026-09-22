@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { AVAILABILITY_LABEL, isIndexable, jsonLd, offSale, SCHEMA_AVAILABILITY, srcSet } from "./storefront";
+import {
+  AVAILABILITY_LABEL,
+  findVariant,
+  isIndexable,
+  jsonLd,
+  offSale,
+  type ProductDetail,
+  productOffers,
+  SCHEMA_AVAILABILITY,
+  srcSet,
+  type StoreVariant,
+} from "./storefront";
 import type { StorefrontContext } from "./tenant";
 
 function context(overrides: Partial<StorefrontContext> = {}, indexable = true): StorefrontContext {
@@ -65,5 +76,31 @@ describe("availability", () => {
     expect(offSale("made_to_order")).toBe(false);
     expect(AVAILABILITY_LABEL.unavailable).toBe("Indisponível");
     expect(SCHEMA_AVAILABILITY.unavailable).toBe("https://schema.org/OutOfStock");
+  });
+});
+
+function variant(values: Record<string, string>, cents: number, availability: StoreVariant["availability"] = "available"): StoreVariant {
+  const price = { amount_cents: cents, compare_at_cents: null, promo_active: false, promo_ends_at: null, currency: "BRL" };
+  return { id: Object.values(values).join("-"), sku: "S", name: "n", option_values: values, price, availability };
+}
+
+describe("variants", () => {
+  const variants = [variant({ Tamanho: "P", Cor: "Azul" }, 1000), variant({ Tamanho: "M", Cor: "Azul" }, 1200, "sold_out")];
+
+  it("finds the variant with exactly the chosen combination", () => {
+    expect(findVariant(variants, { Tamanho: "M", Cor: "Azul" })?.availability).toBe("sold_out");
+    expect(findVariant(variants, { Tamanho: "G", Cor: "Azul" })).toBeUndefined();
+    expect(findVariant(variants, { Tamanho: "P" })).toBeUndefined();
+  });
+
+  it("uses an AggregateOffer only when prices differ", () => {
+    const product = {
+      price: variants[0]?.price,
+      availability: "available",
+      variants,
+    } as unknown as ProductDetail;
+    expect(productOffers(product, "u")).toMatchObject({ "@type": "AggregateOffer", lowPrice: "10.00", highPrice: "12.00", offerCount: 2 });
+    const single = { ...product, variants: variants.slice(0, 1) } as ProductDetail;
+    expect(productOffers(single, "u")).toMatchObject({ "@type": "Offer", price: "10.00" });
   });
 });
