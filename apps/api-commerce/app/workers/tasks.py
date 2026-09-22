@@ -5,10 +5,11 @@ from datetime import timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import idempotency, outbox
+from app.cart.jobs import purge_carts
 from app.core.logging import get_logger
 from app.customers.repository import purge_auth_flows, purge_sessions
 from app.identity.repository import AdminUserRepository
-from app.inventory.service import audit_ledger
+from app.inventory.service import audit_ledger, reserved_mismatches
 from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
@@ -118,6 +119,7 @@ def purge_expired_records() -> dict[str, int]:
             "customer_sessions": await purge_sessions(
                 session, older_than=CUSTOMER_SESSION_RETENTION
             ),
+            "carts": await purge_carts(session),
         }
 
     purged = run_async(with_session(_run))
@@ -131,4 +133,7 @@ def audit_inventory_ledger() -> int:
     mismatches = run_async(with_session(audit_ledger))
     if mismatches:
         logger.error("Inventory ledger audit found mismatches", extra={"count": mismatches})
-    return mismatches
+    held = run_async(with_session(reserved_mismatches))
+    if held:
+        logger.error("Reserved stock differs from active reservations", extra={"count": held})
+    return mismatches + held

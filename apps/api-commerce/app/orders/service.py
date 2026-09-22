@@ -241,14 +241,78 @@ class OrderService:
         )
         await self._emit(order, "order.status_changed", previous=before, reason=reason)
 
-    # ------------------------------------------------------------------ read
-    async def get_for_customer(self, customer_id: str, order_id: str) -> Order:
-        order = await self.session.scalar(
-            select(Order).where(Order.id == order_id).where(Order.customer_id == customer_id)
+    async def cancel(
+        self,
+        order: Order,
+        actor_kind: ActorKind,
+        *,
+        reason: str | None,
+        scopes: frozenset[str] = frozenset(),
+        restock: bool = True,
+    ) -> None:
+        """Cancel before payment (held stock is released) or after it (stock returns when
+        `restock`; the refund is requested by the payment side, stage E S13)."""
+        was = order.status
+        await self._transition(
+            order,
+            OrderStatus.CANCELLED,
+            actor_kind,
+            source=str(actor_kind),
+            reason=reason,
+            scopes=scopes,
         )
+        order.cancel_reason = (reason or None) and reason[:200]
+        order.cancelled_by_actor = self.actor.id
+        reservations = ReservationService(self.session, self.tenant, self.actor)
+        if was == OrderStatus.AWAITING_PAYMENT:
+            await reservations.release(order.id, reason="cancelled")
+        elif restock:
+            await reservations.return_stock(order.id, reason="cancelled")
+        await self._emit(
+            order, "order.cancelled", previous=was, reason=reason, paid=bool(order.paid_at)
+        )
+
+    async def expire(self, order: Order, now: datetime) -> bool:
+        """The payment deadline passed: the order fails and its stock is free again. False when
+        there is nothing to do (paid, cancelled or not due yet — safe to run twice)."""
+        if order.status != OrderStatus.AWAITING_PAYMENT:
+            return False
+        if order.expires_at is None or order.expires_at > now:
+            return False
+        await self._transition(
+            order, OrderStatus.FAILED, ActorKind.SYSTEM, source="system", reason="expired"
+        )
+        await ReservationService(self.session, self.tenant, self.actor).release(
+            order.id, reason="expired", expired=True
+        )
+        await self._emit(order, "order.failed", reason="expired")
+        return True
+
+    # ------------------------------------------------------------------ read
+    async def get_for_customer(
+        self, customer_id: str, order_id: str, *, lock: bool = False
+    ) -> Order:
+        stmt = select(Order).where(Order.id == order_id).where(Order.customer_id == customer_id)
+        if lock:
+            stmt = stmt.with_for_update()
+        order = await self.session.scalar(stmt)
         if order is None:
             raise NotFoundError("Pedido não encontrado.")
         return order
+
+    async def list_for_customer(
+        self, customer_id: str, *, limit: int, before_id: str | None = None
+    ) -> list[Order]:
+        """Newest first (ids are time-ordered UUIDv7), keyset by id; `limit + 1` rows."""
+        stmt = (
+            select(Order)
+            .where(Order.customer_id == customer_id)
+            .order_by(Order.id.desc())
+            .limit(limit + 1)
+        )
+        if before_id is not None:
+            stmt = stmt.where(Order.id < before_id)
+        return list((await self.session.execute(stmt)).scalars())
 
     async def items(self, order_id: str) -> list[OrderItem]:
         stmt = select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.line_no)

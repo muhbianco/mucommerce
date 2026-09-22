@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     auth,
     customer_addresses,
     customer_auth,
+    customer_orders,
     internal,
     legal,
     ops_outbox,
@@ -84,6 +85,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     storefront_checkout.router,
     customer_auth.router,
     customer_addresses.router,
+    customer_orders.router,
     legal.router,
     legal.storefront_router,
 )

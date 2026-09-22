@@ -29,6 +29,18 @@ def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
         return pool.submit(asyncio.run, coro).result()
 
 
+async def with_factory[T](fn: Callable[[async_sessionmaker[AsyncSession]], Awaitable[T]]) -> T:
+    """Like with_session, for jobs that open one transaction per item (the job commits)."""
+    engine = create_app_engine(settings.database_url, pooled=False)
+    factory = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
+    )
+    try:
+        return await fn(factory)
+    finally:
+        await engine.dispose()
+
+
 async def with_session[T](fn: Callable[[AsyncSession], Awaitable[T]]) -> T:
     """Open a dedicated engine + session for a task, commit on success, dispose after."""
     # One short-lived engine per task (its own event loop); same isolation as the API.

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
@@ -29,13 +30,15 @@ from app.inventory.models import (
     MILLI,
     InventoryBalance,
     InventoryMovement,
+    InventoryReservation,
     MovementType,
+    ReservationStatus,
     StockAdjustment,
 )
 from app.inventory.repository import InventoryRepository, StockRow
 from app.inventory.schemas import AdjustmentCreate, AdjustmentLine
 from app.models.base import utcnow
-from app.tenancy.context import TenantContext
+from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
 from app.tenancy.service import Actor
 
 logger = get_logger(__name__)
@@ -318,6 +321,27 @@ def _crossed_below(balance: InventoryBalance, before: int, after: int) -> bool:
     available_before = before - balance.reserved_milli
     available_after = after - balance.reserved_milli
     return available_before >= balance.min_level_milli > available_after
+
+
+async def reserved_mismatches(session: AsyncSession) -> int:
+    """Balances whose reserved_milli differs from the sum of their active reservations."""
+    active = (
+        select(
+            InventoryReservation.variant_id,
+            func.sum(InventoryReservation.quantity_milli).label("held"),
+        )
+        .where(InventoryReservation.status == ReservationStatus.ACTIVE)
+        .group_by(InventoryReservation.variant_id)
+        .subquery()
+    )
+    stmt = (
+        select(func.count())
+        .select_from(InventoryBalance)
+        .outerjoin(active, active.c.variant_id == InventoryBalance.variant_id)
+        .where(InventoryBalance.reserved_milli != func.coalesce(active.c.held, 0))
+        .execution_options(**{CROSS_TENANT_OPTION: True})
+    )
+    return int((await session.execute(stmt)).scalar_one())
 
 
 async def audit_ledger(session: AsyncSession) -> int:
