@@ -94,3 +94,45 @@ class InventoryMovement(UUIDPrimaryKeyMixin, TenantScoped, Base):
     reason: Mapped[str | None] = mapped_column(String(200))
     actor: Mapped[str] = mapped_column(String(120), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class ReservationStatus:
+    ACTIVE = "active"  # counted in InventoryBalance.reserved_milli
+    COMMITTED = "committed"  # sold: on_hand decremented (sale_commit movement)
+    RELEASED = "released"  # order cancelled before payment
+    EXPIRED = "expired"  # payment deadline passed
+    RETURNED = "returned"  # committed, then the paid order was cancelled with restock
+
+
+class InventoryReservation(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Stock an order holds while it waits for payment (ADR 0011: reserve on place, commit on
+    approval). Invariant, checked daily: reserved_milli of a balance == sum of its active
+    reservations; both change only under the balance row lock."""
+
+    __tablename__ = "inventory_reservations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "order_id", "variant_id", name="uq_inventory_reservations_line"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "order_id"],
+            ["orders.tenant_id", "orders.id"],
+            name="fk_inventory_reservations_order",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "variant_id"],
+            ["product_variants.tenant_id", "product_variants.id"],
+            name="fk_inventory_reservations_variant",
+        ),
+        Index("ix_inventory_reservations_variant", "tenant_id", "variant_id", "status"),
+    )
+
+    order_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    variant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    quantity_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=ReservationStatus.ACTIVE
+    )
+    committed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    released_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    release_reason: Mapped[str | None] = mapped_column(String(32))

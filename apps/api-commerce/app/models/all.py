@@ -21,9 +21,15 @@ from app.identity.models import (
     CustomerTenantAccess,
     TenantMembership,
 )
-from app.inventory.models import InventoryBalance, InventoryMovement, StockAdjustment
+from app.inventory.models import (
+    InventoryBalance,
+    InventoryMovement,
+    InventoryReservation,
+    StockAdjustment,
+)
 from app.media.models import MediaAsset
 from app.models.base import Base
+from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.tenancy.models import (
     Tenant,
     TenantDomain,
@@ -52,8 +58,12 @@ __all__ = [
     "IdempotencyKey",
     "InventoryBalance",
     "InventoryMovement",
+    "InventoryReservation",
     "LegalDocument",
     "MediaAsset",
+    "Order",
+    "OrderItem",
+    "OrderStatusHistory",
     "OutboxDelivery",
     "OutboxEvent",
     "ProcessedEvent",
