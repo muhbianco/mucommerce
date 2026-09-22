@@ -16,16 +16,24 @@ from pydantic import BaseModel
 from app.api.deps import (
     CatalogReader,
     DbSession,
+    EventsReader,
     OptionalCustomer,
     StorefrontTenant,
     check_storefront_catalog,
 )
 from app.catalog.pricing import EffectivePrice
+from app.catalog.schemas import LotState
 from app.catalog.storefront import (
     STOREFRONT_PAGE_MAX,
     CardData,
     StorefrontCatalog,
     image_payload,
+)
+from app.catalog.storefront_events import (
+    EVENTS_PAGE_MAX,
+    EventAvailability,
+    EventData,
+    StorefrontEvents,
 )
 from app.core.exceptions import (
     AuthenticationError,
@@ -69,6 +77,7 @@ class ProductCard(BaseModel):
     id: str
     slug: str
     name: str
+    kind: str  # "ticket": the page of this product is its event (/eventos/<slug>)
     short_description: str | None
     price: Price
     availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
@@ -145,6 +154,68 @@ class SitemapEntry(BaseModel):
 class SitemapData(BaseModel):
     products: list[SitemapEntry]
     categories: list[str]
+    events: list[SitemapEntry] = []  # only when the store has the events module on
+
+
+class LotOfferRef(BaseModel):
+    id: str
+    name: str
+    price: Price
+    state: LotState
+    sales_starts_at: datetime | None
+    sales_ends_at: datetime | None
+
+
+class EventCard(BaseModel):
+    slug: str
+    name: str
+    short_description: str | None
+    image: Image | None
+    starts_at: datetime
+    ends_at: datetime | None
+    venue_name: str | None
+    city: str | None
+    online: bool  # the link itself goes to buyers only
+    availability: EventAvailability
+    price_from: Price | None
+
+
+class EventDetail(EventCard):
+    sku: str
+    description_md: str | None
+    venue_address: str | None
+    status_note: str | None
+    images: list[Image]
+    lots: list[LotOfferRef]
+    seo: ProductSeo
+    updated_at: datetime
+
+
+def _cents(cents: int, currency: str) -> Price:
+    return Price(
+        amount_cents=cents,
+        compare_at_cents=None,
+        promo_active=False,
+        promo_ends_at=None,
+        currency=currency,
+    )
+
+
+def _event_card(data: EventData, currency: str) -> EventCard:
+    event, product = data.event, data.product
+    return EventCard(
+        slug=product.slug,
+        name=product.name,
+        short_description=product.short_description,
+        image=Image(**image_payload(data.images[0])) if data.images else None,
+        starts_at=event.starts_at,
+        ends_at=event.ends_at,
+        venue_name=event.venue_name,
+        city=event.city,
+        online=event.online_url is not None,
+        availability=data.availability,
+        price_from=_cents(data.price_from, currency) if data.price_from is not None else None,
+    )
 
 
 def _price(price: EffectivePrice, currency: str) -> Price:
@@ -163,6 +234,7 @@ def _card(card: CardData, currency: str) -> ProductCard:
         id=product.id,
         slug=product.slug,
         name=product.name,
+        kind=product.kind,
         short_description=product.short_description,
         price=_price(card.price, currency),
         availability=card.availability,
@@ -307,11 +379,80 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
     summary="Slugs para o sitemap (≤5000 produtos)",
 )
 async def storefront_sitemap(session: DbSession, tenant: CatalogReader) -> SitemapData:
-    del tenant
-    products, categories = await StorefrontCatalog(session, utcnow()).sitemap()
+    now = utcnow()
+    products, categories = await StorefrontCatalog(session, now).sitemap()
+    events = await StorefrontEvents(session, now).sitemap() if tenant.feature("events") else []
+    event_slugs = {slug for slug, _ in events}
     return SitemapData(
-        products=[SitemapEntry(slug=s, updated_at=u) for s, u in products],
+        # A ticket's page is its event page: listed once, under events.
+        products=[SitemapEntry(slug=s, updated_at=u) for s, u in products if s not in event_slugs],
         categories=categories,
+        events=[SitemapEntry(slug=s, updated_at=u) for s, u in events],
+    )
+
+
+# ----------------------------------------------------------------------------- events
+@router.get(
+    "/catalog/events",
+    response_model=Page[EventCard],
+    summary="Próximos eventos (por data; paginação por cursor)",
+)
+async def storefront_events(
+    session: DbSession,
+    tenant: EventsReader,
+    limit: Annotated[int, Query(ge=1, le=EVENTS_PAGE_MAX)] = 24,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+) -> Page[EventCard]:
+    after = None
+    if cursor:
+        raw = decode_cursor(cursor, "s", "id")
+        try:
+            after = (datetime.fromisoformat(raw["s"]), raw["id"])
+        except ValueError as exc:
+            raise ValidationError("Cursor inválido.") from exc
+    events = await StorefrontEvents(session, utcnow()).upcoming(limit=limit, after=after)
+    page = events[:limit]
+    next_cursor = (
+        encode_cursor(s=page[-1].event.starts_at.isoformat(), id=page[-1].event.id)
+        if len(events) > limit
+        else None
+    )
+    return Page[EventCard](
+        items=[_event_card(e, tenant.currency) for e in page], next_cursor=next_cursor
+    )
+
+
+@router.get(
+    "/catalog/events/{slug}",
+    response_model=EventDetail,
+    summary="Página do evento (data, local, lotes e situação de cada um)",
+)
+async def storefront_event(session: DbSession, tenant: EventsReader, slug: str) -> EventDetail:
+    data = await StorefrontEvents(session, utcnow()).by_slug(slug[:160])
+    if data is None:
+        raise NotFoundError("Evento não encontrado.")
+    event, product = data.event, data.product
+    seo = product.seo or {}
+    return EventDetail(
+        **_event_card(data, tenant.currency).model_dump(),
+        sku=product.sku,
+        description_md=product.description_md,
+        venue_address=event.venue_address,
+        status_note=event.status_note,
+        images=[Image(**image_payload(m)) for m in data.images],
+        lots=[
+            LotOfferRef(
+                id=offer.lot.id,
+                name=offer.variant.name,
+                price=_cents(offer.variant.price_cents or 0, tenant.currency),
+                state=offer.state,
+                sales_starts_at=offer.lot.sales_starts_at,
+                sales_ends_at=offer.lot.sales_ends_at,
+            )
+            for offer in data.lots
+        ],
+        seo=ProductSeo(title=seo.get("title"), description=seo.get("description")),
+        updated_at=product.updated_at,
     )
 
 

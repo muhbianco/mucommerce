@@ -244,6 +244,16 @@ setattr(require_catalog_access, CATALOG_ACCESS_GUARD_ATTR, True)
 CatalogReader = Annotated[TenantContext, Depends(require_catalog_access)]
 
 
+async def require_events_access(tenant: CatalogReader) -> TenantContext:
+    """Catalog access (above), plus the store's `events` module: off → 404, as if it had none."""
+    if not tenant.feature("events"):
+        raise NotFoundError("Recurso não encontrado.")
+    return tenant
+
+
+EventsReader = Annotated[TenantContext, Depends(require_events_access)]
+
+
 # --------------------------------------------------------------------------- actor
 def admin_actor(request: Request, user: AdminUser) -> Actor:
     return Actor(
