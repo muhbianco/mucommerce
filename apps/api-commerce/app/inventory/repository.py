@@ -55,6 +55,9 @@ class InventoryRepository:
         order queue behind each other instead of deadlocking.
         """
         ordered = sorted(set(variant_ids))
+        if not ordered:
+            # An empty executemany would insert one row of defaults (no variant_id).
+            return {}
         rows = [
             {
                 "id": new_id(),

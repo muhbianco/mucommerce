@@ -147,6 +147,12 @@ class EventRepository:
             lot.variant_id: (event, lot) for lot, event in (await self.session.execute(stmt)).all()
         }
 
+    async def reserved(self, variant_id: str) -> int:
+        stmt = select(InventoryBalance.reserved_milli).where(
+            InventoryBalance.variant_id == variant_id
+        )
+        return int((await self.session.execute(stmt)).scalar_one_or_none() or 0) // MILLI
+
     async def has_lots(self, product_id: str) -> bool:
         stmt = (
             select(EventLot.id)
@@ -329,6 +335,10 @@ class EventService:
             raise NotFoundError("Lote não encontrado.")
         if await self.repo.on_hand(current.variant.id) < current.lot.quantity:
             raise ConflictError("Lote com ingressos vendidos não pode ser removido.", code="sold")
+        if await self.repo.reserved(current.variant.id) > 0:
+            raise ConflictError(
+                "Lote com ingressos reservados em pedidos aguardando pagamento.", code="reserved"
+            )
         if product.status in PUBLISHED_STATUSES and len(view.lots) == 1:
             raise ConflictError("Evento publicado precisa de ao menos um lote.")
         variant = current.variant

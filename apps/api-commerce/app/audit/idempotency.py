@@ -49,7 +49,11 @@ def _serialize(result: Any) -> tuple[int, Any]:
 
 
 def idempotent(
-    scope: str, *, status_code: int = 200, required: bool = True
+    scope: str,
+    *,
+    status_code: int = 200,
+    required: bool = True,
+    principal: Callable[[dict[str, Any]], str] | None = None,
 ) -> Callable[[Callable[P, Awaitable[Any]]], Callable[P, Awaitable[Any]]]:
     """Wrap an endpoint so a repeated `Idempotency-Key` replays the first response.
 
@@ -61,6 +65,9 @@ def idempotent(
     - same key, same payload, finished → stored response + `Idempotent-Replayed: true`
     - same key, same payload, still running → 409 `idempotency_in_progress`
     - same key, different payload → 422 `idempotency_key_reused`
+
+    `principal(kwargs)` names who is calling (e.g. the customer): it is part of the request
+    hash, so someone else replaying a key gets 422, never the first caller's response.
     """
 
     def decorator(func: Callable[P, Awaitable[Any]]) -> Callable[P, Awaitable[Any]]:
@@ -79,6 +86,8 @@ def idempotent(
 
             tenant_id = session_tenant_id(session) or "-"
             req_hash = await _request_hash(request)
+            if principal is not None:
+                req_hash = hashlib.sha256(f"{req_hash}:{principal(kwargs)}".encode()).hexdigest()
             existing = await _find(session, scope, tenant_id, key)
             if existing is not None and existing.expires_at <= utcnow():
                 # Past its TTL the key is free again. The unique row is reused (the purge

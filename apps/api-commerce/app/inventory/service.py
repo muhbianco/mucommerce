@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.outbox import emit
 from app.audit.writer import audit
 from app.catalog.models import Product, ProductVariant, SoldBy, StockPolicy
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    ReservedStockError,
+    ValidationError,
+)
 from app.core.logging import get_logger
 from app.inventory.models import (
     MILLI,
@@ -111,6 +116,8 @@ class InventoryService:
         balances = await self.repo.lock_balances(self.tenant.id, ids)
         new_levels: dict[str, int] = {}
         short: list[dict[str, Any]] = []
+        reserved_short: list[dict[str, Any]] = []
+        oversold: list[str] = []
         for line in data.lines:
             balance = balances[line.variant_id]
             qty = to_milli(line.quantity)
@@ -129,9 +136,23 @@ class InventoryService:
                         "on_hand": str(from_milli(balance.on_hand_milli)),
                     }
                 )
+            elif after < balance.reserved_milli and data.kind in ("loss", "adjustment"):
+                # Orders awaiting payment hold that stock: a manual change may not take it.
+                # A count is the physical truth and goes through (it is flagged as oversold).
+                reserved_short.append(
+                    {
+                        "variant_id": line.variant_id,
+                        "sku": found[line.variant_id][0].sku,
+                        "reserved": str(from_milli(balance.reserved_milli)),
+                    }
+                )
+            elif after < balance.reserved_milli:
+                oversold.append(line.variant_id)
             new_levels[line.variant_id] = after
         if short:
             raise ConflictError("Estoque insuficiente.", code="insufficient_stock", lines=short)
+        if reserved_short:
+            raise ReservedStockError(lines=reserved_short)
 
         adjustment = StockAdjustment(
             kind=data.kind,
@@ -201,6 +222,20 @@ class InventoryService:
             payload={"adjustment_id": adjustment.id, "kind": data.kind, "lines": lines_payload},
             tenant_id=self.tenant.id,
         )
+        for variant_id in oversold:
+            await emit(
+                self.session,
+                aggregate_type="variant_stock",
+                aggregate_id=variant_id,
+                event_type="inventory.oversold",
+                payload={
+                    "variant_id": variant_id,
+                    "sku": found[variant_id][0].sku,
+                    "on_hand_milli": balances[variant_id].on_hand_milli,
+                    "reserved_milli": balances[variant_id].reserved_milli,
+                },
+                tenant_id=self.tenant.id,
+            )
         for variant_id in crossed_low:
             await emit(
                 self.session,

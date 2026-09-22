@@ -116,9 +116,9 @@ class LegalService:
         ip: str | None,
         user_agent: str | None,
         channel: str = "web",
-    ) -> int:
+    ) -> list[Consent]:
         """Store one consent per accepted document version that exists in this store."""
-        recorded = 0
+        recorded: list[Consent] = []
         for item in accepted:
             doc = (
                 await self.session.execute(
@@ -129,19 +129,18 @@ class LegalService:
             ).scalar_one_or_none()
             if doc is None:
                 continue
-            self.session.add(
-                Consent(
-                    customer_id=customer_id,
-                    kind=doc.kind,
-                    document_id=doc.id,
-                    document_version=doc.version,
-                    accepted_at=at,
-                    channel=channel,
-                    ip=ip,
-                    user_agent=(user_agent or "")[:300] or None,
-                )
+            consent = Consent(
+                customer_id=customer_id,
+                kind=doc.kind,
+                document_id=doc.id,
+                document_version=doc.version,
+                accepted_at=at,
+                channel=channel,
+                ip=ip,
+                user_agent=(user_agent or "")[:300] or None,
             )
-            recorded += 1
+            self.session.add(consent)
+            recorded.append(consent)
         if recorded:
             await self.session.flush()
         return recorded

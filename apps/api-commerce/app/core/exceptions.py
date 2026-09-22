@@ -193,3 +193,50 @@ class InvalidQuantityError(ValidationError):
 class CartLimitError(ConflictError):
     error_code = "cart_limit"
     message = "Limite do carrinho atingido."
+
+
+class CartEmptyError(ConflictError):
+    error_code = "cart_empty"
+    message = "O carrinho está vazio."
+
+
+class CartChangedError(ConflictError):
+    """The cart (items, prices, stock or delivery) changed since the customer reviewed it."""
+
+    error_code = "cart_changed"
+    message = "O carrinho mudou desde a revisão. Confira de novo antes de finalizar."
+
+
+class CartAlreadyConvertedError(ConflictError):
+    error_code = "cart_already_converted"
+    message = "Este carrinho já virou um pedido."
+
+
+class CartProblemsError(ConflictError):
+    error_code = "cart_problems"
+    message = "Alguns itens do carrinho não podem ser comprados agora."
+
+
+class FulfillmentInvalidError(ConflictError):
+    error_code = "fulfillment_invalid"
+    message = "Escolha de retirada ou entrega inválida para este pedido."
+
+
+class ConsentRequiredError(ValidationError):
+    error_code = "consent_required"
+    message = "Aceite os termos e a política de privacidade vigentes para finalizar."
+
+
+class TooManyOpenOrdersError(ConflictError):
+    error_code = "too_many_open_orders"
+    message = "Você tem pedidos aguardando pagamento. Pague ou cancele antes de fazer outro."
+
+
+class ReservedStockError(ConflictError):
+    error_code = "reserved_stock"
+    message = "Parte desse estoque está reservada para pedidos aguardando pagamento."
+
+
+class CancelWindowClosedError(ConflictError):
+    error_code = "cancel_window_closed"
+    message = "Este pedido não pode mais ser cancelado por aqui. Fale com a loja."
