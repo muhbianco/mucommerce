@@ -47,6 +47,14 @@ def test_single_head_and_linear_history() -> None:
     assert len(heads) == 1, heads
 
 
+def test_models_match_migrations(sqlite_url: str) -> None:
+    """`alembic check` on SQLite: a column the models changed but a migration did not (a type,
+    a nullability, an index) fails here, without waiting for the MariaDB job."""
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "head")
+    command.check(config)
+
+
 @pytest.mark.skipif(not os.environ.get("MARIADB_TEST_URL"), reason="MariaDB not available")
 def test_models_match_migrations_on_mariadb() -> None:
     """`alembic check` against a freshly migrated MariaDB: model drift fails CI."""
