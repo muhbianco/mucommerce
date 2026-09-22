@@ -124,3 +124,13 @@ Consumo real ≠ previsto é registrado por linha (`planned_qty`, `actual_qty`, 
   - `upcoming`: antes do início das vendas do lote;
   - `sold_out`: sem saldo;
   - senão `on_sale`.
+
+## Implementado na etapa E (22/09/2026)
+
+O código ficou mais curto que este documento; vale [ADR 0011](adr/0011-checkout-pedidos-pagamentos.md) e `app/orders/state_machine.py`, onde a tabela de transições **é** a política (quem pode, com qual escopo, com qual guarda).
+
+- **Pedido:** `awaiting_payment → payment_confirmed → accepted → in_production → ready_for_pickup | shipped → delivered`, mais `cancelled` e `failed`. Não existem `draft` (o carrinho faz esse papel) nem `payment_pending` (isso é status do pagamento). `refunded` e `partially_refunded` também não são estados: viraram `orders.refund_status` + `refunded_cents`. `failed → payment_confirmed` existe só para pagamento que chega atrasado e ainda encontra estoque.
+- **Pagamento:** `pending → requires_action → approved | rejected | cancelled | expired`, mais `partially_refunded`, `refunded` e `chargeback`. Status nunca anda para trás, com uma exceção deliberada: `rejected | cancelled | expired → approved` (o provedor é a verdade; o dinheiro entrou), que vira pagamento tardio ou em dobro.
+- **Reserva de estoque:** `active → committed | released | expired`, `committed → returned` (pedido pago cancelado com devolução ao estoque) e `expired → committed` (pagamento tardio recuperado).
+- **Devolução** (novo): `requested → approved → processing → completed`, mais `failed` e `rejected`.
+- **Quem pode:** cliente cancela até o limite da loja (`checkout.customer_cancel_until`); a equipe move com `orders:transition` e cancela com `orders:cancel`; devolução acima do limite da loja pede uma segunda pessoa com `payments:refund_approve`. Toda transição grava histórico, auditoria e evento de outbox na mesma transação, e o painel manda a `version` que estava na tela (tela velha → `409 stale_order`).

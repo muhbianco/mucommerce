@@ -13,7 +13,7 @@ O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, u
 | B | Chatwoot: provisionamento pelo admin do site, `liberar_loja` nos dois sentidos, reconciliação, logos | F1 fatia 3 |
 | C | Domínios próprios: `providers.http`, verificação e ativação, redirects, subdomínios de plataforma | F1 fatia 4 |
 | D | Catálogo completo: eventos, variantes/opções/modificadores, tags, estado `paused` ([runbook](runbooks/etapa-d-catalogo.md)) | F1 fatia 5 |
-| E | Carrinho, `OrderService.place`, reservas, MP + InfinitePay, e-mails, pedidos, cupons | F2 |
+| E | Carrinho, `OrderService.place`, reservas, MP + InfinitePay, e-mails, pedidos, cupons ([ADR 0011](adr/0011-checkout-pedidos-pagamentos.md), [runbook](runbooks/etapa-e-checkout.md)) | F2 |
 | F | Chatwoot operacional + Dashboard App | F3 |
 | G | Produção, insumos, custos | F4 |
 | H | Rede de inteligência: assinatura multi-instância, modos "agente" e "expor", WuzAPI isolado no número do cliente ([ADR 0010](adr/0010-rede-de-agentes.md)) | F5 (substituída) |
@@ -60,6 +60,8 @@ O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, u
 **Dependências**: conta MP do tenant piloto (produção + teste), InfiniteTag do tenant, credenciais no `/ops`; n8n workflow "commerce e-mail" (clone do transacional existente) com HMAC.
 
 **Riscos/rollback**: feature flag `checkout` por tenant (desliga compra, mantém vitrine); pagamentos em voo continuam conciliando; rollback de imagem sem downgrade de schema (migrations aditivas).
+
+**Feito (22/09/2026), na branch `feat/etapa-e-checkout`:** carrinho, endereços, entrega V2, `OrderService.place` como gate único, reservas e expiração, pagamentos (Pix e cartão) com caixa de entrada de webhooks, conciliação, devoluções com quatro olhos, pagamento tardio e em dobro, chargeback, e-mails pelo n8n, pedidos no painel, cupons, saúde e alertas. Migrations 0017–0024. O que **depende do dono** antes de valer em produção: credenciais do MP e da InfinitePay na loja modelo, workflow "commerce e-mail" no n8n (`NOTIFY_N8N_URL`/`NOTIFY_N8N_SECRET`) e a homologação de R$ 1,00. Falta conferir no teste com sandbox: hosts da CSP do Card Brick e se o MP assina os avisos enviados ao `notification_url` de cada pagamento.
 
 ## Fase 3 — Chatwoot operacional e Dashboard App
 

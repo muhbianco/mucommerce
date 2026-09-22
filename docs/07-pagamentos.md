@@ -122,3 +122,12 @@ Reserva no `place` (policy `tracked`), TTL = expiração do pagamento + 5 min; c
 - Ambiente: `PAYMENTS_ALLOWED_PROVIDERS=mercadopago,infinitepay,fake` (prod sem `fake`), `MERCADOPAGO_API_BASE`, `INFINITEPAY_API_BASE` (permite apontar para mock em staging).
 - Tenant: `tenant_payment_configs` (N providers habilitados, um `is_default`); métodos oferecidos = interseção `capabilities × tenant.config.methods × feature flags`. O checkout mostra "Pix / Cartão (Mercado Pago)" e/ou "Pagar com InfinitePay (Pix ou cartão)". Troca de provedor não afeta pedidos existentes (cada `payment` carrega `provider`).
 - Painel ops na criação do tenant: seleção do provedor com cartão-guia por provedor (o que criar, onde pegar credenciais, URL de webhook para colar, botão "testar").
+
+## Implementado na etapa E (22/09/2026)
+
+Contratos conferidos na documentação oficial de cada provedor em 22/09/2026; o que ficou como suposição está marcado na [ADR 0011](adr/0011-checkout-pedidos-pagamentos.md).
+
+- **Mercado Pago:** `/v1/payments` (Pix e cartão tokenizado pelo Card Payment Brick), `X-Idempotency-Key` = id do nosso pagamento, Pix com expiração respeitando o mínimo de 30 min do MP, consulta por id ou pelo nosso `external_reference`, cancelamento que reporta aprovação que ganhou a corrida, devolução por `/refunds`. Webhook com manifesto `id:…;request-id:…;ts:…;` (HMAC-SHA256). A página de webhooks do MP chama `/v1/payments` de legado diante da API de Orders: a troca, se vier, é um módulo só.
+- **InfinitePay:** link de pagamento (`/links`, conta identificada pela InfiniteTag) e `payment_check`. Sem autenticação, sem assinatura no aviso, sem API de cancelamento nem de devolução. Por isso: o aviso é só uma dica, a consulta vai sempre com a InfiniteTag da loja e o nosso `order_nsu`, o valor tem de bater exatamente e uma transação paga um pagamento só. Devolução é manual, registrada com evidência.
+- **Regras que valem para os dois:** o pagamento é gravado antes da chamada; nenhuma chamada acontece com transação aberta ou lock na mão; o webhook nunca aprova sozinho; a conciliação roda com backoff (1, 3, 10 min) e o prazo do pedido consulta o provedor antes de desistir; pagamento tardio recupera o pedido se o estoque ainda estiver lá, senão devolve o dinheiro; pagamento em dobro devolve; chargeback marca o pedido e alerta.
+- **Fake provider** (`payments.providers.fake`): existe só onde o deployment permite (testes e E2E); produção recusa.

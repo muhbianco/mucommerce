@@ -323,3 +323,12 @@ Painel expõe, por tenant, um bloco "Configuração de pagamento" com links dire
 | `customer.access.approved|revoked` | atributo `liberar_loja` | e-mail "acesso liberado" | — | — | ✓ |
 | `tenant.provisioning.*` | — | e-mail ops | — | — | ✓ |
 | `domain.activated|failed` | — | e-mail ops/tenant | — | — | ✓ |
+
+## Implementado na etapa E (22/09/2026)
+
+Rotas novas (v1), todas com os mesmos padrões de erro e paginação por keyset. Detalhes e porquês em [ADR 0011](adr/0011-checkout-pedidos-pagamentos.md); operação no [runbook](runbooks/etapa-e-checkout.md).
+
+- **Cliente (flag `checkout`, sessão da loja):** `GET/POST/PATCH/DELETE /cart…`, `PUT/DELETE /cart/coupon`, `PUT /cart/fulfillment`, `POST /checkout/orders` (Idempotency-Key ligado ao cliente), `GET /checkout/orders/{id}`, `GET /checkout/orders/{id}/payment`, `POST /checkout/orders/{id}/payments`, `POST /checkout/payments/{id}/check`, `POST /checkout/payments/{id}/cancel`, `GET/POST /me/orders…`, `GET/POST/PATCH/DELETE /me/addresses…`.
+- **Provedores:** `POST /webhooks/{provider}/{tenant_key}` — só no host público da API, corpo até 64 KB, loja identificada pela chave da URL, assinatura conferida com o segredo da loja (inválida → 401), aviso guardado e deduplicado; o processamento sempre consulta o provedor.
+- **Painel da loja:** `GET/PUT/POST /admin/tenants/{t}/payments/providers…` (leitura pela equipe, escrita só do dono), `GET /admin/tenants/{t}/orders…` + `POST /orders/{id}/transition`, `POST /orders/{id}/refunds` e `POST /refunds/{id}/approve|reject|complete`, `GET/POST/PATCH /admin/tenants/{t}/coupons…`.
+- **Ops:** `GET /ops/tenants/{id}/payments` (configurado sim/não, sem segredo) e `GET /ops/payments/health` (o que está travado em todas as lojas).
