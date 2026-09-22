@@ -28,7 +28,7 @@ from app.payments import registry
 from app.payments.config_service import PaymentConfigService
 from app.payments.models import InboxStatus, Payment, PaymentWebhookInbox, TenantPaymentConfig
 from app.payments.provider import InboundWebhook, WebhookHint, WebhookVerdict
-from app.payments.service import PaymentService
+from app.payments.service import PaymentService, clean_hints
 from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext, bind_session_tenant
 from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
@@ -92,11 +92,18 @@ async def ingest(
     row.dedupe_key = hint.dedupe_key[:160]
     row.event_type = (hint.event_type or "")[:64] or None
     row.resource_id = (hint.resource_id or "")[:64] or None
+    row.hints = clean_hints(hint.hints) or None
     if hint.provider_payment_id:
         row.payment_id = await session.scalar(
             select(Payment.id)
             .where(Payment.provider == provider_name)
             .where(Payment.provider_payment_id == hint.provider_payment_id)
+        )
+    if row.payment_id is None and hint.provider_reference:
+        row.payment_id = await session.scalar(
+            select(Payment.id)
+            .where(Payment.provider == provider_name)
+            .where(Payment.provider_reference == hint.provider_reference[:64])
         )
     row.status = InboxStatus.RECEIVED
     row.next_attempt_at = now
@@ -195,7 +202,7 @@ async def _handle(
         payment_id = await service.find_by_provider_id(row.provider, row.resource_id)
     if payment_id is None:
         return InboxStatus.IGNORED, "no payment of ours", None
-    outcome = await service.sync(payment_id, source="webhook")
+    outcome = await service.sync(payment_id, source="webhook", hints=row.hints)
     if outcome == "failed":  # the provider could not be asked (timeout, 5xx): retry later
         return InboxStatus.FAILED, "provider unavailable", payment_id
     return InboxStatus.PROCESSED, outcome, payment_id

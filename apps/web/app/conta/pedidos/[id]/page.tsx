@@ -66,6 +66,7 @@ export default async function OrderPage({
       {ok === "pedido" ? <p role="status">Pedido recebido!</p> : null}
       {ok === "cancelado" ? <p role="status">Pedido cancelado.</p> : null}
       {ok === "trocar" ? <p role="status">Pagamento cancelado. Escolha outro jeito de pagar.</p> : null}
+      {ok === "retorno" ? <p role="status">Você voltou do pagamento. A confirmação aparece aqui.</p> : null}
       {erro && isPaymentErrorCode(erro) ? (
         <p role="alert">{paymentError(erro)}</p>
       ) : erro === "cancel_window_closed" ? (

@@ -53,10 +53,14 @@ async def payment_webhook(
     result = await webhooks.ingest(session, tenant, provider, inbound)
     await session.commit()
     if result.status == InboxStatus.INVALID:
-        return JSONResponse({"status": "invalid_signature"}, status_code=401)
+        return JSONResponse(
+            {"status": "invalid_signature", "success": False, "message": "invalid signature"},
+            status_code=401,
+        )
     if result.status == InboxStatus.RECEIVED and result.inbox_id:
         await _dispatch(session, result.inbox_id)
-    return JSONResponse({"status": result.status})
+    # `success`/`message` is the acknowledgement InfinitePay documents; the others read the code.
+    return JSONResponse({"status": result.status, "success": True, "message": None})
 
 
 async def _dispatch(session: DbSession, inbox_id: str) -> None:

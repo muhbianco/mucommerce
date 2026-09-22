@@ -24,12 +24,13 @@ from app.orders.state_machine import OrderStatus
 from app.payments.models import ACTIVE_PAYMENT_STATUSES
 from app.payments.schemas import (
     OrderPaymentRead,
+    PaymentCheckIn,
     PaymentCreateIn,
     PaymentRead,
     order_payment_read,
     payment_read,
 )
-from app.payments.service import PaymentService
+from app.payments.service import GAVE_UP, PaymentService
 from app.tenancy.service import Actor
 
 router = APIRouter(tags=["Carrinho e checkout"])
@@ -186,13 +187,20 @@ async def create_payment(
     ],
 )
 async def check_payment(
-    request: Request, session: DbSession, shopper: CheckoutShopper, payment_id: PaymentId
+    request: Request,
+    session: DbSession,
+    shopper: CheckoutShopper,
+    payment_id: PaymentId,
+    body: PaymentCheckIn | None = None,
 ) -> PaymentRead:
     customer_id = shopper.viewer.customer_id
     service = PaymentService(session, shopper.tenant, customer_actor(request, customer_id))
     payment = await service.get_for_customer(customer_id, payment_id)
-    if payment.status in ACTIVE_PAYMENT_STATUSES:
-        await service.sync(payment.id, source="customer_check")
+    hints = body.hints() if body else {}
+    # With the provider's return data even a closed link is asked about: a payment made on it
+    # is money in the store's account (late payment), never ignored.
+    if payment.status in ACTIVE_PAYMENT_STATUSES or (hints and payment.status in GAVE_UP):
+        await service.sync(payment.id, source="customer_check", hints=hints)
     return payment_read(await service.get_for_customer(customer_id, payment_id))
 
 

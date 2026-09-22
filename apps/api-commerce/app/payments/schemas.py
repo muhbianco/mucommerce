@@ -60,6 +60,17 @@ class PaymentCreateIn(StrictModel):
         )
 
 
+class PaymentCheckIn(StrictModel):
+    """What the provider's page appended to the return address (InfinitePay): only used to ask
+    the provider about this payment."""
+
+    transaction_nsu: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")] | None = None
+    slug: Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")] | None = None
+
+    def hints(self) -> dict[str, str]:
+        return {k: v for k, v in self.model_dump().items() if v}
+
+
 class PaymentOptionRead(BaseModel):
     provider: str
     methods: list[str]

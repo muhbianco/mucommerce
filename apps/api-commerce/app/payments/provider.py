@@ -103,6 +103,9 @@ class ProviderRef:
     provider_payment_id: str | None
     provider_reference: str
     hints: Mapping[str, Any] = field(default_factory=dict)
+    # What the payment is for: providers whose status check cannot be tied to our reference
+    # (InfinitePay) refuse an answer for any other amount.
+    amount_cents: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +127,10 @@ class WebhookHint:
     event_type: str | None
     resource_id: str | None
     provider_payment_id: str | None = None
-    hints: Mapping[str, Any] = field(default_factory=dict)
+    # What the provider needs to check the payment (InfinitePay: transaction_nsu, slug). Untrusted:
+    # used only to ask the provider, never as the answer.
+    hints: Mapping[str, str] = field(default_factory=dict)
+    provider_reference: str | None = None  # our reference, when the notice carries it
 
 
 @dataclass(frozen=True, slots=True)

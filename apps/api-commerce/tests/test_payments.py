@@ -157,7 +157,7 @@ async def test_pix_paid_by_webhook_confirms_the_order_and_sells_the_stock(
     fake.settle(ext_id, "approved")
     body = fake.webhook_body(ext_id)
     received = await webhook(client, tenant, body)
-    assert received.status_code == 200 and received.json() == {"status": "received"}
+    assert received.status_code == 200 and received.json()["status"] == "received"
 
     paid = await state(client, me, order["id"])
     assert paid["order_status"] == "payment_confirmed" and paid["paid_at"]
@@ -166,7 +166,7 @@ async def test_pix_paid_by_webhook_confirms_the_order_and_sells_the_stock(
     assert await balance(session_factory, variant) == (3000, 0)  # sold, not just held
 
     duplicate = await webhook(client, tenant, body)
-    assert duplicate.json() == {"status": "duplicate"}
+    assert duplicate.json()["status"] == "duplicate"
     async with session_factory() as session:
         inbox = (
             await session.execute(

@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
@@ -72,6 +73,8 @@ MAX_ACTIVE_CHECKS = 50
 MAX_CANCEL_ATTEMPTS = 5
 GAVE_UP = frozenset({PaymentStatus.REJECTED, PaymentStatus.CANCELLED, PaymentStatus.EXPIRED})
 SyncOutcome = Literal["changed", "unchanged", "failed", "skipped"]
+HINT_KEYS = frozenset({"transaction_nsu", "slug"})
+HINT_VALUE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,10 +108,22 @@ def next_check(attempts: int, now: datetime) -> datetime:
     return now + CHECK_BACKOFF[min(attempts, len(CHECK_BACKOFF) - 1)]
 
 
-def provider_ref(payment: Payment) -> ProviderRef:
+def provider_ref(payment: Payment, hints: Mapping[str, str] | None = None) -> ProviderRef:
     return ProviderRef(
-        payment.provider_payment_id, payment.provider_reference, payment.provider_hints or {}
+        payment.provider_payment_id,
+        payment.provider_reference,
+        {**(payment.provider_hints or {}), **(hints or {})},
+        payment.amount_cents,
     )
+
+
+def clean_hints(hints: Mapping[str, object] | None) -> dict[str, str]:
+    """Hints from notices or return URLs: short plain tokens only (they only go to the provider)."""
+    return {
+        k: v
+        for k, v in (hints or {}).items()
+        if k in HINT_KEYS and isinstance(v, str) and HINT_VALUE.match(v)
+    }
 
 
 class PaymentService:
@@ -239,6 +254,12 @@ class PaymentService:
             payer_name=(order.customer_snapshot or {}).get("name"),
             expires_at=payment.expires_at,
             notification_url=self.configs.webhook_url(payment.provider),
+            return_url=(
+                f"{settings.storefront_origin(self.tenant.host)}"
+                f"/conta/pedidos/{order.id}/retorno/{payment.id}"
+                if self.tenant.host
+                else None
+            ),
             card=data.card,
             payer_identification=data.payer_identification,
         )
@@ -341,16 +362,20 @@ class PaymentService:
         )
 
     # ------------------------------------------------------------------ provider round trips
-    async def sync(self, payment_id: str, *, source: str) -> SyncOutcome:
+    async def sync(
+        self, payment_id: str, *, source: str, hints: Mapping[str, object] | None = None
+    ) -> SyncOutcome:
         """Ask the provider for the payment's current state and apply it. Commits the open
         transaction first (nothing is held while waiting for the provider); the caller commits
-        the result."""
+        the result. `hints` (from a notice or the customer's return) only help ask the provider;
+        they are kept on the payment once the provider recognised the transaction."""
         payment = await self.session.get(Payment, payment_id, populate_existing=True)
         if payment is None or registry.get_provider(payment.provider) is None:
             return "skipped"
         provider = self._provider(payment)
         creds = await self.configs.credentials(payment.provider)
-        ref = provider_ref(payment)
+        extra = clean_hints(hints)
+        ref = provider_ref(payment, extra)
         await self.session.commit()
         outcome = await self._call(
             "fetch_status", payment.provider, provider.fetch_status(creds, ref), payment_id
@@ -368,6 +393,10 @@ class PaymentService:
             self._event(payment, "fetch_status", None, None, detail={"reference_mismatch": True})
             return "failed"
         changed = await self.apply(payment, result, source=source, order=order)
+        recognised = result.provider_payment_id is not None
+        if extra and recognised and payment.provider_payment_id == result.provider_payment_id:
+            payment.provider_hints = {**(payment.provider_hints or {}), **extra}
+            await self.session.flush()
         return "changed" if changed else "unchanged"
 
     async def find_by_provider_id(self, provider_name: str, provider_payment_id: str) -> str | None:

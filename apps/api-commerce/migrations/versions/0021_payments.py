@@ -150,6 +150,7 @@ def upgrade() -> None:
         sa.Column("signature_valid", sa.Boolean(), nullable=True),
         sa.Column("headers", sa.JSON(), nullable=True),
         sa.Column("body", sa.JSON(), nullable=True),
+        sa.Column("hints", sa.JSON(), nullable=True),
         sa.Column("body_sha256", sa.String(64), nullable=False),
         sa.Column("status", sa.String(16), nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False),

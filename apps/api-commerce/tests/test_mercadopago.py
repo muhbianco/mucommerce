@@ -370,7 +370,7 @@ async def test_a_pix_through_mercado_pago_is_confirmed_by_its_signed_webhook(
         headers={"host": settings.api_public_host, "content-type": "application/json"}
         | signed("123456"),
     )
-    assert hook.status_code == 200 and hook.json() == {"status": "received"}
+    assert hook.status_code == 200 and hook.json()["status"] == "received"
     state = (await client.get(f"/api/v1/checkout/orders/{order['id']}/payment", headers=me)).json()
     assert state["order_status"] == "payment_confirmed"
     assert state["payment"]["status"] == "approved"

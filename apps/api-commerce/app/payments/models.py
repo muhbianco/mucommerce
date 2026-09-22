@@ -178,6 +178,7 @@ class PaymentWebhookInbox(UUIDPrimaryKeyMixin, TenantScoped, Base):
     signature_valid: Mapped[bool | None] = mapped_column(Boolean)
     headers: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # allow-listed only
     body: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    hints: Mapped[dict[str, Any] | None] = mapped_column(JSON)  # parsed from the body, untrusted
     body_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=InboxStatus.RECEIVED)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

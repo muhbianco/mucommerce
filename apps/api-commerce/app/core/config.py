@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     payments_fake_webhook_secret: SecretStr = SecretStr("")
     payments_http_timeout_seconds: float = 10.0
     mercadopago_api_base: str = "https://api.mercadopago.com"
+    infinitepay_api_base: str = "https://api.checkout.infinitepay.io"
     # No payment deadline goes beyond this, whatever the provider allows.
     checkout_max_order_age_minutes: int = 120
 
@@ -183,6 +184,8 @@ class Settings(BaseSettings):
                 raise ValueError("The fake payment provider is not allowed in production")
             if self.mercadopago_api_base != "https://api.mercadopago.com":
                 raise ValueError("MERCADOPAGO_API_BASE must be Mercado Pago's API in production")
+            if self.infinitepay_api_base != "https://api.checkout.infinitepay.io":
+                raise ValueError("INFINITEPAY_API_BASE must be InfinitePay's API in production")
         if len(self.jwt_secret.get_secret_value()) < 32 and self.environment != "development":
             raise ValueError("JWT_SECRET must have at least 32 characters")
         return self
