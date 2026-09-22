@@ -8,6 +8,7 @@ Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http)
 
 - `loja.localhost`           tenant `muhbianco`, public, with published products (one with sizes
                              P/M/G, M paused, tagged `algodão`)
+                             and a workshop event (`events` on) with two lots
 - `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer);
                              customers sign in with Google (apps/web/e2e/fake-google.mjs); green
                              brand colour and serif font
@@ -25,6 +26,7 @@ import base64
 import os
 import sys
 import tempfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 PORT = int(os.environ.get("E2E_API_PORT", "8791"))
@@ -74,7 +76,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import uvicorn  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
+from app.catalog.events import EventService  # noqa: E402
 from app.catalog.schemas import (  # noqa: E402
+    EventUpsert,
+    LotCreate,
     ModifierGroupIn,
     ModifierIn,
     ProductCreate,
@@ -160,6 +165,38 @@ async def _variant_product(session: AsyncSession, tenant_id: str) -> None:
     await catalog.pause_variant(product_id, medium.id, reason="E2E")
 
 
+async def _event_product(session: AsyncSession, tenant_id: str) -> None:
+    """A workshop in 20 days: lot 1 on sale, lot 2 later; capacity leaves room for one more."""
+    context = await TenantResolver(session).resolve_by_id(tenant_id)
+    catalog = CatalogService(session, context, ACTOR)
+    events = EventService(session, context, ACTOR)
+    view = await catalog.create_product(
+        ProductCreate(name="Oficina de Brownie", base_price_cents=0, kind="ticket")
+    )
+    product_id = view.product.id
+    await _ready_image(session, tenant_id, product_id)
+    starts = (datetime.now(UTC) + timedelta(days=20)).replace(minute=0, second=0, microsecond=0)
+    await events.upsert(
+        product_id,
+        EventUpsert(
+            starts_at=starts,
+            ends_at=starts + timedelta(hours=3),
+            venue_name="Cozinha MuhBianco",
+            city="São Paulo",
+            capacity=40,
+        ),
+    )
+    await events.add_lot(product_id, LotCreate(name="1º lote", price_cents=12000, quantity=20))
+    second = LotCreate(
+        name="2º lote",
+        price_cents=15000,
+        quantity=10,
+        sales_starts_at=starts - timedelta(days=5),
+    )
+    await events.add_lot(product_id, second)
+    await catalog.publish(product_id)
+
+
 async def seed() -> None:
     engine = create_app_engine(E2E_ENV["DATABASE_URL_OVERRIDE"], pooled=False)
     async with engine.begin() as connection:
@@ -172,11 +209,14 @@ async def seed() -> None:
         platform = await service.repo.get_by_slug("muhbianco")
         assert platform is not None
         store = await service.get_or_404(platform.id)  # loads domains (settings invalidate caches)
-        await service.set_features(store, {"catalog": True, "inventory": True}, ACTOR)
+        await service.set_features(
+            store, {"catalog": True, "inventory": True, "events": True}, ACTOR
+        )
         await service.set_setting(store, "storefront", {"access_mode": "public"}, ACTOR)
         await session.commit()
         await _publish_products(session, store.id)
         await _variant_product(session, store.id)
+        await _event_product(session, store.id)
         await session.commit()
 
     async with factory() as session:

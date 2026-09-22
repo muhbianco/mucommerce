@@ -204,6 +204,57 @@ export const PRODUCT_STATUS_LABEL: Record<string, string> = {
   archived: "arquivado",
 };
 
+export const PRODUCT_KINDS: Record<string, string> = {
+  physical: "Produto",
+  made_to_order: "Feito sob encomenda",
+  service: "Serviço",
+  digital: "Digital",
+  ticket: "Ingresso de evento",
+};
+
+export interface EventLot {
+  id: string;
+  variant_id: string;
+  sku: string;
+  name: string;
+  price_cents: number;
+  quantity: number;
+  available: number;
+  sales_starts_at: string | null;
+  sales_ends_at: string | null;
+  position: number;
+  state: "upcoming" | "on_sale" | "sold_out" | "ended" | "unavailable";
+}
+
+export interface ProductEvent {
+  product_id: string;
+  starts_at: string;
+  ends_at: string | null;
+  venue_name: string | null;
+  venue_address: string | null;
+  city: string | null;
+  online_url: string | null;
+  capacity: number | null;
+  allocated: number;
+  status: "scheduled" | "postponed" | "cancelled";
+  status_note: string | null;
+  lots: EventLot[];
+}
+
+export const EVENT_STATUS_LABEL: Record<ProductEvent["status"], string> = {
+  scheduled: "Confirmado",
+  postponed: "Adiado",
+  cancelled: "Cancelado",
+};
+
+export const LOT_STATE_LABEL: Record<EventLot["state"], string> = {
+  on_sale: "à venda",
+  upcoming: "vendas em breve",
+  sold_out: "esgotado",
+  ended: "encerrado",
+  unavailable: "fora de venda (produto não publicado, pausado ou evento não confirmado)",
+};
+
 export const STOCK_POLICIES: Record<string, string> = {
   tracked: "Controlar estoque",
   made_to_order: "Sob encomenda",

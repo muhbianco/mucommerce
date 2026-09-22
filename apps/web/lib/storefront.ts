@@ -32,6 +32,8 @@ export interface ProductCard {
   id: string;
   slug: string;
   name: string;
+  /** "ticket": the product's page is its event (/eventos/<slug>). */
+  kind: string;
   short_description: string | null;
   price: StorePrice;
   availability: Availability;
@@ -160,6 +162,7 @@ export function withDefaults(product: ProductDetail): ProductDetail {
     options: product.options ?? [],
     modifier_groups: product.modifier_groups ?? [],
     tags: product.tags ?? [],
+    kind: product.kind ?? "physical",
     variants: product.variants.map((variant) => ({ ...variant, option_values: variant.option_values ?? null })),
   };
 }
@@ -207,4 +210,141 @@ export function productOffers(product: ProductDetail, url: string): Record<strin
 /** Not for sale right now (sold out or paused): shown with the muted "sold out" style. */
 export function offSale(availability: Availability): boolean {
   return availability === "sold_out" || availability === "unavailable";
+}
+
+// ------------------------------------------------------------------ events
+export type EventAvailability =
+  | "on_sale"
+  | "upcoming"
+  | "sold_out"
+  | "ended"
+  | "unavailable"
+  | "postponed"
+  | "cancelled";
+export type LotState = "upcoming" | "on_sale" | "sold_out" | "ended" | "unavailable";
+
+export interface EventCard {
+  slug: string;
+  name: string;
+  short_description: string | null;
+  image: StoreImage | null;
+  starts_at: string;
+  ends_at: string | null;
+  venue_name: string | null;
+  city: string | null;
+  online: boolean;
+  availability: EventAvailability;
+  price_from: StorePrice | null;
+}
+
+export interface EventLotOffer {
+  id: string;
+  name: string;
+  price: StorePrice;
+  state: LotState;
+  sales_starts_at: string | null;
+  sales_ends_at: string | null;
+}
+
+export interface EventDetail extends EventCard {
+  sku: string;
+  description_md: string | null;
+  venue_address: string | null;
+  status_note: string | null;
+  images: StoreImage[];
+  lots: EventLotOffer[];
+  seo: { title: string | null; description: string | null };
+  updated_at: string;
+}
+
+export interface EventPage {
+  items: EventCard[];
+  next_cursor: string | null;
+}
+
+export const EVENT_AVAILABILITY_LABEL: Record<EventAvailability, string> = {
+  on_sale: "Ingressos à venda",
+  upcoming: "Vendas em breve",
+  sold_out: "Esgotado",
+  ended: "Encerrado",
+  unavailable: "Indisponível",
+  postponed: "Adiado",
+  cancelled: "Cancelado",
+};
+
+export const LOT_STATE_LABEL: Record<LotState, string> = {
+  on_sale: "À venda",
+  upcoming: "Em breve",
+  sold_out: "Esgotado",
+  ended: "Encerrado",
+  unavailable: "Indisponível",
+};
+
+const LOT_SCHEMA_AVAILABILITY: Record<LotState, string> = {
+  on_sale: "https://schema.org/InStock",
+  upcoming: "https://schema.org/PreSale",
+  sold_out: "https://schema.org/SoldOut",
+  ended: "https://schema.org/Discontinued",
+  unavailable: "https://schema.org/Discontinued",
+};
+
+/** "sábado, 5 de dezembro de 2026 às 20:00", plus "até 23:00" (same day) or the end date. */
+export function formatEventDate(startsAt: string, endsAt: string | null, timeZone: string): string {
+  const full = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full", timeStyle: "short", timeZone });
+  const day = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone });
+  const time = new Intl.DateTimeFormat("pt-BR", { timeStyle: "short", timeZone });
+  const start = new Date(startsAt);
+  if (!endsAt) return full.format(start);
+  const end = new Date(endsAt);
+  return day.format(start) === day.format(end)
+    ? `${full.format(start)} até ${time.format(end)}`
+    : `${full.format(start)} até ${full.format(end)}`;
+}
+
+/** schema.org Event: status, attendance mode, place, one Offer per lot, the store as organizer. */
+export function eventJsonLd(event: EventDetail, url: string, organizer: { name: string; url: string }): Record<string, unknown> {
+  const status =
+    event.availability === "postponed"
+      ? "https://schema.org/EventPostponed"
+      : event.availability === "cancelled"
+        ? "https://schema.org/EventCancelled"
+        : "https://schema.org/EventScheduled";
+  const place = event.venue_name
+    ? {
+        "@type": "Place",
+        name: event.venue_name,
+        address: {
+          "@type": "PostalAddress",
+          ...(event.venue_address ? { streetAddress: event.venue_address } : {}),
+          ...(event.city ? { addressLocality: event.city } : {}),
+          addressCountry: "BR",
+        },
+      }
+    : null;
+  // The real link goes to buyers only: the event page stands for it.
+  const virtual = event.online ? { "@type": "VirtualLocation", url } : null;
+  const mode =
+    place && virtual ? "MixedEventAttendanceMode" : virtual ? "OnlineEventAttendanceMode" : "OfflineEventAttendanceMode";
+  return {
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: event.name,
+    description: event.seo.description || event.short_description || undefined,
+    startDate: event.starts_at,
+    ...(event.ends_at ? { endDate: event.ends_at } : {}),
+    eventStatus: status,
+    eventAttendanceMode: `https://schema.org/${mode}`,
+    location: [place, virtual].filter(Boolean),
+    image: event.images.map((image) => image.renditions[image.renditions.length - 1]?.url).filter(Boolean),
+    organizer: { "@type": "Organization", ...organizer },
+    offers: event.lots.map((lot) => ({
+      "@type": "Offer",
+      name: lot.name,
+      url,
+      price: (lot.price.amount_cents / 100).toFixed(2),
+      priceCurrency: lot.price.currency,
+      availability: LOT_SCHEMA_AVAILABILITY[lot.state],
+      ...(lot.sales_starts_at ? { validFrom: lot.sales_starts_at } : {}),
+    })),
+  };
 }

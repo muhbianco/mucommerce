@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { cache } from "react";
 
 import { getStorefrontContext } from "@/lib/server-context";
@@ -68,6 +68,8 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
   const { slug } = await params;
   const result = await loadProduct(slug);
   const product = requireCatalog(result, `/loja/produto/${encodeURIComponent(slug)}`);
+  // A ticket's page is its event page (when the store runs events).
+  if (product.kind === "ticket" && context.features.events) permanentRedirect(`/eventos/${product.slug}`);
   const origin = storeOrigin(context);
   const url = `${origin}/loja/produto/${product.slug}`;
   const category = product.categories[0];

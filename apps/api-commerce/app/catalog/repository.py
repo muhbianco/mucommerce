@@ -94,6 +94,10 @@ class CatalogRepository:
         )
         return (await self.session.execute(stmt)).first() is not None
 
+    async def has_event(self, product_id: str) -> bool:
+        stmt = select(Event.id).where(Event.product_id == product_id).limit(1)
+        return (await self.session.execute(stmt)).first() is not None
+
     async def all_variants(self, product_id: str) -> list[ProductVariant]:
         """Every variant of the product, archived ones included (the matrix revives them)."""
         stmt = (

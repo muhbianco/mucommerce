@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   AVAILABILITY_LABEL,
+  type EventDetail,
+  eventJsonLd,
   findVariant,
+  formatEventDate,
   isIndexable,
   jsonLd,
   offSale,
@@ -112,5 +115,42 @@ describe("older API answers", () => {
     const product = withDefaults(old);
     expect([product.options, product.modifier_groups, product.tags]).toEqual([[], [], []]);
     expect(product.variants[0]?.option_values).toBeNull();
+  });
+});
+
+describe("events", () => {
+  it("formats the date in the store's time zone, with the end", () => {
+    const sameDay = formatEventDate("2026-12-05T23:00:00Z", "2026-12-06T02:00:00Z", "America/Sao_Paulo");
+    expect(sameDay).toContain("5 de dezembro de 2026");
+    expect(sameDay).toMatch(/20:00.*até 23:00$/);
+    expect(formatEventDate("2026-12-05T23:00:00Z", "2026-12-07T02:00:00Z", "America/Sao_Paulo")).toContain(
+      "6 de dezembro",
+    );
+  });
+
+  it("describes status, place and one offer per lot, never the private link", () => {
+    const price = { amount_cents: 5000, compare_at_cents: null, promo_active: false, promo_ends_at: null, currency: "BRL" };
+    const event = {
+      name: "Show",
+      short_description: null,
+      starts_at: "2026-12-05T23:00:00Z",
+      ends_at: null,
+      venue_name: "Teatro",
+      venue_address: null,
+      city: "São Paulo",
+      online: true,
+      availability: "postponed",
+      images: [],
+      seo: { title: null, description: null },
+      lots: [{ id: "l", name: "1º lote", price, state: "upcoming", sales_starts_at: "2026-11-01T00:00:00Z", sales_ends_at: null }],
+    } as unknown as EventDetail;
+    const data = eventJsonLd(event, "https://loja/eventos/show", { name: "Loja", url: "https://loja" });
+    expect(data).toMatchObject({
+      "@type": "Event",
+      eventStatus: "https://schema.org/EventPostponed",
+      eventAttendanceMode: "https://schema.org/MixedEventAttendanceMode",
+      offers: [{ price: "50.00", availability: "https://schema.org/PreSale", validFrom: "2026-11-01T00:00:00Z" }],
+    });
+    expect(JSON.stringify(data)).toContain('"url":"https://loja/eventos/show"');
   });
 });

@@ -9,9 +9,13 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   type Category,
   type Product,
+  EVENT_STATUS_LABEL,
+  LOT_STATE_LABEL,
   MODIFIER_GROUP_ROWS,
+  PRODUCT_KINDS,
   PRODUCT_OPTION_ROWS,
   PRODUCT_STATUS_LABEL,
+  type ProductEvent,
   type TagRef,
   STOCK_POLICIES,
 } from "@/lib/panel/types";
@@ -19,6 +23,9 @@ import {
 import styles from "../../../../../panel.module.css";
 import {
   deleteMedia,
+  removeLot,
+  saveEvent,
+  saveLot,
   setProductModifiers,
   setProductOptions,
   setProductStatus,
@@ -59,6 +66,15 @@ export default async function ProductPage({
     api<TagRef[]>(`${path}/tags`),
   ]);
   const otherTags = tags.filter((tag) => !product.tags.some((mine) => mine.slug === tag.slug));
+  const isTicket = product.kind === "ticket";
+  let event: ProductEvent | null = null;
+  if (isTicket && context.features.events) {
+    try {
+      event = await api<ProductEvent>(`${path}/products/${encodeURIComponent(product.id)}/event`);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 404)) throw error;
+    }
+  }
   const canWrite = scopes.can("catalog:write") && product.status !== "archived";
   const zone = context.timezone;
   const hidden = (
@@ -237,6 +253,16 @@ export default async function ProductPage({
               <input name="cost" inputMode="decimal" defaultValue={moneyInput(product.cost_cents_estimate)} />
             </label>
             <label>
+              Tipo
+              <select name="kind" defaultValue={product.kind}>
+                {Object.entries(PRODUCT_KINDS).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
               Estoque
               <select name="stock_policy" defaultValue={product.stock_policy}>
                 {Object.entries(STOCK_POLICIES).map(([value, label]) => (
@@ -317,43 +343,194 @@ export default async function ProductPage({
         </form>
       </section>
 
-      <section className={styles.card}>
-        <h2>Opções</h2>
-        <p className="muted">
-          Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com SKU, preço e estoque próprios (até 3 opções e
-          100 combinações). Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
-        </p>
-        <form action={setProductOptions} className={styles.form}>
-          {hidden}
-          {Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => (
-            <div key={i} style={{ display: "contents" }}>
+      {isTicket && context.features.events ? (
+        <section className={styles.card}>
+          <h2>Evento e lotes</h2>
+          <p className="muted">
+            Cada lote tem preço, quantidade de ingressos e janela de vendas próprios. A quantidade vira o estoque do
+            lote; diminuir nunca apaga ingressos já vendidos.
+          </p>
+          <form action={saveEvent} className={styles.form}>
+            {hidden}
+            <input type="hidden" name="time_zone" value={zone} />
+            <fieldset disabled={!canWrite} style={{ display: "contents" }}>
               <label>
-                Opção {i + 1}
-                <input
-                  name={`option_name_${i}`}
-                  maxLength={40}
-                  defaultValue={product.options[i]?.name ?? ""}
-                  disabled={!canWrite}
-                />
+                Início ({zone})
+                <input name="starts_at" type="datetime-local" required defaultValue={utcToLocalInput(event?.starts_at, zone)} />
               </label>
-              <label style={{ flexGrow: 2 }}>
-                Valores (separados por vírgula)
-                <input
-                  name={`option_values_${i}`}
-                  maxLength={900}
-                  defaultValue={product.options[i]?.values.join(", ") ?? ""}
-                  disabled={!canWrite}
-                />
+              <label>
+                Fim
+                <input name="ends_at" type="datetime-local" defaultValue={utcToLocalInput(event?.ends_at, zone)} />
               </label>
-            </div>
-          ))}
-          {canWrite ? (
-            <button type="submit" className={styles.buttonGhost}>
-              Salvar opções
-            </button>
-          ) : null}
-        </form>
-      </section>
+              <label>
+                Local
+                <input name="venue_name" maxLength={160} defaultValue={event?.venue_name ?? ""} />
+              </label>
+              <label>
+                Endereço
+                <input name="venue_address" maxLength={300} defaultValue={event?.venue_address ?? ""} />
+              </label>
+              <label>
+                Cidade
+                <input name="city" maxLength={120} defaultValue={event?.city ?? ""} />
+              </label>
+              <label>
+                Link (evento online; só para quem comprar)
+                <input name="online_url" type="url" maxLength={500} placeholder="https://" defaultValue={event?.online_url ?? ""} />
+              </label>
+              <label>
+                Capacidade (vazio = sem limite)
+                <input name="capacity" type="number" min={1} defaultValue={event?.capacity ?? ""} style={{ width: "8rem" }} />
+              </label>
+              <label>
+                Situação
+                <select name="status" defaultValue={event?.status ?? "scheduled"}>
+                  {Object.entries(EVENT_STATUS_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ flexBasis: "100%" }}>
+                Aviso aos clientes (adiado, cancelado…)
+                <input name="status_note" maxLength={300} defaultValue={event?.status_note ?? ""} />
+              </label>
+              {canWrite ? (
+                <button type="submit" className={styles.button}>
+                  Salvar evento
+                </button>
+              ) : null}
+            </fieldset>
+          </form>
+
+          {event ? (
+            <>
+              <p>
+                Ingressos nos lotes: {event.allocated}
+                {event.capacity ? ` de ${event.capacity}` : ""}
+              </p>
+              {event.lots.map((lot) => (
+                <div key={lot.id}>
+                  <form action={saveLot} className={styles.form}>
+                    {hidden}
+                    <input type="hidden" name="time_zone" value={zone} />
+                    <input type="hidden" name="lot_id" value={lot.id} />
+                    <fieldset disabled={!canWrite} style={{ display: "contents" }}>
+                      <label>
+                        Lote · {lot.sku}
+                        <input name="name" required maxLength={80} defaultValue={lot.name} />
+                      </label>
+                      <label>
+                        Preço
+                        <input name="price" required inputMode="decimal" defaultValue={moneyInput(lot.price_cents)} style={{ width: "7rem" }} />
+                      </label>
+                      <label>
+                        Ingressos ({lot.available} restantes)
+                        <input name="quantity" type="number" min={0} required defaultValue={lot.quantity} style={{ width: "7rem" }} />
+                      </label>
+                      <label>
+                        Vendas de
+                        <input name="sales_starts_at" type="datetime-local" defaultValue={utcToLocalInput(lot.sales_starts_at, zone)} />
+                      </label>
+                      <label>
+                        até
+                        <input name="sales_ends_at" type="datetime-local" defaultValue={utcToLocalInput(lot.sales_ends_at, zone)} />
+                      </label>
+                      <span className={styles.badge}>{LOT_STATE_LABEL[lot.state]}</span>
+                      {canWrite ? (
+                        <button type="submit" className={styles.buttonGhost}>
+                          Salvar lote
+                        </button>
+                      ) : null}
+                    </fieldset>
+                  </form>
+                  {canWrite ? (
+                    <form action={removeLot}>
+                      {hidden}
+                      <input type="hidden" name="lot_id" value={lot.id} />
+                      <button type="submit" className={styles.buttonGhost}>
+                        Remover lote
+                      </button>
+                    </form>
+                  ) : null}
+                </div>
+              ))}
+              {canWrite ? (
+                <form action={saveLot} className={styles.form}>
+                  {hidden}
+                  <input type="hidden" name="time_zone" value={zone} />
+                  <label>
+                    Novo lote
+                    <input name="name" required maxLength={80} placeholder="ex.: 1º lote" />
+                  </label>
+                  <label>
+                    Preço
+                    <input name="price" required inputMode="decimal" style={{ width: "7rem" }} />
+                  </label>
+                  <label>
+                    Ingressos
+                    <input name="quantity" type="number" min={0} required style={{ width: "7rem" }} />
+                  </label>
+                  <label>
+                    Vendas de
+                    <input name="sales_starts_at" type="datetime-local" />
+                  </label>
+                  <label>
+                    até
+                    <input name="sales_ends_at" type="datetime-local" />
+                  </label>
+                  <button type="submit" className={styles.button}>
+                    Criar lote
+                  </button>
+                </form>
+              ) : null}
+            </>
+          ) : (
+            <p className="muted">Salve o evento para criar os lotes.</p>
+          )}
+        </section>
+      ) : null}
+
+      {isTicket ? null : (
+        <section className={styles.card}>
+          <h2>Opções</h2>
+          <p className="muted">
+            Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com SKU, preço e estoque próprios (até 3 opções e
+            100 combinações). Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
+          </p>
+          <form action={setProductOptions} className={styles.form}>
+            {hidden}
+            {Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => (
+              <div key={i} style={{ display: "contents" }}>
+                <label>
+                  Opção {i + 1}
+                  <input
+                    name={`option_name_${i}`}
+                    maxLength={40}
+                    defaultValue={product.options[i]?.name ?? ""}
+                    disabled={!canWrite}
+                  />
+                </label>
+                <label style={{ flexGrow: 2 }}>
+                  Valores (separados por vírgula)
+                  <input
+                    name={`option_values_${i}`}
+                    maxLength={900}
+                    defaultValue={product.options[i]?.values.join(", ") ?? ""}
+                    disabled={!canWrite}
+                  />
+                </label>
+              </div>
+            ))}
+            {canWrite ? (
+              <button type="submit" className={styles.buttonGhost}>
+                Salvar opções
+              </button>
+            ) : null}
+          </form>
+        </section>
+      )}
 
       <section className={styles.card}>
         <h2>Adicionais</h2>

@@ -218,6 +218,14 @@ class CatalogService:
             "ends_at": changes.get("promo_ends_at", product.promo_ends_at),
         }
         check_promotion(**merged)
+        new_kind = changes.get("kind", product.kind)
+        if new_kind != product.kind:
+            if product.kind == ProductKind.TICKET and await self.repo.has_event(product.id):
+                raise ConflictError("Ingresso com evento não muda de tipo.", code="has_event")
+            if new_kind == ProductKind.TICKET and product.has_variants:
+                raise ConflictError(
+                    "Tire as opções antes de transformar em ingresso.", code="has_options"
+                )
         needs_price = product.kind != ProductKind.TICKET
         if needs_price and product.status in PUBLISHED_STATUSES and merged["base_cents"] <= 0:
             raise ConflictError("Produto publicado precisa de preço maior que zero.")

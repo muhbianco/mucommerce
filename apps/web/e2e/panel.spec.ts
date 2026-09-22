@@ -76,3 +76,20 @@ test("pausar a venda deixa o produto indisponível na vitrine; opções geram va
   await expect(page.getByText(/^Pequeno · P\d+$/)).toBeVisible();
   await expect(page.getByText(/^Grande · P\d+-1$/)).toBeVisible();
 });
+
+test("evento: o painel cria um lote dentro da capacidade", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Produtos" }).first().click();
+  await page.getByRole("link", { name: "Oficina de Brownie" }).click();
+  await expect(page.getByRole("heading", { name: "Evento e lotes" })).toBeVisible();
+  await expect(page.getByText("Ingressos nos lotes: 30 de 40")).toBeVisible();
+
+  await page.getByLabel("Novo lote").fill("Lote extra");
+  const form = page.locator("form").filter({ has: page.getByRole("button", { name: "Criar lote" }) });
+  await form.getByLabel("Preço").fill("90,00");
+  await form.getByLabel("Ingressos").fill("5");
+  await form.getByRole("button", { name: "Criar lote" }).click();
+  await expect(page.getByText("Lote criado; o estoque de ingressos foi contado.")).toBeVisible();
+  await expect(page.getByText("Ingressos nos lotes: 35 de 40")).toBeVisible();
+});

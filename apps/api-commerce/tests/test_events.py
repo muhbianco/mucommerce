@@ -257,3 +257,26 @@ async def test_event_rules_and_the_flag(
     assert off.status_code == 403 and off.json()["error"]["code"] == "feature_disabled"
     other = await client.get(f"{base(dark)}/products/{product['id']}/event", headers=headers)
     assert other.status_code == 404
+
+
+async def test_a_ticket_with_an_event_keeps_its_kind(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    venue: tuple[Tenant, dict[str, str], dict[str, Any]],
+) -> None:
+    tenant, headers, product = venue
+    url = f"{base(tenant)}/products/{product['id']}"
+    await client.put(f"{url}/event", json=event_body(), headers=headers)
+    changed = await client.patch(url, json={"kind": "physical"}, headers=headers)
+    assert changed.json()["error"]["details"] == {"code": "has_event"}
+
+    shirt = await create_product(client, tenant, headers, name="Camiseta")
+    await client.put(
+        f"{base(tenant)}/products/{shirt['id']}/options",
+        json={"options": [{"name": "Tamanho", "values": ["P", "M"]}]},
+        headers=headers,
+    )
+    to_ticket = await client.patch(
+        f"{base(tenant)}/products/{shirt['id']}", json={"kind": "ticket"}, headers=headers
+    )
+    assert to_ticket.json()["error"]["details"] == {"code": "has_options"}

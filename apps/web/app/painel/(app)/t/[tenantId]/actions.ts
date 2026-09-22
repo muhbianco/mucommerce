@@ -114,6 +114,7 @@ export async function updateProduct(form: FormData): Promise<void> {
         promo_starts_at: promoStarts,
         promo_ends_at: promoEnds,
         cost_cents_estimate: money(form, "cost"),
+        kind: text(form, "kind") || undefined,
         stock_policy: text(form, "stock_policy"),
         sold_by: text(form, "sold_by"),
         unit_label: text(form, "unit_label") || "un",
@@ -182,6 +183,70 @@ export async function setProductModifiers(form: FormData): Promise<void> {
       });
     }
     await api(`${path}/products/${productId}/modifiers`, { method: "PUT", json: { groups } });
+  });
+}
+
+// ------------------------------------------------------------------ events
+function eventDate(form: FormData, name: string, timeZone: string): string | null {
+  const iso = localToUtcIso(text(form, name), timeZone);
+  if (iso === "invalid") throw new FormError("data_invalida");
+  return iso;
+}
+
+/** Date, venue, capacity and status of a ticket product's event (PUT: the whole event). */
+export async function saveEvent(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  const timeZone = text(form, "time_zone") || "America/Sao_Paulo";
+  await run(`${page}/produtos/${productId}`, "evento", async () => {
+    const startsAt = eventDate(form, "starts_at", timeZone);
+    if (!startsAt) throw new FormError("data_invalida");
+    const capacity = text(form, "capacity");
+    await api(`${path}/products/${productId}/event`, {
+      method: "PUT",
+      json: {
+        starts_at: startsAt,
+        ends_at: eventDate(form, "ends_at", timeZone),
+        venue_name: optional(form, "venue_name"),
+        venue_address: optional(form, "venue_address"),
+        city: optional(form, "city"),
+        online_url: optional(form, "online_url"),
+        capacity: capacity ? Number(capacity) : null,
+        status: text(form, "status") || "scheduled",
+        status_note: optional(form, "status_note"),
+      },
+    });
+  });
+}
+
+/** New lot, or changes to one (`lot_id`); the quantity moves the tickets' stock. */
+export async function saveLot(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  const lotId = optional(form, "lot_id");
+  const timeZone = text(form, "time_zone") || "America/Sao_Paulo";
+  await run(`${page}/produtos/${productId}`, lotId ? "lote_salvo" : "lote_criado", async () => {
+    const quantity = Number(text(form, "quantity"));
+    if (!Number.isInteger(quantity) || quantity < 0) throw new FormError("quantidade_invalida");
+    const body = {
+      name: text(form, "name"),
+      price_cents: money(form, "price", { required: true }),
+      quantity,
+      sales_starts_at: eventDate(form, "sales_starts_at", timeZone),
+      sales_ends_at: eventDate(form, "sales_ends_at", timeZone),
+    };
+    const lots = `${path}/products/${productId}/event/lots`;
+    if (lotId) await api(`${lots}/${id(lotId)}`, { method: "PATCH", json: body });
+    else await api(lots, { json: body });
+  });
+}
+
+export async function removeLot(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  const lotId = id(text(form, "lot_id"));
+  await run(`${page}/produtos/${productId}`, "lote_removido", async () => {
+    await api(`${path}/products/${productId}/event/lots/${lotId}`, { method: "DELETE" });
   });
 }
 

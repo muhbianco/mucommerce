@@ -22,6 +22,7 @@ from app.catalog.models import (
     EventLot,
     EventStatus,
     Product,
+    ProductKind,
     ProductVariant,
 )
 from app.catalog.schemas import LotState
@@ -83,6 +84,7 @@ class StorefrontEvents:
         stmt = (
             select(Event, Product)
             .join(Product, Product.id == Event.product_id)
+            .where(Product.kind == ProductKind.TICKET)
             .where(Product.status.in_(PUBLISHED_STATUSES))
             .where(func.coalesce(Event.ends_at, Event.starts_at) > self.now)
             .order_by(Event.starts_at, Event.id)
@@ -105,6 +107,7 @@ class StorefrontEvents:
             select(Event, Product)
             .join(Product, Product.id == Event.product_id)
             .where(Product.slug == slug)
+            .where(Product.kind == ProductKind.TICKET)
             .where(Product.status.in_(PUBLISHED_STATUSES))
         )
         row = (await self.session.execute(stmt)).first()
@@ -117,6 +120,7 @@ class StorefrontEvents:
         stmt = (
             select(Product.slug, Product.updated_at)
             .join(Event, Event.product_id == Product.id)
+            .where(Product.kind == ProductKind.TICKET)
             .where(Product.status.in_(PUBLISHED_STATUSES))
             .order_by(Event.starts_at.desc(), Event.id)
             .limit(SITEMAP_MAX)

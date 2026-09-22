@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 interface SitemapData {
   products: { slug: string; updated_at: string }[];
   categories: string[];
+  events?: { slug: string; updated_at: string }[]; // absent from an older API
 }
 
 /** Per-tenant sitemap (the middleware attached the tenant). Empty unless the store is indexable. */
@@ -29,6 +30,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${origin}/loja/produto/${product.slug}`,
       lastModified: product.updated_at,
       changeFrequency: "weekly",
+      priority: 0.8,
+    });
+  }
+  const events = context.features.events ? (data.data.events ?? []) : [];
+  if (events.length) entries.push({ url: `${origin}/eventos`, changeFrequency: "daily", priority: 0.8 });
+  for (const event of events) {
+    entries.push({
+      url: `${origin}/eventos/${event.slug}`,
+      lastModified: event.updated_at,
+      changeFrequency: "daily",
       priority: 0.8,
     });
   }

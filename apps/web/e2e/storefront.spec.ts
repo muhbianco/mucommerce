@@ -56,6 +56,22 @@ test.describe("vitrine pública (loja modelo)", () => {
     await expect(page.getByText("Brownie de chocolate")).toHaveCount(0);
   });
 
+  test("eventos: lista, página com lotes e JSON-LD Event; o produto-ingresso vai para o evento", async ({ page }) => {
+    await page.goto(`${STORE}/eventos`);
+    await page.getByRole("link", { name: /Oficina de Brownie/ }).click();
+    await expect(page).toHaveURL(/\/eventos\/oficina-de-brownie$/);
+    await expect(page.getByRole("heading", { name: "Oficina de Brownie" })).toBeVisible();
+    await expect(page.getByRole("row", { name: /1º lote/ })).toContainText("À venda");
+    await expect(page.getByRole("row", { name: /2º lote/ })).toContainText("Em breve");
+
+    const scripts = await page.locator('script[type="application/ld+json"]').allTextContents();
+    const types = scripts.map((text) => (JSON.parse(text) as { "@type"?: string })["@type"]);
+    expect(types).toContain("Event");
+
+    await page.goto(`${STORE}/loja/produto/oficina-de-brownie`);
+    await expect(page).toHaveURL(/\/eventos\/oficina-de-brownie$/);
+  });
+
   test("produto inexistente é 404", async ({ page }) => {
     const response = await page.goto(`${STORE}/loja/produto/nao-existe`);
     expect(response?.status()).toBe(404);

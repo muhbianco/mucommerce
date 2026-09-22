@@ -92,6 +92,22 @@
   color: #991b1b;
 }
 
+.lots {
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.lots caption {
+  text-align: left;
+  font-weight: 600;
+}
+
+.lots th,
+.lots td {
+  padding: 0.35rem 0.75rem 0.35rem 0;
+  text-align: left;
+}
+
 .picker fieldset {
   border: 0;
   padding: 0;
