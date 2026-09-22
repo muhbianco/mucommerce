@@ -14,6 +14,8 @@ from app.audit.models import OutboxEvent
 from app.audit.outbox import registry
 from app.core.logging import get_logger
 from app.core.storage import get_storage
+from app.notifications.notifier import EVENT_TYPES as NOTIFIED_EVENTS
+from app.notifications.notifier import notifier
 from app.workers.media import process_media_task
 
 logger = get_logger(__name__)
@@ -56,5 +58,6 @@ async def media_janitor(session: AsyncSession, event: OutboxEvent) -> None:
 
 
 registry.register("audit_projector", ("*",), audit_projector)
+registry.register("notifier", NOTIFIED_EVENTS, notifier)
 registry.register("media_processor", ("media.uploaded",), media_processor)
 registry.register("media_janitor", ("media.deleted",), media_janitor)

@@ -140,6 +140,13 @@ class Settings(BaseSettings):
     # No payment deadline goes beyond this, whatever the provider allows.
     checkout_max_order_age_minutes: int = 120
 
+    # --- transactional e-mail (stage E) ------------------------------------------------
+    # n8n webhook that sends the store's e-mails; empty means e-mails are only recorded.
+    notify_n8n_url: str = ""
+    notify_n8n_secret: SecretStr = SecretStr("")
+    notify_from_name: str = "MuhBianco"
+    notify_http_timeout_seconds: float = 10.0
+
     # --- cors -----------------------------------------------------------------------
     cors_origins: str = ""
 
@@ -186,6 +193,10 @@ class Settings(BaseSettings):
                 raise ValueError("MERCADOPAGO_API_BASE must be Mercado Pago's API in production")
             if self.infinitepay_api_base != "https://api.checkout.infinitepay.io":
                 raise ValueError("INFINITEPAY_API_BASE must be InfinitePay's API in production")
+            if self.notify_n8n_url and not self.notify_n8n_secret.get_secret_value():
+                raise ValueError("NOTIFY_N8N_SECRET is required when NOTIFY_N8N_URL is set")
+            if self.notify_n8n_url and not self.notify_n8n_url.startswith("https://"):
+                raise ValueError("NOTIFY_N8N_URL must be https in production")
         if len(self.jwt_secret.get_secret_value()) < 32 and self.environment != "development":
             raise ValueError("JWT_SECRET must have at least 32 characters")
         return self

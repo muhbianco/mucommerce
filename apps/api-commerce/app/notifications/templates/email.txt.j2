@@ -1,0 +1,17 @@
+{{ store_name }}
+
+{{ heading }}
+
+{% for paragraph in paragraphs %}{{ paragraph }}
+
+{% endfor %}{% if items %}{% for item in items %}{{ item.label }}: {{ item.value }}
+{% endfor %}
+{% endif %}{% if code %}{{ code_label }}
+{{ code }}
+
+{% endif %}{% if cta_url %}{{ cta_label }}: {{ cta_url }}
+
+{% endif %}{% if note %}{{ note }}
+{% endif %}
+--
+{{ store_name }} · este e-mail foi enviado automaticamente.

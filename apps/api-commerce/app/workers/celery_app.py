@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.workers.media",
         "app.workers.orders",
         "app.workers.payments",
+        "app.workers.notifications",
     ],
 )
 
@@ -44,6 +45,7 @@ celery_app.conf.update(
         "app.workers.payments.reconcile_payments": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.process_refund": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.sweep_refunds": {"queue": QUEUE_PAYMENTS},
+        "app.workers.notifications.send_notifications": {"queue": QUEUE_NOTIFICATIONS},
     },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -79,6 +81,10 @@ celery_app.conf.update(
             "schedule": 60.0,
         },
         "sweep-refunds": {"task": "app.workers.payments.sweep_refunds", "schedule": 60.0},
+        "send-notifications": {
+            "task": "app.workers.notifications.send_notifications",
+            "schedule": 15.0,
+        },
         "audit-inventory-ledger": {
             "task": "app.workers.tasks.audit_inventory_ledger",
             "schedule": 86400.0,

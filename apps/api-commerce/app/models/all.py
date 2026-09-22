@@ -29,11 +29,13 @@ from app.inventory.models import (
 )
 from app.media.models import MediaAsset
 from app.models.base import Base
+from app.notifications.models import NotificationDelivery
 from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.payments.models import (
     Payment,
     PaymentEvent,
     PaymentWebhookInbox,
+    Refund,
     TenantPaymentConfig,
 )
 from app.tenancy.models import (
@@ -67,6 +69,7 @@ __all__ = [
     "InventoryReservation",
     "LegalDocument",
     "MediaAsset",
+    "NotificationDelivery",
     "Order",
     "OrderItem",
     "OrderStatusHistory",
@@ -79,6 +82,7 @@ __all__ = [
     "Product",
     "ProductCategory",
     "ProductVariant",
+    "Refund",
     "StockAdjustment",
     "Tenant",
     "TenantDomain",

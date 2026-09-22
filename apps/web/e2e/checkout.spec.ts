@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { API, FAKE_GOOGLE, STORE } from "./playwright.config";
+import { API, FAKE_GOOGLE, FAKE_N8N, STORE } from "./playwright.config";
 
 // One shared seeded database: the purchase runs in order (cart → checkout → payment).
 test.describe.configure({ mode: "serial" });
@@ -123,4 +123,10 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await expect(page.getByText("Pagamento aprovado")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText("Pagamento confirmado", { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel("Pix copia e cola")).toHaveCount(0);
+
+  // The store writes to the customer: the beat runs the outbox and the e-mails (n8n).
+  await page.request.post(`${API}/__e2e/tick`, { data: {} });
+  const inbox = await page.request.get(`${FAKE_N8N}/__e2e/messages?to=${BIA.email}`);
+  const subjects = (await inbox.json()).map((m: { subject: string }) => m.subject);
+  expect(subjects.some((s: string) => s.startsWith("Pagamento confirmado"))).toBe(true);
 });

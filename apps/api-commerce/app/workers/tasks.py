@@ -10,6 +10,7 @@ from app.core.logging import get_logger
 from app.customers.repository import purge_auth_flows, purge_sessions
 from app.identity.repository import AdminUserRepository
 from app.inventory.service import audit_ledger, reserved_mismatches
+from app.notifications.jobs import purge_notification_bodies
 from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
@@ -105,7 +106,8 @@ CUSTOMER_SESSION_RETENTION = timedelta(days=7)
 @celery_app.task(name="app.workers.tasks.purge_expired_records")
 def purge_expired_records() -> dict[str, int]:
     """Daily: idempotency keys past their TTL, refresh tokens expired for a week, customer
-    sign-in flows older than a day, customer sessions expired or revoked for a week."""
+    sign-in flows older than a day, customer sessions expired or revoked for a week, and the
+    bodies of e-mails sent over a month ago."""
 
     async def _run(session: AsyncSession) -> dict[str, int]:
         return {
@@ -120,6 +122,7 @@ def purge_expired_records() -> dict[str, int]:
                 session, older_than=CUSTOMER_SESSION_RETENTION
             ),
             "carts": await purge_carts(session),
+            "notification_bodies": await purge_notification_bodies(session),
         }
 
     purged = run_async(with_session(_run))

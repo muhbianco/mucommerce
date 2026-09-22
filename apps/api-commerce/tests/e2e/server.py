@@ -20,7 +20,7 @@ the image (this file is not shipped):
 - `POST /__e2e/payments/settle`  {"tenant", "status"}: the store's latest open payment is paid
   (or refused) at the fake provider, which then sends its signed webhook to the real endpoint;
 - `POST /__e2e/tick`             {"minutes"}: runs the beat jobs (webhook sweep, reconciliation,
-  order expiry, refunds) as if `minutes` had passed.
+  order expiry, refunds, outbox consumers and e-mails) as if `minutes` had passed.
 
 Panel login goes through apps/web/e2e/fake-accounts.mjs, which plays the MuhBianco accounts
 service (api-agents) at MUHBIANCO_ACCOUNTS_INTERNAL_URL. The file lives under tests/ so it never
@@ -72,6 +72,9 @@ E2E_ENV = {
     "GOOGLE_OIDC_JWKS_URL": f"http://127.0.0.1:{GOOGLE_PORT}/certs",
     "STOREFRONT_ORIGIN_TEMPLATE": f"http://{{host}}:{WEB_PORT}",
     "REDIS_URL": "",
+    # The store's e-mails go to apps/web/e2e/fake-n8n.mjs (the workflow checks the signature).
+    "NOTIFY_N8N_URL": os.environ.get("NOTIFY_N8N_URL", ""),
+    "NOTIFY_N8N_SECRET": os.environ.get("NOTIFY_N8N_SECRET", ""),
     "PAYMENTS_ALLOWED_PROVIDERS": "fake",
     "PAYMENTS_FAKE_WEBHOOK_SECRET": "e2e-" + "w" * 32,
     "CELERY_BROKER_URL": "",
@@ -90,6 +93,7 @@ from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
+from app.audit import outbox  # noqa: E402
 from app.catalog.events import EventService  # noqa: E402
 from app.catalog.schemas import (  # noqa: E402
     EventUpsert,
@@ -109,6 +113,7 @@ from app.main import app  # noqa: E402
 from app.media.models import MediaAsset, MediaStatus  # noqa: E402
 from app.models.all import Base  # noqa: E402  (every model, for create_all)
 from app.models.base import utcnow  # noqa: E402
+from app.notifications.jobs import run_send_notifications  # noqa: E402
 from app.orders.jobs import run_expire_orders  # noqa: E402
 from app.payments.config_service import PaymentConfigIn, PaymentConfigService  # noqa: E402
 from app.payments.jobs import run_reconcile_payments  # noqa: E402
@@ -335,13 +340,24 @@ async def settle_latest(body: SettleIn) -> dict[str, object]:
 
 @e2e.post("/tick")
 async def tick(body: TickIn) -> dict[str, int]:
+    """The beat, on demand: webhooks, reconciliation, deadlines, refunds, outbox and e-mails."""
     now = utcnow() + timedelta(minutes=body.minutes)
-    return {
+    counts = {
         "webhooks": await run_process_webhooks(SessionFactory, now),
         "reconciled": await run_reconcile_payments(SessionFactory, now),
         "expired": await run_expire_orders(SessionFactory, now),
         "refunds": await run_process_refunds(SessionFactory, now),
     }
+    async with SessionFactory() as session:
+        dispatch = await outbox.relay_pending(session)
+        await session.commit()
+    for event_id, consumer in dispatch:
+        async with SessionFactory() as session:
+            await outbox.deliver(session, event_id, consumer)
+            await session.commit()
+    counts["events"] = len(dispatch)
+    counts["emails"] = await run_send_notifications(SessionFactory, utcnow())
+    return counts
 
 
 def main() -> None:
