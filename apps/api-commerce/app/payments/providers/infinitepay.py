@@ -36,6 +36,7 @@ from app.payments.provider import (
     ProviderCredentials,
     ProviderError,
     ProviderRef,
+    RefundResult,
     WebhookHint,
     WebhookVerdict,
 )
@@ -191,6 +192,14 @@ class InfinitePayProvider:
 
     async def cancel(self, creds: ProviderCredentials, ref: ProviderRef) -> ChargeResult | None:
         return None  # no cancel API: an unpaid link simply stays unpaid
+
+    async def refund(
+        self, creds: ProviderCredentials, ref: ProviderRef, amount_cents: int, *, idempotency: str
+    ) -> RefundResult:
+        # Never called (capabilities.refunds is False: refunds are external, with evidence).
+        raise ProviderError(
+            "InfinitePay has no refund API", code="refund_unsupported", definitive=True
+        )
 
     def verify_webhook(self, creds: ProviderCredentials, inbound: InboundWebhook) -> WebhookVerdict:
         return WebhookVerdict.UNSUPPORTED  # InfinitePay does not sign its notices

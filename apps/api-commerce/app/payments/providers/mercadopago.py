@@ -38,6 +38,7 @@ from app.payments.provider import (
     ProviderCredentials,
     ProviderError,
     ProviderRef,
+    RefundResult,
     WebhookHint,
     WebhookVerdict,
 )
@@ -149,6 +150,7 @@ def result_from(data: Mapping[str, Any], http_status: int | None = None) -> Char
             "date_approved": data.get("date_approved"),
         },
         http_status=http_status,
+        refunded_cents=to_cents(data.get("transaction_amount_refunded")),
     )
 
 
@@ -337,6 +339,29 @@ class MercadoPagoProvider:
             # Not cancellable any more (approved meanwhile, already expired): report its state.
             status, data = await self._request(creds, "GET", f"/v1/payments/{payment_id}")
         return result_from(data, status)
+
+    async def refund(
+        self, creds: ProviderCredentials, ref: ProviderRef, amount_cents: int, *, idempotency: str
+    ) -> RefundResult:
+        """`POST /v1/payments/{id}/refunds` with our refund id as the idempotency key. The amount
+        always goes explicitly (MP reads no body as "everything"). The refund object's `status`
+        is not documented in detail: anything but a clear refusal or "in process" is taken as
+        done, and the payment's own status (refunded / partially refunded) confirms it later."""
+        payment_id = _checked_id(ref.provider_payment_id or "")
+        _, data = await self._request(
+            creds,
+            "POST",
+            f"/v1/payments/{payment_id}/refunds",
+            body={"amount": to_amount(amount_cents)},
+            idempotency=idempotency,
+        )
+        refund_id = str(data["id"]) if data.get("id") is not None else None
+        status = str(data.get("status") or "")
+        if status in ("rejected", "cancelled"):
+            return RefundResult(status="failed", provider_refund_id=refund_id, detail=status)
+        if status in ("in_process", "pending"):
+            return RefundResult(status="pending", provider_refund_id=refund_id, detail=status)
+        return RefundResult(status="completed", provider_refund_id=refund_id, detail=status or None)
 
     # ------------------------------------------------------------------ webhooks
     def verify_webhook(self, creds: ProviderCredentials, inbound: InboundWebhook) -> WebhookVerdict:

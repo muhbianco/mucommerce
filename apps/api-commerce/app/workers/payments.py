@@ -8,6 +8,7 @@ from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.payments import webhooks
 from app.payments.jobs import run_reconcile_payments
+from app.payments.refunds import process_one, refund_tenant, run_process_refunds
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async, with_factory
 
@@ -50,3 +51,30 @@ def reconcile_payments() -> int:
     if changed:
         logger.info("Payments reconciled", extra={"changed": changed})
     return changed
+
+
+@celery_app.task(name="app.workers.payments.process_refund")
+def process_refund(refund_id: str) -> str:
+    """Right after a refund is approved. A lost message is picked up by the sweep."""
+
+    async def _run(factory: async_sessionmaker[AsyncSession]) -> str:
+        async with factory() as session:
+            tenant_id = await refund_tenant(session, refund_id)
+            if tenant_id is None:
+                return "missing"
+            return await process_one(session, refund_id, tenant_id)
+
+    return run_async(with_factory(_run))
+
+
+@celery_app.task(name="app.workers.payments.sweep_refunds")
+def sweep_refunds() -> int:
+    """Every minute: approved provider refunds due (lost task, retry after a failure, lease out)."""
+
+    async def _run(factory: async_sessionmaker[AsyncSession]) -> int:
+        return await run_process_refunds(factory, utcnow())
+
+    completed = run_async(with_factory(_run))
+    if completed:
+        logger.info("Refunds completed", extra={"count": completed})
+    return completed

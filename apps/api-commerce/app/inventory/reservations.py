@@ -2,7 +2,8 @@
 
 reserve (place) → commit (payment approved: on_hand leaves with a sale_commit movement) |
 release (cancelled before payment) | expire (deadline). A committed reservation may be
-returned (paid order cancelled with restock). Invariant: a balance's reserved_milli equals the
+returned (paid order cancelled with restock); an expired one may be recovered (paid late, the
+stock is still there). Invariant: a balance's reserved_milli equals the
 sum of its active reservations; both only change while the balance row is locked, and balances
 are always locked in variant id order (InventoryRepository.lock_balances), so two orders over
 the same variants queue instead of deadlocking.
@@ -97,6 +98,39 @@ class ReservationService:
             reservation.release_reason = reason[:32]
         await self.session.flush()
         return len(reservations)
+
+    async def recover(self, order_id: str) -> bool:
+        """A payment arrived after the deadline: sell the expired lines after all, but only if
+        every one of them is still available now (all or nothing). Returns whether it did."""
+        reservations = await self._reservations(order_id, ReservationStatus.EXPIRED)
+        if not reservations:
+            return True  # nothing tracked: nothing to take from the shelf
+        balances = await self._lock([r.variant_id for r in reservations])
+        for reservation in reservations:
+            balance = balances.get(reservation.variant_id)
+            if balance is None:
+                return False
+            available = balance.on_hand_milli - balance.reserved_milli
+            if available < reservation.quantity_milli:
+                return False
+        now = utcnow()
+        low: list[str] = []
+        for reservation in reservations:
+            balance = balances[reservation.variant_id]
+            before = balance.on_hand_milli
+            balance.on_hand_milli -= reservation.quantity_milli
+            self._movement(
+                reservation, MovementType.SALE_COMMIT, -reservation.quantity_milli, balance, now
+            )
+            reservation.status = ReservationStatus.COMMITTED
+            reservation.committed_at = now
+            reservation.release_reason = None
+            if _crossed_below(balance, before):
+                low.append(reservation.variant_id)
+        await self.session.flush()
+        for variant_id in low:
+            await self._low_stock(variant_id, balances[variant_id])
+        return True
 
     async def return_stock(self, order_id: str, *, reason: str) -> int:
         """A paid order was cancelled with restock: committed stock comes back to the shelf."""

@@ -27,6 +27,7 @@ from app.core.rate_limit import rate_limit
 from app.orders.schemas import OrderRead
 from app.orders.service import OrderService
 from app.orders.state_machine import ActorKind
+from app.payments.cancellation import cancel_order, dispatch_refunds
 from app.schemas.common import StrictModel
 
 router = APIRouter(tags=["Clientes"])
@@ -111,12 +112,21 @@ async def cancel_my_order(
     order_id: OrderId,
     body: CancelIn | None = None,
 ) -> OrderRead:
-    service = OrderService(session, tenant, customer_actor(request, viewer.customer_id))
+    actor = customer_actor(request, viewer.customer_id)
+    service = OrderService(session, tenant, actor)
     order = await service.get_for_customer(viewer.customer_id, order_id, lock=True)
     try:
-        await service.cancel(
-            order, ActorKind.CUSTOMER, reason=(body.reason if body else None) or "customer"
+        refunds = await cancel_order(
+            session,
+            tenant,
+            actor,
+            order,
+            ActorKind.CUSTOMER,
+            reason=(body.reason if body else None) or "customer",
         )
     except InvalidTransitionError as exc:
         raise CancelWindowClosedError(status=order.status) from exc
-    return await customer_order_read(session, service, order)
+    read = await customer_order_read(session, service, order)
+    await session.commit()  # the cancellation and its refund stand before any money moves
+    await dispatch_refunds(session, tenant, refunds)
+    return read

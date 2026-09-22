@@ -21,7 +21,7 @@ from app.audit.outbox import emit
 from app.audit.writer import audit
 from app.cart.models import Cart, CartItem, CartStatus
 from app.cart.service import CartService
-from app.catalog.models import StockPolicy
+from app.catalog.models import Event, EventStatus, StockPolicy
 from app.core.exceptions import (
     CartAlreadyConvertedError,
     CartChangedError,
@@ -191,10 +191,47 @@ class OrderService:
         """Payment approved (or nothing to pay): stock leaves, the order is paid; the store's
         auto-accept moves it on."""
         await ReservationService(self.session, self.tenant, self.actor).commit(order.id)
+        await self._paid(order, source=source, reason=reason)
+
+    async def recover_late_payment(self, order: Order, *, source: str) -> bool:
+        """A payment approved after the order failed: the order comes back to life only if every
+        line is still available and no ticket's event is over or cancelled (all or nothing).
+        False leaves the order failed (the payment side refunds the money)."""
+        if order.status != OrderStatus.FAILED:
+            return False
+        if not await self._events_still_on(order):
+            return False
+        if not await ReservationService(self.session, self.tenant, self.actor).recover(order.id):
+            return False
+        await self._paid(order, source=source, reason="late_payment_recovered")
+        return True
+
+    async def _events_still_on(self, order: Order) -> bool:
+        event_ids = [
+            str(item.event["event_id"])
+            for item in await self.items(order.id)
+            if item.event and item.event.get("event_id")
+        ]
+        if not event_ids:
+            return True
+        now = utcnow()
+        rows = (
+            await self.session.execute(
+                select(Event.status, Event.starts_at, Event.ends_at).where(Event.id.in_(event_ids))
+            )
+        ).all()
+        if len(rows) != len(set(event_ids)):
+            return False
+        return all(
+            status != EventStatus.CANCELLED and (ends_at or starts_at) > now
+            for status, starts_at, ends_at in rows
+        )
+
+    async def _paid(self, order: Order, *, source: str, reason: str | None) -> None:
         await self._transition(
             order, OrderStatus.PAYMENT_CONFIRMED, ActorKind.SYSTEM, source=source, reason=reason
         )
-        await self._emit(order, "order.paid")
+        await self._emit(order, "order.paid", late=reason == "late_payment_recovered")
         if checkout_settings(self.tenant.settings).auto_accept:
             await self._transition(
                 order, OrderStatus.ACCEPTED, ActorKind.SYSTEM, source="system", reason="auto_accept"

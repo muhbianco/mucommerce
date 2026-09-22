@@ -347,3 +347,74 @@ async def test_one_approval_seen_by_many_at_once_sells_the_stock_once(
         ).scalar_one()
     assert len(confirmations) == 1 and len(sales) == 1
     assert (balance.on_hand_milli, balance.reserved_milli) == (4000, 0)
+
+
+async def test_two_refunds_at_once_never_exceed_what_was_paid(
+    session_factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two operators refunding the same payment at the same moment queue on the order and
+    payment rows: the second sees what the first took and is refused."""
+    from app.core.config import settings
+    from app.orders.commands import CartSource, Contact, PlaceOrder
+    from app.orders.models import Order
+    from app.orders.service import OrderService
+    from app.payments.config_service import PaymentConfigIn, PaymentConfigService
+    from app.payments.models import Refund
+    from app.payments.provider import CardInput
+    from app.payments.providers import fake
+    from app.payments.refunds import RefundService, RefundTooLargeError
+    from app.payments.service import PaymentCreate, PaymentService
+
+    monkeypatch.setattr(settings, "payments_allowed_providers", "fake")
+    tenant = await _selling_context(session_factory, "alpha")
+    variant = await _published(session_factory, tenant, "Brownie", 5)
+    customer_id, version, total, cart_id = await _cart(session_factory, tenant, [variant])
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        await PaymentConfigService(session, tenant, ACTOR).save(
+            "fake", PaymentConfigIn(enabled=True)
+        )
+        placed = await OrderService(session, tenant, ACTOR).place(
+            PlaceOrder(
+                origin="storefront",
+                customer_id=customer_id,
+                idempotency_key=cart_id,
+                source=CartSource(cart_id, version),
+                contact=Contact("Cliente"),
+                expected_total_cents=total,
+            )
+        )
+        await session.commit()
+        order_id = placed.order.id
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        card = CardInput(fake.APPROVE_TOKEN, "visa", None, 1)
+        payment = await PaymentService(session, tenant, ACTOR).create(
+            order_id, customer_id, PaymentCreate("fake", "card", card), "key-refund"
+        )
+        await session.commit()
+        assert payment.status == "approved" and payment.paid_amount_cents == total
+
+    async def refund(amount: int) -> str:
+        async with session_factory() as session:
+            bind_session_tenant(session, tenant.id)
+            order = (
+                await session.execute(select(Order).where(Order.id == order_id).with_for_update())
+            ).scalar_one()
+            try:
+                await RefundService(session, tenant, ACTOR).request(
+                    order, kind="operator", reason="teste", amount_cents=amount
+                )
+            except RefundTooLargeError:
+                await session.rollback()
+                return "refused"
+            await session.commit()
+            return "ok"
+
+    share = total * 2 // 3  # two of these do not fit in the payment
+    outcomes = await asyncio.gather(refund(share), refund(share))
+    assert sorted(outcomes) == ["ok", "refused"]
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        amounts = (await session.execute(select(Refund.amount_cents))).scalars().all()
+    assert list(amounts) == [share]

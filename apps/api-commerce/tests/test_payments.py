@@ -341,7 +341,7 @@ async def test_an_unpaid_order_expires_after_the_grace_and_the_pix_is_cancelled(
     assert (row.status, row.next_check_at) == ("expired", None)
 
 
-async def test_a_pix_paid_after_the_order_expired_is_flagged_as_late(
+async def test_a_pix_paid_after_the_order_expired_revives_it_while_the_stock_is_there(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     paying: tuple[Tenant, dict[str, str], dict[str, Any], str],
@@ -351,21 +351,18 @@ async def test_a_pix_paid_after_the_order_expired_is_flagged_as_late(
     ext_id = await provider_id(session_factory, payment["id"])
     await _deadline_passed(session_factory, order["id"], GRACE + timedelta(minutes=1))
     assert await run_expire_orders(session_factory, utcnow()) == 1
+    assert await balance(session_factory, variant) == (5000, 0)  # let go at the deadline
     fake.settle(ext_id, "approved")  # paid before our cancel reached the provider
 
     assert await run_reconcile_payments(session_factory, utcnow() + timedelta(seconds=1)) == 1
     row = await order_row(session_factory, order["id"])
-    assert row.status == "failed"  # the order stays failed: the stock was already let go
+    assert row.status == "payment_confirmed"  # the stock was still there: sold after all
     assert row.risk_flags == {"late_payment": payment["id"]}
     assert (await payment_row(session_factory, payment["id"])).status == "approved"
-    assert await balance(session_factory, variant) == (5000, 0)
-    async with session_factory() as session:
-        late = await session.scalar(
-            select(OutboxEvent.id)
-            .where(OutboxEvent.event_type == "payment.late")
-            .execution_options(**CROSS)
-        )
-    assert late is not None
+    assert await balance(session_factory, variant) == (3000, 0)
+    history = (await client.get(f"/api/v1/me/orders/{order['id']}", headers=me)).json()["timeline"]
+    assert [e["status"] for e in history] == ["awaiting_payment", "failed", "payment_confirmed"]
+    assert history[-1]["reason"] == "late_payment_recovered"
 
 
 async def test_the_customer_can_give_up_on_a_pix_and_cancelling_the_order_closes_it(

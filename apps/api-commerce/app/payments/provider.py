@@ -96,6 +96,7 @@ class ChargeResult:
     payer: Mapping[str, Any] | None = None  # brand, last four, masked document
     raw_summary: Mapping[str, Any] = field(default_factory=dict)
     http_status: int | None = None
+    refunded_cents: int | None = None  # refunded so far, as the provider sees it
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +135,15 @@ class WebhookHint:
 
 
 @dataclass(frozen=True, slots=True)
+class RefundResult:
+    """`pending`: accepted, not final yet (asked again with the same idempotency key)."""
+
+    status: Literal["completed", "pending", "failed"]
+    provider_refund_id: str | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CredentialTest:
     ok: bool
     detail: str | None = None
@@ -162,6 +172,10 @@ class PaymentProvider(Protocol):
     async def fetch_status(self, creds: ProviderCredentials, ref: ProviderRef) -> ChargeResult: ...
 
     async def cancel(self, creds: ProviderCredentials, ref: ProviderRef) -> ChargeResult | None: ...
+
+    async def refund(
+        self, creds: ProviderCredentials, ref: ProviderRef, amount_cents: int, *, idempotency: str
+    ) -> RefundResult: ...
 
     def verify_webhook(
         self, creds: ProviderCredentials, inbound: InboundWebhook

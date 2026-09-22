@@ -25,7 +25,9 @@ from app.payments.provider import (
     PixData,
     ProviderCapabilities,
     ProviderCredentials,
+    ProviderError,
     ProviderRef,
+    RefundResult,
     WebhookHint,
     WebhookVerdict,
 )
@@ -34,6 +36,9 @@ from app.payments.provider import (
 APPROVE_TOKEN = "approve-card"  # noqa: S105
 _LEDGER: dict[str, ChargeResult] = {}
 _BY_REFERENCE: dict[str, str] = {}
+_REFUNDS: dict[str, RefundResult] = {}  # idempotency key -> the answer given the first time
+# Test switch: provider payment id -> "transient" (outage) or "refused" (definitive).
+REFUND_FAILURES: dict[str, str] = {}
 # A 1x1 transparent PNG: enough for the page to show "the QR code".
 _QR = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
 
@@ -112,6 +117,33 @@ class FakeProvider:
         if current.status in (PaymentStatus.PENDING, PaymentStatus.REQUIRES_ACTION):
             return settle(payment_id, PaymentStatus.CANCELLED)
         return current
+
+    async def refund(
+        self, creds: ProviderCredentials, ref: ProviderRef, amount_cents: int, *, idempotency: str
+    ) -> RefundResult:
+        payment_id = ref.provider_payment_id
+        if payment_id is None or payment_id not in _LEDGER:
+            raise ProviderError("unknown payment", code="not_found", definitive=True)
+        if idempotency in _REFUNDS:
+            return _REFUNDS[idempotency]  # a retry: the same refund, not a second one
+        failure = REFUND_FAILURES.get(payment_id)
+        if failure == "transient":
+            raise ProviderError("fake outage", code="unavailable")
+        if failure == "refused":
+            raise ProviderError("fake refused the refund", code="refund_refused", definitive=True)
+        current = _LEDGER[payment_id]
+        refunded = (current.refunded_cents or 0) + amount_cents
+        status = (
+            PaymentStatus.REFUNDED
+            if refunded >= (current.paid_amount_cents or 0)
+            else PaymentStatus.PARTIALLY_REFUNDED
+        )
+        _LEDGER[payment_id] = replace(
+            current, status=status, provider_status=status, refunded_cents=refunded
+        )
+        result = RefundResult(status="completed", provider_refund_id=f"fake-refund-{new_id()}")
+        _REFUNDS[idempotency] = result
+        return result
 
     def verify_webhook(self, creds: ProviderCredentials, inbound: InboundWebhook) -> WebhookVerdict:
         sent = inbound.headers.get("x-fake-signature", "")

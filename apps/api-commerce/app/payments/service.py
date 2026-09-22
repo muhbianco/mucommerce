@@ -50,7 +50,7 @@ from app.payments import registry
 from app.payments.closing import close_active_payment
 from app.payments.config_service import PaymentConfigService
 from app.payments.events import emit_payment, record_event
-from app.payments.models import ACTIVE_PAYMENT_STATUSES, Payment, PaymentStatus
+from app.payments.models import ACTIVE_PAYMENT_STATUSES, Payment, PaymentStatus, RefundKind
 from app.payments.provider import (
     CardInput,
     ChargeRequest,
@@ -60,6 +60,7 @@ from app.payments.provider import (
     ProviderError,
     ProviderRef,
 )
+from app.payments.refunds import RefundService
 from app.payments.status import CLOSED, can_transition
 from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
 from app.tenancy.service import Actor
@@ -296,6 +297,13 @@ class PaymentService:
             :80
         ] or payment.provider_status_detail
         payment.raw_summary = dict(result.raw_summary) or payment.raw_summary
+        if result.refunded_cents and result.refunded_cents > payment.refunded_cents:
+            # Refunded at the provider beyond our completed refunds: ours in flight, or done in
+            # the provider's panel. Amounts only ever come from our refund rows (no double count).
+            logger.warning(
+                "Provider reports more refunded than recorded",
+                extra={"payment_id": payment.id, "provider_refunded": result.refunded_cents},
+            )
         target = result.status
         if target == payment.status or not can_transition(payment.status, target):
             if target != payment.status and not (payment.status in GAVE_UP and target in GAVE_UP):
@@ -332,7 +340,19 @@ class PaymentService:
         await emit_payment(self.session, self.tenant.id, payment, f"payment.{target}")
         if target == PaymentStatus.APPROVED:
             await self._approved(payment, order)
+        elif target == PaymentStatus.CHARGEBACK:
+            await self._chargeback(payment, order)
         return True
+
+    async def _chargeback(self, payment: Payment, order: Order | None) -> None:
+        """The cardholder disputed the charge and the bank took the money back. The stock is not
+        touched (the goods may be gone); the store is told and the order is marked."""
+        order = order or await self._lock_order(payment.order_id)
+        flags = dict(order.risk_flags or {})
+        flags["chargeback"] = payment.id
+        order.risk_flags = flags
+        await self.session.flush()
+        logger.error("Payment charged back", extra={"payment_id": payment.id, "order_id": order.id})
 
     async def _approved(self, payment: Payment, order: Order | None) -> None:
         order = order or await self._lock_order(payment.order_id)
@@ -346,19 +366,39 @@ class PaymentService:
                 self.session, self.tenant.id, self.actor.id, order.id, reason="superseded"
             )
             return
-        # Paid after the order failed, was cancelled, or was already paid by another payment:
-        # the money is in the store's account. Flag it; the refund/recovery flow handles it.
+        # Paid after the order failed or was cancelled, or paid twice: the money is in the
+        # store's account. A failed order comes back if its stock is still there; otherwise
+        # (and always for a cancelled or already paid order) the money goes back by policy.
         kind = "duplicate" if order.paid_at else "late"
         flags = dict(order.risk_flags or {})
         flags[f"{kind}_payment"] = payment.id
         order.risk_flags = flags
         await self.session.flush()
+        orders = OrderService(self.session, self.tenant, self.actor)
+        if kind == "late" and await orders.recover_late_payment(order, source="payment"):
+            await close_active_payment(
+                self.session, self.tenant.id, self.actor.id, order.id, reason="superseded"
+            )
+            logger.warning(
+                "Late payment recovered the order",
+                extra={"payment_id": payment.id, "order_id": order.id},
+            )
+            await emit_payment(
+                self.session, self.tenant.id, payment, "payment.late", recovered=True
+            )
+            return
         logger.error(
             "Payment approved for an order not awaiting payment",
             extra={"payment_id": payment.id, "order_id": order.id, "order_status": order.status},
         )
         await emit_payment(
             self.session, self.tenant.id, payment, f"payment.{kind}", order_status=order.status
+        )
+        await RefundService(self.session, self.tenant, self.actor).request(
+            order,
+            kind=RefundKind.DUPLICATE_PAYMENT if kind == "duplicate" else RefundKind.LATE_PAYMENT,
+            reason="Pagamento em dobro" if kind == "duplicate" else "Pagamento depois do prazo",
+            payment_id=payment.id,
         )
 
     # ------------------------------------------------------------------ provider round trips

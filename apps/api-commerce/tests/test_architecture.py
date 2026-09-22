@@ -4,6 +4,9 @@
   `OrderService.place`: every order — storefront, panel, agents — goes through the same gate.
 - An `InventoryReservation` is built only in `ReservationService`, which keeps reserved_milli
   and the reservations in step under the balance lock.
+- An order is cancelled only through `payments.cancellation.cancel_order`, which requests the
+  refund of a paid order in the same transaction: no path cancels a paid order and keeps the
+  money.
 - Money-moving provider calls (`create_charge`, `fetch_status`, `cancel` on a provider) happen
   only in `PaymentService`, whose round trips commit first and lock after: no transaction or
   lock is ever held while a payment provider answers.
@@ -88,4 +91,21 @@ def test_only_the_payment_service_calls_payment_providers() -> None:
             outside = rel != "payments/service.py" or scope[:1] != ["PaymentService"]
             if isinstance(receiver, ast.Name) and receiver.id == "provider" and outside:
                 offenders.append(f"{rel}: provider.cancel in {'.'.join(scope)}")
+    assert not offenders, offenders
+
+
+def test_orders_are_cancelled_only_with_their_refund() -> None:
+    """Any `.cancel(...)` call is either the provider round trip inside PaymentService or the
+    order cancel inside `cancel_order` (whatever variable holds the OrderService)."""
+    allowed = {
+        ("payments/cancellation.py", "cancel_order"),
+        ("payments/service.py", "_cancel_at_provider"),
+    }
+    offenders = [
+        f"{path.relative_to(APP).as_posix()}: .cancel in {'.'.join(scope)}"
+        for path, tree, _ in _sources()
+        for call, scope in _calls(tree, "cancel")
+        if isinstance(call.func, ast.Attribute)
+        and (path.relative_to(APP).as_posix(), scope[-1]) not in allowed
+    ]
     assert not offenders, offenders

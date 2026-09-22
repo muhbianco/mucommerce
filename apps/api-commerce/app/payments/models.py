@@ -186,3 +186,77 @@ class PaymentWebhookInbox(UUIDPrimaryKeyMixin, TenantScoped, Base):
     received_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     processed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     result_detail: Mapped[str | None] = mapped_column(String(500))
+
+
+class RefundStatus(StrEnum):
+    REQUESTED = "requested"  # above the store's limit: waits for a second person (four eyes)
+    APPROVED = "approved"  # to be sent to the provider, or done by hand (external)
+    PROCESSING = "processing"  # sent to the provider; claimed with a lease
+    COMPLETED = "completed"
+    FAILED = "failed"
+    REJECTED = "rejected"
+
+
+# Refunds that count against what can still be refunded on a payment.
+COUNTED_REFUND_STATUSES = frozenset(
+    {
+        RefundStatus.REQUESTED,
+        RefundStatus.APPROVED,
+        RefundStatus.PROCESSING,
+        RefundStatus.COMPLETED,
+    }
+)
+
+
+class RefundKind(StrEnum):
+    CUSTOMER_CANCEL = "customer_cancel"  # the customer cancelled a paid order (store policy)
+    OPERATOR = "operator"  # the store refunded (part of) an order, or cancelled a paid one
+    LATE_PAYMENT = "late_payment"  # paid after the order failed or was cancelled
+    DUPLICATE_PAYMENT = "duplicate_payment"  # a second payment for an order already paid
+
+
+class RefundMethod(StrEnum):
+    PROVIDER = "provider"  # through the provider's API (Mercado Pago)
+    EXTERNAL = "external"  # done by the store in the provider's app, proven with evidence
+
+
+class Refund(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Money going back to a customer. Invariant (under the payment lock): the refunds that
+    count never add up to more than the payment's paid amount."""
+
+    __tablename__ = "refunds"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "order_id"], ["orders.tenant_id", "orders.id"], name="fk_refunds_order"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "payment_id"],
+            ["payments.tenant_id", "payments.id"],
+            name="fk_refunds_payment",
+        ),
+        Index("ix_refunds_order", "tenant_id", "order_id", "requested_at"),
+        Index("ix_refunds_payment", "tenant_id", "payment_id"),
+        Index("ix_refunds_due", "status", "next_attempt_at"),
+    )
+
+    order_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    payment_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reason: Mapped[str] = mapped_column(String(200), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    method: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider_refund_id: Mapped[str | None] = mapped_column(String(64))
+    requested_by_actor: Mapped[str] = mapped_column(String(120), nullable=False)
+    approved_by_actor: Mapped[str | None] = mapped_column(String(120))
+    rejected_by_actor: Mapped[str | None] = mapped_column(String(120))
+    rejection_reason: Mapped[str | None] = mapped_column(String(200))
+    completed_by_actor: Mapped[str | None] = mapped_column(String(120))
+    external_evidence: Mapped[str | None] = mapped_column(String(500))
+    failure_message: Mapped[str | None] = mapped_column(String(300))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    requested_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

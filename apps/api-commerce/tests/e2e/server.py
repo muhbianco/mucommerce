@@ -20,7 +20,7 @@ the image (this file is not shipped):
 - `POST /__e2e/payments/settle`  {"tenant", "status"}: the store's latest open payment is paid
   (or refused) at the fake provider, which then sends its signed webhook to the real endpoint;
 - `POST /__e2e/tick`             {"minutes"}: runs the beat jobs (webhook sweep, reconciliation,
-  order expiry) as if `minutes` had passed.
+  order expiry, refunds) as if `minutes` had passed.
 
 Panel login goes through apps/web/e2e/fake-accounts.mjs, which plays the MuhBianco accounts
 service (api-agents) at MUHBIANCO_ACCOUNTS_INTERNAL_URL. The file lives under tests/ so it never
@@ -114,6 +114,7 @@ from app.payments.config_service import PaymentConfigIn, PaymentConfigService  #
 from app.payments.jobs import run_reconcile_payments  # noqa: E402
 from app.payments.models import Payment  # noqa: E402
 from app.payments.providers import fake  # noqa: E402
+from app.payments.refunds import run_process_refunds  # noqa: E402
 from app.payments.webhooks import run_process_webhooks  # noqa: E402
 from app.tenancy.context import bind_session_tenant  # noqa: E402
 from app.tenancy.models import TenantStatus  # noqa: E402
@@ -339,6 +340,7 @@ async def tick(body: TickIn) -> dict[str, int]:
         "webhooks": await run_process_webhooks(SessionFactory, now),
         "reconciled": await run_reconcile_payments(SessionFactory, now),
         "expired": await run_expire_orders(SessionFactory, now),
+        "refunds": await run_process_refunds(SessionFactory, now),
     }
 
 

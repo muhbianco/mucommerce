@@ -55,6 +55,7 @@ COVERED_TENANT_SCOPED_TABLES = {
     "payments",
     "payment_events",
     "payment_webhook_inbox",
+    "refunds",
     "tenant_settings",
     "tenant_feature_flags",
     "tenant_sequences",

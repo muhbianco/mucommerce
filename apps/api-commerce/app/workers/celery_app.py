@@ -42,6 +42,8 @@ celery_app.conf.update(
         "app.workers.payments.process_webhook": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.sweep_webhooks": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.reconcile_payments": {"queue": QUEUE_PAYMENTS},
+        "app.workers.payments.process_refund": {"queue": QUEUE_PAYMENTS},
+        "app.workers.payments.sweep_refunds": {"queue": QUEUE_PAYMENTS},
     },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -76,6 +78,7 @@ celery_app.conf.update(
             "task": "app.workers.payments.reconcile_payments",
             "schedule": 60.0,
         },
+        "sweep-refunds": {"task": "app.workers.payments.sweep_refunds", "schedule": 60.0},
         "audit-inventory-ledger": {
             "task": "app.workers.tasks.audit_inventory_ledger",
             "schedule": 86400.0,
