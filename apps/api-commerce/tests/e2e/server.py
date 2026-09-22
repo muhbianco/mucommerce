@@ -210,9 +210,22 @@ async def seed() -> None:
         assert platform is not None
         store = await service.get_or_404(platform.id)  # loads domains (settings invalidate caches)
         await service.set_features(
-            store, {"catalog": True, "inventory": True, "events": True}, ACTOR
+            store,
+            {
+                "catalog": True,
+                "inventory": True,
+                "events": True,
+                "checkout": True,
+                "pickup": True,
+                "customer_login": True,
+            },
+            ACTOR,
         )
         await service.set_setting(store, "storefront", {"access_mode": "public"}, ACTOR)
+        pickup = {"name": "Loja MuhBianco", "address": "Rua E2E, 100"}
+        await service.set_setting(
+            store, "fulfillment", {"pickup": {"enabled": True, "locations": [pickup]}}, ACTOR
+        )
         await session.commit()
         await _publish_products(session, store.id)
         await _variant_product(session, store.id)

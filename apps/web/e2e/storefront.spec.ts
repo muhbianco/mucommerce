@@ -30,6 +30,8 @@ test.describe("vitrine pública (loja modelo)", () => {
 
   test("variantes: o tamanho escolhido mostra preço e disponibilidade; a tag filtra", async ({ page }) => {
     await page.goto(`${STORE}/loja/produto/camiseta-muhbianco`);
+    // The buy button turns on once the picker is live: choices made before would be reset.
+    await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toBeEnabled();
     const status = page.getByRole("status");
     await expect(page.getByRole("group", { name: "Tamanho" })).toBeVisible();
     await expect(status).toContainText(/R\$\s*59,00/);

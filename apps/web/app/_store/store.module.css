@@ -92,6 +92,14 @@
   color: #991b1b;
 }
 
+.buy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
 .lots {
   border-collapse: collapse;
   margin: 1rem 0;

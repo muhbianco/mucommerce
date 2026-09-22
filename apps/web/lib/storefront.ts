@@ -239,6 +239,7 @@ export interface EventCard {
 
 export interface EventLotOffer {
   id: string;
+  variant_id: string;
   name: string;
   price: StorePrice;
   state: LotState;

@@ -159,6 +159,7 @@ class SitemapData(BaseModel):
 
 class LotOfferRef(BaseModel):
     id: str
+    variant_id: str  # what the cart adds
     name: str
     price: Price
     state: LotState
@@ -443,6 +444,7 @@ async def storefront_event(session: DbSession, tenant: EventsReader, slug: str) 
         lots=[
             LotOfferRef(
                 id=offer.lot.id,
+                variant_id=offer.variant.id,
                 name=offer.variant.name,
                 price=_cents(offer.variant.price_cents or 0, tenant.currency),
                 state=offer.state,

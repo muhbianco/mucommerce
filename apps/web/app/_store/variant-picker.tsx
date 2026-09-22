@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   AVAILABILITY_LABEL,
@@ -14,6 +14,7 @@ import {
   type StoreVariant,
 } from "@/lib/storefront";
 
+import { addToCart } from "./cart-actions";
 import styles from "./store.module.css";
 
 /**
@@ -24,10 +25,13 @@ export function VariantPicker({
   options,
   variants,
   modifierGroups,
+  buy,
 }: {
   options: ProductOption[];
   variants: StoreVariant[];
   modifierGroups: StoreModifierGroup[];
+  /** The store sells online: show the buy form (back = this page, for the sign-in round trip). */
+  buy?: { back: string };
 }) {
   const first = variants.find((v) => v.availability === "available") ?? variants[0];
   const [selection, setSelection] = useState<Record<string, string>>(first?.option_values ?? {});
@@ -35,6 +39,10 @@ export function VariantPicker({
     modifierGroups.flatMap((group) => (group.min_select > 0 ? group.modifiers.slice(0, group.min_select) : [])).map((m) => m.id),
   );
   const chosen = options.length ? findVariant(variants, selection) : variants[0];
+  // The buy form carries the choice in hidden inputs that React fills: until the component is
+  // live, a click would send the server-rendered default (not what the customer picked).
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
   const extra = modifiersTotal(modifierGroups, extras);
 
   // Radios only for "choose exactly one"; an optional single choice is a checkbox that can be
@@ -112,6 +120,21 @@ export function VariantPicker({
           <span className={styles.soldOut}>{AVAILABILITY_LABEL.unavailable}</span>
         )}
       </p>
+      {buy ? (
+        <form action={addToCart} className={styles.buy}>
+          <input type="hidden" name="variant_id" value={chosen?.id ?? ""} />
+          <input type="hidden" name="back" value={buy.back} />
+          {extras.map((id) => (
+            <input key={id} type="hidden" name="modifier_ids" value={id} />
+          ))}
+          <label>
+            Quantidade <input name="quantity" inputMode="numeric" defaultValue="1" size={4} />
+          </label>{" "}
+          <button type="submit" className="button" disabled={!ready || !chosen || offSale(chosen.availability)}>
+            Adicionar ao carrinho
+          </button>
+        </form>
+      ) : null}
     </div>
   );
 }

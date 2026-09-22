@@ -18,6 +18,7 @@ import {
   storeOrigin,
 } from "@/lib/storefront";
 
+import { AddToCart, CART_ERRORS } from "../../_store/add-to-cart";
 import { StoreImage } from "../../_store/store-image";
 import { StoreShell } from "../../_store/store-shell";
 import styles from "../../_store/store.module.css";
@@ -59,16 +60,24 @@ function salesWindow(start: string | null, end: string | null, timeZone: string)
   return "";
 }
 
-export default async function EventPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function EventPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ erro?: string }>;
+}) {
   const context = await getStorefrontContext();
   if (!context) notFound();
   const { slug } = await params;
+  const { erro } = await searchParams;
   const event = requireCatalog(await loadEvent(slug), `/eventos/${encodeURIComponent(slug)}`);
   const origin = storeOrigin(context);
   const url = `${origin}/eventos/${event.slug}`;
   const zone = context.tenant.timezone;
   const [cover] = event.images;
   const structured = eventJsonLd(event, url, { name: context.tenant.name, url: origin });
+  const sells = Boolean(context.features.checkout);
 
   return (
     <StoreShell context={context}>
@@ -110,6 +119,7 @@ export default async function EventPage({ params }: { params: Promise<{ slug: st
             {event.status_note ? ` ${event.status_note}` : ""}
           </p>
           {event.short_description ? <p>{event.short_description}</p> : null}
+          {erro ? <p role="alert">{CART_ERRORS[erro] ?? "Não foi possível adicionar. Tente de novo."}</p> : null}
           {event.lots.length ? (
             <table className={styles.lots}>
               <caption>Ingressos</caption>
@@ -124,13 +134,20 @@ export default async function EventPage({ params }: { params: Promise<{ slug: st
                       </span>
                     </td>
                     <td className="muted">{salesWindow(lot.sales_starts_at, lot.sales_ends_at, zone)}</td>
+                    {sells ? (
+                      <td>
+                        {lot.state === "on_sale" ? (
+                          <AddToCart variantId={lot.variant_id} back={`/eventos/${event.slug}`} label="Comprar" />
+                        ) : null}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : null}
           {event.description_md ? <div className={styles.description}>{event.description_md}</div> : null}
-          <p className="muted">Compra de ingressos online chega em breve.</p>
+          {sells ? null : <p className="muted">Compra de ingressos online chega em breve.</p>}
         </div>
       </div>
     </StoreShell>

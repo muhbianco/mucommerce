@@ -18,6 +18,7 @@ import {
   storeOrigin,
 } from "@/lib/storefront";
 
+import { AddToCart, CART_ERRORS } from "../../../_store/add-to-cart";
 import { StoreImage } from "../../../_store/store-image";
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
@@ -62,10 +63,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   };
 }
 
-export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function ProductPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ erro?: string }>;
+}) {
   const context = await getStorefrontContext();
   if (!context) notFound();
   const { slug } = await params;
+  const { erro } = await searchParams;
   const result = await loadProduct(slug);
   const product = requireCatalog(result, `/loja/produto/${encodeURIComponent(slug)}`);
   // A ticket's page is its event page (when the store runs events).
@@ -73,6 +81,8 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
   const origin = storeOrigin(context);
   const url = `${origin}/loja/produto/${product.slug}`;
   const category = product.categories[0];
+  const sells = Boolean(context.features.checkout);
+  const back = `/loja/produto/${product.slug}`;
 
   const structured = [
     {
@@ -151,19 +161,35 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               ))}
             </p>
           ) : null}
+          {erro ? <p role="alert">{CART_ERRORS[erro] ?? "Não foi possível adicionar. Tente de novo."}</p> : null}
           {product.options.length || product.modifier_groups.length ? (
-            <VariantPicker options={product.options} variants={product.variants} modifierGroups={product.modifier_groups} />
+            <VariantPicker
+              options={product.options}
+              variants={product.variants}
+              modifierGroups={product.modifier_groups}
+              buy={sells ? { back } : undefined}
+            />
           ) : product.variants.length > 1 ? (
             <ul>
               {product.variants.map((variant) => (
                 <li key={variant.id}>
                   {variant.name}: {formatPrice(variant.price)} · {AVAILABILITY_LABEL[variant.availability]}
+                  {sells && !offSale(variant.availability) ? (
+                    <AddToCart variantId={variant.id} back={back} byWeight={product.sold_by === "weight"} />
+                  ) : null}
                 </li>
               ))}
             </ul>
+          ) : sells && product.variants[0] ? (
+            <AddToCart
+              variantId={product.variants[0].id}
+              back={back}
+              disabled={offSale(product.availability)}
+              byWeight={product.sold_by === "weight"}
+            />
           ) : null}
           {product.description_md ? <div className={styles.description}>{product.description_md}</div> : null}
-          <p className="muted">Pedidos online chegam em breve.</p>
+          {sells ? null : <p className="muted">Pedidos online chegam em breve.</p>}
         </div>
       </div>
     </StoreShell>
