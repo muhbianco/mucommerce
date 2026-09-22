@@ -182,6 +182,8 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     # Off until their phase ships (catálogo completo, checkout, Chatwoot): a module switched on
     # in the site admin must do something.
     "events": False,
+    # Stage E: master switch for cart, checkout and payments (needs `customer_login` too).
+    "checkout": False,
     "pickup": False,
     "delivery": False,
     "manufacturing": False,

@@ -8,6 +8,7 @@ change adds a V2 model plus a data migration, never an in-place reinterpretation
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -124,8 +125,18 @@ class FulfillmentV1(_Setting):
 
 
 class CheckoutV1(_Setting):
+    # Only `reserve_on_place` is implemented (ADR 0011); the other value is ignored.
     reservation_mode: Literal["reserve_on_place", "decrement_on_payment"] = "reserve_on_place"
+    # Order deadline: payment window before the reservation is released.
     pix_ttl_minutes: Annotated[int, Field(ge=5, le=1440)] = 30
+    # Paid orders skip `payment_confirmed` and go straight to `accepted`.
+    auto_accept: bool = False
+    # Last status in which the customer may still cancel a paid order (refund + restock).
+    customer_cancel_until: Literal["payment_confirmed", "accepted"] = "accepted"
+    # Orders awaiting payment one customer may have open at once (anti stock hoarding).
+    max_open_orders: Annotated[int, Field(ge=1, le=10)] = 3
+    # Refunds above this need a second person to approve (four eyes).
+    refund_four_eyes_threshold_cents: Annotated[int, Field(ge=0, le=100_000_000)] = 20_000
 
 
 SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
@@ -158,3 +169,8 @@ def validate_setting(key: str, value: dict[str, Any]) -> tuple[int, dict[str, An
         ]
         raise ValidationError("Configuração inválida.", key=key, errors=errors) from exc
     return version, parsed.model_dump(mode="json")
+
+
+def checkout_settings(settings: Mapping[str, Any]) -> CheckoutV1:
+    """The store's checkout settings; missing keys (older rows) take the defaults."""
+    return CheckoutV1.model_validate(settings.get("checkout") or {})
