@@ -83,3 +83,4 @@ export const STORE = `http://loja.localhost:${WEB_PORT}`;
 export const CLOSED_STORE = `http://fechada.loja.localhost:${WEB_PORT}`;
 export const PANEL = `http://painel.localhost:${WEB_PORT}`;
 export const FAKE_GOOGLE = `http://127.0.0.1:${GOOGLE_PORT}`;
+export const API = `http://127.0.0.1:${API_PORT}`;

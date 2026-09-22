@@ -6,16 +6,26 @@ import { notFound, redirect } from "next/navigation";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { type Order, orderStatusLabel } from "@/lib/orders";
+import { type OrderPayment, paymentError } from "@/lib/payments";
 import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice } from "@/lib/storefront";
 
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
 import { cancelOrder } from "../../actions";
+import { PaymentSection } from "./payment-section";
 
 export const metadata: Metadata = { title: "Pedido", robots: { index: false, follow: false } };
 
 const ID = /^[0-9a-f-]{36}$/;
+const PAYMENT_ERROR_CODES = new Set([
+  "payment_in_progress",
+  "order_not_payable",
+  "provider_not_enabled",
+  "payment_not_cancellable",
+  "rate_limited",
+  "provider_refused",
+]);
 
 function money(cents: number, currency: string): string {
   return formatPrice({ amount_cents: cents, compare_at_cents: null, promo_active: false, promo_ends_at: null, currency });
@@ -42,6 +52,13 @@ export default async function OrderPage({
     if (error instanceof CustomerApiError && error.status === 404) notFound();
     throw error;
   }
+  // The payment part needs the store's `checkout` module; without it the order page still works.
+  let payment: OrderPayment | null = null;
+  try {
+    payment = await customerApi<OrderPayment>(`/checkout/orders/${id}/payment`);
+  } catch (error) {
+    if (!(error instanceof CustomerApiError) || error.status >= 500) throw error;
+  }
   const { ok, erro } = await searchParams;
   const zone = context.tenant.timezone;
   const when = (iso: string) =>
@@ -56,7 +73,10 @@ export default async function OrderPage({
       <h1>Pedido #{order.number}</h1>
       {ok === "pedido" ? <p role="status">Pedido recebido!</p> : null}
       {ok === "cancelado" ? <p role="status">Pedido cancelado.</p> : null}
-      {erro === "cancel_window_closed" ? (
+      {ok === "trocar" ? <p role="status">Pagamento cancelado. Escolha outro jeito de pagar.</p> : null}
+      {erro && PAYMENT_ERROR_CODES.has(erro) ? (
+        <p role="alert">{paymentError(erro)}</p>
+      ) : erro === "cancel_window_closed" ? (
         <p role="alert">Este pedido não pode mais ser cancelado por aqui. Fale com a loja.</p>
       ) : erro ? (
         <p role="alert">Não foi possível cancelar. Tente de novo.</p>
@@ -87,7 +107,7 @@ export default async function OrderPage({
       {order.fulfillment_type === "pickup" ? <p>Retirada: {place}</p> : null}
       {order.fulfillment_type === "delivery" ? <p>Entrega: {place}</p> : null}
       {order.scheduled_start ? <p>Horário: {when(order.scheduled_start)}</p> : null}
-      {order.status === "awaiting_payment" ? <p className="muted">O pagamento online chega em breve nesta loja.</p> : null}
+      {payment ? <PaymentSection state={payment} when={when} /> : null}
       {["awaiting_payment", "payment_confirmed", "accepted"].includes(order.status) ? (
         <form action={cancelOrder}>
           <input type="hidden" name="order_id" value={order.id} />

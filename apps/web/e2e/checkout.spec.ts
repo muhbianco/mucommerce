@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { FAKE_GOOGLE, STORE } from "./playwright.config";
+import { API, FAKE_GOOGLE, STORE } from "./playwright.config";
 
 // One shared seeded database: the purchase runs in order (cart → checkout → payment).
 test.describe.configure({ mode: "serial" });
@@ -88,4 +88,39 @@ test("meus pedidos: lista e cancela o pedido que aguarda pagamento", async ({ pa
   await expect(page.getByText("Pedido cancelado.")).toBeVisible();
   await expect(page.getByText("Cancelado", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancelar pedido" })).toHaveCount(0);
+});
+
+test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) => {
+  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
+  const product = `${STORE}/loja/produto/camiseta-muhbianco`;
+  await page.goto(`${STORE}/entrar?next=${encodeURIComponent("/loja/produto/camiseta-muhbianco")}`);
+  await page.getByRole("link", { name: "Entrar com Google" }).click();
+  await expect(page).toHaveURL(product);
+  const buy = page.getByRole("button", { name: "Adicionar ao carrinho" });
+  await expect(buy).toBeEnabled();
+  await page.getByRole("radio", { name: "P" }).check();
+  await expect(page.getByRole("status")).toContainText(/R\$\s*59,00/);
+  await buy.click();
+  await expect(page).toHaveURL(/\/carrinho\?ok=adicionado$/);
+  await page.getByLabel(/Retirar em Loja MuhBianco/).check();
+  await page.getByRole("button", { name: "Usar esta opção" }).click();
+  await page.getByRole("link", { name: "Finalizar compra" }).click();
+  const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
+  if (await accept.count()) await accept.check();
+  await page.getByRole("button", { name: "Fazer pedido" }).click();
+  await expect(page).toHaveURL(/\/conta\/pedidos\/[0-9a-f-]{36}\?ok=pedido$/);
+
+  await page.getByRole("button", { name: "Pagar com Pix" }).click();
+  await expect(page).toHaveURL(/\?ok=pagamento$/);
+  await expect(page.getByText("Aguardando o seu pagamento")).toBeVisible();
+  await expect(page.getByRole("img", { name: "QR Code do Pix" })).toBeVisible();
+  await expect(page.getByLabel("Pix copia e cola")).toHaveValue(/^00020126fake/);
+  await expect(page.getByRole("button", { name: "Pagar com Pix" })).toHaveCount(0); // one at a time
+
+  // The bank pays; the provider notifies the store; the page notices by itself (no reload).
+  const settled = await page.request.post(`${API}/__e2e/payments/settle`, { data: { tenant: "muhbianco" } });
+  expect((await settled.json()).webhook).toBe(200);
+  await expect(page.getByText("Pagamento aprovado")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Pagamento confirmado", { exact: true }).first()).toBeVisible();
+  await expect(page.getByLabel("Pix copia e cola")).toHaveCount(0);
 });

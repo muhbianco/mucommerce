@@ -14,6 +14,14 @@ Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http)
                              brand colour and serif font
 - `suspensa.loja.localhost`  tenant `suspensa`, suspended (503)
 
+`muhbianco` takes payments with the in-memory fake provider (Pix). Test-only routes, never in
+the image (this file is not shipped):
+
+- `POST /__e2e/payments/settle`  {"tenant", "status"}: the store's latest open payment is paid
+  (or refused) at the fake provider, which then sends its signed webhook to the real endpoint;
+- `POST /__e2e/tick`             {"minutes"}: runs the beat jobs (webhook sweep, reconciliation,
+  order expiry) as if `minutes` had passed.
+
 Panel login goes through apps/web/e2e/fake-accounts.mjs, which plays the MuhBianco accounts
 service (api-agents) at MUHBIANCO_ACCOUNTS_INTERNAL_URL. The file lives under tests/ so it never
 ships in the image (.dockerignore).
@@ -64,6 +72,8 @@ E2E_ENV = {
     "GOOGLE_OIDC_JWKS_URL": f"http://127.0.0.1:{GOOGLE_PORT}/certs",
     "STOREFRONT_ORIGIN_TEMPLATE": f"http://{{host}}:{WEB_PORT}",
     "REDIS_URL": "",
+    "PAYMENTS_ALLOWED_PROVIDERS": "fake",
+    "PAYMENTS_FAKE_WEBHOOK_SECRET": "e2e-" + "w" * 32,
     "CELERY_BROKER_URL": "",
     "METRICS_ENABLED": "false",
     "DOCS_ENABLED": "false",
@@ -73,7 +83,11 @@ E2E_ENV = {
 os.environ.update(E2E_ENV)
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import httpx  # noqa: E402
 import uvicorn  # noqa: E402
+from fastapi import APIRouter  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
 from app.catalog.events import EventService  # noqa: E402
@@ -90,9 +104,17 @@ from app.catalog.schemas import (  # noqa: E402
 )
 from app.catalog.service import CatalogService  # noqa: E402
 from app.cli import _seed_platform_in_session  # noqa: E402
-from app.core.database import create_app_engine  # noqa: E402
+from app.core.database import SessionFactory, create_app_engine  # noqa: E402
+from app.main import app  # noqa: E402
 from app.media.models import MediaAsset, MediaStatus  # noqa: E402
 from app.models.all import Base  # noqa: E402  (every model, for create_all)
+from app.models.base import utcnow  # noqa: E402
+from app.orders.jobs import run_expire_orders  # noqa: E402
+from app.payments.config_service import PaymentConfigIn, PaymentConfigService  # noqa: E402
+from app.payments.jobs import run_reconcile_payments  # noqa: E402
+from app.payments.models import Payment  # noqa: E402
+from app.payments.providers import fake  # noqa: E402
+from app.payments.webhooks import run_process_webhooks  # noqa: E402
 from app.tenancy.context import bind_session_tenant  # noqa: E402
 from app.tenancy.models import TenantStatus  # noqa: E402
 from app.tenancy.orm_filter import register_tenant_filter  # noqa: E402
@@ -230,6 +252,10 @@ async def seed() -> None:
         await _publish_products(session, store.id)
         await _variant_product(session, store.id)
         await _event_product(session, store.id)
+        context = await TenantResolver(session).resolve_by_id(store.id)
+        await PaymentConfigService(session, context, ACTOR).save(
+            "fake", PaymentConfigIn(enabled=True, is_default=True, methods=["pix"])
+        )
         await session.commit()
 
     async with factory() as session:
@@ -263,11 +289,65 @@ async def seed() -> None:
     await engine.dispose()
 
 
+# ------------------------------------------------------------------------------ /__e2e routes
+e2e = APIRouter(prefix="/__e2e", include_in_schema=False)
+
+
+class SettleIn(BaseModel):
+    tenant: str = "muhbianco"
+    status: str = "approved"
+
+
+class TickIn(BaseModel):
+    minutes: int = 0
+
+
+@e2e.post("/payments/settle")
+async def settle_latest(body: SettleIn) -> dict[str, object]:
+    async with SessionFactory() as session:
+        tenant = await TenantService(session).repo.get_by_slug(body.tenant)
+        assert tenant is not None
+        bind_session_tenant(session, tenant.id)
+        payment = await session.scalar(
+            select(Payment)
+            .where(Payment.active_order_id.is_not(None))
+            .order_by(Payment.created_at.desc())
+            .limit(1)
+        )
+        if payment is None or payment.provider_payment_id is None:
+            return {"settled": None}
+        public_key = tenant.public_key
+    fake.settle(payment.provider_payment_id, body.status)
+    raw = fake.webhook_body(payment.provider_payment_id)
+    async with httpx.AsyncClient(timeout=10) as client:
+        sent = await client.post(
+            f"http://127.0.0.1:{PORT}/api/v1/webhooks/fake/{public_key}",
+            content=raw,
+            headers={
+                "host": E2E_ENV["API_PUBLIC_HOST"],
+                "content-type": "application/json",
+                "x-fake-signature": fake.signature(raw),
+            },
+        )
+    return {"settled": payment.id, "webhook": sent.status_code}
+
+
+@e2e.post("/tick")
+async def tick(body: TickIn) -> dict[str, int]:
+    now = utcnow() + timedelta(minutes=body.minutes)
+    return {
+        "webhooks": await run_process_webhooks(SessionFactory, now),
+        "reconciled": await run_reconcile_payments(SessionFactory, now),
+        "expired": await run_expire_orders(SessionFactory, now),
+    }
+
+
 def main() -> None:
     register_tenant_filter()
     DB_FILE.unlink(missing_ok=True)
     asyncio.run(seed())
-    uvicorn.run("app.main:app", host="127.0.0.1", port=PORT, log_level="warning")
+    app.include_router(e2e)
+    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
 
 
 if __name__ == "__main__":
