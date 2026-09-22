@@ -17,7 +17,7 @@ Vale para a `api-commerce` e a `web` na stack `commerce`. Decisões e porquês: 
 ## 2. Desligar / rollback
 
 - **Desligar o checkout da loja:** módulo `checkout` off no admin do site. A vitrine continua, o carrinho some, e **pagamentos em andamento continuam sendo conciliados** (webhook e conciliação não dependem da flag): ninguém paga sem que o pedido seja confirmado.
-- **Rollback de versão:** [runbook de rollback](rollback.md). As migrations da etapa E (0017–0023) são aditivas; uma imagem anterior convive com elas.
+- **Rollback de versão:** [runbook de rollback](rollback.md). As migrations da etapa E (0017–0024) são aditivas; uma imagem anterior convive com elas.
 - **Provedor com problema:** desligar só aquele meio no painel da loja (Pagamentos → Ativo na loja). Os pedidos já criados seguem no meio antigo até expirar.
 
 ## 3. Alertas (`payment_alert`) e o que fazer
@@ -37,7 +37,7 @@ O beat conta a cada 5 min e loga `payment_alert` com `alert` e `count` (Sentry v
 ## 4. Perguntas frequentes de suporte
 
 - **"Paguei e o pedido não mudou".** O cliente pode usar **Já paguei** na página do pedido (consulta o provedor na hora). Nunca confirmar pedido na mão pelo banco de dados: o dinheiro só é reconhecido pela resposta do provedor.
-- **"Pix pago depois do prazo".** O pedido volta sozinho se todo o estoque ainda estiver lá; senão a devolução é criada automaticamente (`late_payment`). A loja vê em Devoluções.
+- **"Pix pago depois do prazo".** O prazo do pedido acompanha o prazo que o provedor deu ao Pix (com teto de `checkout_max_order_age_minutes`, padrão 120 min), então isso é raro. Quando acontece, o pedido volta sozinho se todo o estoque ainda estiver lá; senão a devolução é criada automaticamente (`late_payment`). A loja vê em Devoluções.
 - **"Pagou duas vezes".** A segunda vira devolução `duplicate_payment` automática.
 - **"Cliente cancelou pedido pago".** Estoque volta e a devolução é pedida na mesma hora; acima do limite da loja (`refund_four_eyes_threshold_cents`, padrão R$ 200) outra pessoa da loja precisa aprovar.
 - **Chargeback:** o pedido fica marcado (`risk_flags.chargeback`) e o estoque **não** é mexido; a loja decide o que fazer.
@@ -45,7 +45,7 @@ O beat conta a cada 5 min e loga `payment_alert` com `alert` e `count` (Sentry v
 ## 5. Onde olhar
 
 - `payment_events` (por pagamento): cada chamada ao provedor, com duração e status.
-- `payment_webhook_inbox`: todo aviso recebido, válido ou não, e o resultado.
-- `refunds` e `notification_deliveries`: tentativas, erros e evidências.
+- `payment_webhook_inbox`: todo aviso recebido, válido ou não, e o resultado. Avisos com mais de 30 dias são apagados pelo job diário (qualquer um consegue postar no endereço de um provedor que não assina, como a InfinitePay).
+- `refunds` e `notification_deliveries`: tentativas, erros e evidências. Uma devolução que aparece como `superseded` no log foi enviada por outro worker (lease vencida): o dinheiro sai uma vez só, contado por quem manteve a posse da linha.
 - Métricas: `commerce_payments_started_total`, `commerce_payments_approved_total`, `commerce_payment_webhooks_total`, `commerce_refunds_completed_total`, `commerce_orders_placed_total`.
 - Smoke (`infra/scripts/smoke.sh`): inclui webhook com chave desconhecida → 404.
