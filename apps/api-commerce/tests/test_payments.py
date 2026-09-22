@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -23,7 +24,7 @@ from app.payments.jobs import run_reconcile_payments
 from app.payments.models import Payment, PaymentWebhookInbox, TenantPaymentConfig
 from app.payments.providers import fake
 from app.payments.service import GRACE
-from app.payments.webhooks import run_process_webhooks
+from app.payments.webhooks import purge_inbox, run_process_webhooks
 from app.tenancy.context import CROSS_TENANT_OPTION
 from app.tenancy.models import Tenant
 from tests.shoppers import as_shopper, signed_in
@@ -290,14 +291,37 @@ async def test_reconciliation_finds_a_payment_whose_webhook_never_came(
 async def _deadline_passed(
     session_factory: async_sessionmaker[AsyncSession], order_id: str, ago: timedelta
 ) -> None:
+    """The whole deadline is in the past: the order's, its payment's, and the window the
+    provider itself reports (an order never expires while the provider still takes the Pix)."""
+    past = utcnow() - ago
     async with session_factory() as session:
         await session.execute(
             update(Order)
             .where(Order.id == order_id)
-            .values(expires_at=utcnow() - ago)
+            .values(expires_at=past)
+            .execution_options(synchronize_session=False, **CROSS)
+        )
+        payments = (
+            (
+                await session.execute(
+                    select(Payment.provider_payment_id)
+                    .where(Payment.order_id == order_id)
+                    .execution_options(**CROSS)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await session.execute(
+            update(Payment)
+            .where(Payment.order_id == order_id)
+            .values(expires_at=past)
             .execution_options(synchronize_session=False, **CROSS)
         )
         await session.commit()
+    for provider_id in payments:
+        if provider_id in fake._LEDGER:
+            fake._LEDGER[provider_id] = replace(fake._LEDGER[provider_id], expires_at=past)
 
 
 async def test_the_deadline_asks_the_provider_first_and_an_approval_wins(
@@ -434,3 +458,38 @@ async def test_the_sweep_processes_webhooks_left_behind(
     assert await run_process_webhooks(session_factory, utcnow()) == 1
     assert (await state(client, me, order["id"]))["order_status"] == "payment_confirmed"
     assert await run_process_webhooks(session_factory, utcnow()) == 0  # nothing left
+
+
+async def test_old_payment_notices_are_purged(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    paying: tuple[Tenant, dict[str, str], dict[str, Any], str],
+) -> None:
+    """Anyone can POST to an unsigned provider's address, so the inbox cannot grow forever."""
+    tenant, me, order, _ = paying
+    payment = (await pay(client, me, order["id"])).json()
+    ext_id = await provider_id(session_factory, payment["id"])
+    assert (await webhook(client, tenant, fake.webhook_body(ext_id))).status_code == 200
+    fresh = await webhook(client, tenant, fake.webhook_body(ext_id))
+    assert fresh.status_code == 200
+
+    async with session_factory() as session:
+        kept = await purge_inbox(session, utcnow())
+        await session.commit()
+    assert kept == 0  # nothing old yet
+
+    async with session_factory() as session:
+        await session.execute(
+            update(PaymentWebhookInbox)
+            .values(received_at=utcnow() - timedelta(days=40))
+            .execution_options(synchronize_session=False, **CROSS)
+        )
+        await session.commit()
+        purged = await purge_inbox(session, utcnow())
+        await session.commit()
+    assert purged >= 1
+    async with session_factory() as session:
+        left = (
+            await session.execute(select(PaymentWebhookInbox.id).execution_options(**CROSS))
+        ).all()
+    assert left == []

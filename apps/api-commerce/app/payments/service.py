@@ -40,6 +40,7 @@ from app.core.exceptions import (
     PaymentNotCancellableError,
     ProviderNotEnabledError,
 )
+from app.core.ids import new_id
 from app.core.logging import get_logger
 from app.core.metrics import PAYMENTS_APPROVED, PAYMENTS_STARTED
 from app.identity.models import Customer
@@ -217,7 +218,12 @@ class PaymentService:
             raise ProviderNotEnabledError(provider=data.provider, method=data.method)
         provider = self._provider_named(data.provider)
         now = utcnow()
+        # The id is made here so the reference is right on the INSERT: a placeholder would put
+        # the same value in the global unique key for every payment of every store, and two
+        # checkouts at once would queue on that index entry.
+        payment_id = new_id()
         payment = Payment(
+            id=payment_id,
             order_id=order.id,
             active_order_id=order.id,
             provider=data.provider,
@@ -227,14 +233,13 @@ class PaymentService:
             currency=order.currency,
             amount_cents=order.total_cents,
             installments=data.card.installments if data.card else 1,
-            provider_reference="pending",
+            provider_reference=provider_reference(self.tenant, order, payment_id),
             idempotency_hash=ihash,
             expires_at=order.expires_at,
             next_check_at=now + CHECK_BACKOFF[0],
         )
         self.session.add(payment)
         await self.session.flush()
-        payment.provider_reference = provider_reference(self.tenant, order, payment.id)
         self._event(payment, "created", None, PaymentStatus.PENDING)
         await self.session.flush()
         await emit_payment(self.session, self.tenant.id, payment, "payment.created")
@@ -292,6 +297,7 @@ class PaymentService:
             payment.checkout_url = result.checkout_url
         if result.expires_at is not None:
             payment.expires_at = result.expires_at
+            self._extend_deadline(order, result.expires_at)
         if result.payer:
             payment.payer_snapshot = dict(result.payer)
         payment.provider_status = (result.provider_status or "")[:40] or payment.provider_status
@@ -356,6 +362,18 @@ class PaymentService:
         order.risk_flags = flags
         await self.session.flush()
         logger.error("Payment charged back", extra={"payment_id": payment.id, "order_id": order.id})
+
+    @staticmethod
+    def _extend_deadline(order: Order | None, until: datetime) -> None:
+        """The provider gave the customer until `until` (Mercado Pago's Pix window is at least
+        30 minutes): the order waits that long too, never past the store-wide limit. Otherwise
+        the deadline job would kill a code the customer can still pay."""
+        if order is None or order.status != OrderStatus.AWAITING_PAYMENT:
+            return
+        cap = order.placed_at + timedelta(minutes=settings.checkout_max_order_age_minutes)
+        target = min(until, cap)
+        if order.expires_at is None or target > order.expires_at:
+            order.expires_at = target
 
     async def _approved(self, payment: Payment, order: Order | None) -> None:
         order = order or await self._lock_order(payment.order_id)
@@ -481,6 +499,7 @@ class PaymentService:
             outcome = await self.sync(payment_id, source="reconcile")
         elif payment.status in (PaymentStatus.CANCELLED, PaymentStatus.EXPIRED):
             outcome = await self._cancel_at_provider(payment_id)
+        await self._lock_order(payment.order_id)  # order → payment, as everywhere else
         payment = await self._lock_payment(payment_id)
         self._schedule(payment, outcome, now)
         await self.session.flush()

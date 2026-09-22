@@ -1,6 +1,6 @@
 """Cancelling an order, money included: the one way an order is cancelled by a person.
 
-Before payment, the held stock goes back and the open payment is closed (OrderService.cancel).
+Before payment, the open payment is closed and the held stock goes back (OrderService.cancel).
 After payment, the stock goes back too (when asked) and a refund of what was paid is requested
 in the same transaction — by policy for the customer (within the store's window), under the
 four-eyes rule for the store's team. The caller holds the order lock, commits, then hands the
@@ -39,18 +39,21 @@ async def cancel_order(
     restock: bool = True,
 ) -> list[Refund]:
     was_paid = order.status in PAID_STATUSES
+    refunds = RefundService(session, tenant, actor)
+    # The payment is locked before the stock goes back (order → payment → coupon → balances).
+    payment = await refunds.refundable_payment(order, required=False) if was_paid else None
     await OrderService(session, tenant, actor).cancel(
         order, actor_kind, reason=reason, scopes=scopes, restock=restock
     )
-    if not was_paid:
-        return []
+    if payment is None:
+        return []  # nothing was charged (free order), or it was never paid
     kind = RefundKind.CUSTOMER_CANCEL if actor_kind == ActorKind.CUSTOMER else RefundKind.OPERATOR
     try:
-        refund = await RefundService(session, tenant, actor).request(
-            order, kind=kind, reason=reason or "Pedido cancelado"
+        refund = await refunds.request(
+            order, kind=kind, reason=reason or "Pedido cancelado", payment_id=payment.id
         )
     except NothingToRefundError:
-        return []  # nothing was charged (free order)
+        return []
     return [refund]
 
 

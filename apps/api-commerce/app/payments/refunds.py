@@ -108,7 +108,8 @@ class RefundService:
     ) -> Refund:
         """Ask to give money back. The caller holds the order lock. `amount_cents=None`: all
         that can still be refunded. `payment_id`: which payment (default: the one that paid)."""
-        payment = await self._refundable_payment(order, payment_id)
+        payment = await self.refundable_payment(order, payment_id)
+        assert payment is not None  # required=True raises instead of returning None
         remaining = await self.remaining(payment)
         amount = remaining if amount_cents is None else amount_cents
         if amount <= 0 or remaining <= 0:
@@ -154,7 +155,11 @@ class RefundService:
         )
         return (payment.paid_amount_cents or 0) - int(counted or 0)
 
-    async def _refundable_payment(self, order: Order, payment_id: str | None) -> Payment:
+    async def refundable_payment(
+        self, order: Order, payment_id: str | None = None, *, required: bool = True
+    ) -> Payment | None:
+        """The payment money can still come back from, locked. Callers that will cancel the
+        order take this first: the lock order is order → payment → coupon → balances."""
         stmt = select(Payment).where(Payment.order_id == order.id)
         if payment_id is not None:
             stmt = stmt.where(Payment.id == payment_id)
@@ -164,7 +169,9 @@ class RefundService:
             stmt.limit(1).with_for_update().execution_options(populate_existing=True)
         )
         if payment is None or payment.status not in REFUNDABLE:
-            raise NothingToRefundError()
+            if required:
+                raise NothingToRefundError()
+            return None
         return payment
 
     # ------------------------------------------------------------------ decisions
@@ -232,7 +239,10 @@ class RefundService:
             return "not_due"
         refund.status = RefundStatus.PROCESSING
         refund.attempts += 1
-        refund.next_attempt_at = now + LEASE
+        claimed = refund.attempts
+        # The lease starts now, not when the sweep listed its batch: a long batch must not hand
+        # out leases that are already expired.
+        refund.next_attempt_at = utcnow() + LEASE
         payment = await self.session.get(Payment, refund.payment_id)
         assert payment is not None
         provider = registry.get_provider(payment.provider)
@@ -273,6 +283,11 @@ class RefundService:
         await self._lock_order(refund.order_id)
         await self._lock_payment(refund.payment_id)
         refund = await self._lock_refund(refund_id)
+        if refund.status != RefundStatus.PROCESSING or refund.attempts != claimed:
+            # Somebody else claimed it while the provider answered (an expired lease, a retry
+            # of this task). They own the outcome; counting it here would refund it twice.
+            logger.warning("Refund claim lost while sending", extra={"refund_id": refund_id})
+            return "superseded"
         if result is not None and result.status == "completed":
             await self._completed(refund, provider_refund_id=result.provider_refund_id)
             return RefundStatus.COMPLETED

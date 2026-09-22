@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,6 +39,7 @@ MAX_ATTEMPTS = 5
 LEASE = timedelta(minutes=2)
 BACKOFF = (timedelta(minutes=1), timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1))
 BATCH = 100
+KEPT = timedelta(days=30)  # how long a notice stays for support
 # Only these headers are kept (for support); never authorization or cookies.
 KEPT_HEADERS = ("x-request-id", "x-signature", "content-type", "user-agent")
 ACTOR = Actor.system("payment-webhooks")
@@ -221,6 +222,19 @@ async def due(session: AsyncSession, now: datetime) -> list[str]:
         .execution_options(**{CROSS_TENANT_OPTION: True})
     )
     return list((await session.execute(stmt)).scalars())
+
+
+async def purge_inbox(session: AsyncSession, now: datetime | None = None) -> int:
+    """Notices are kept for a month for support. Anyone can POST to an unsigned provider's
+    address (InfinitePay does not sign), so without this the table only grows."""
+    cutoff = (now or utcnow()) - KEPT
+    result = await session.execute(
+        delete(PaymentWebhookInbox)
+        .where(PaymentWebhookInbox.received_at < cutoff)
+        .where(PaymentWebhookInbox.status != InboxStatus.RECEIVED)
+        .execution_options(synchronize_session=False, **{CROSS_TENANT_OPTION: True})
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 async def run_process_webhooks(factory: async_sessionmaker[AsyncSession], now: datetime) -> int:

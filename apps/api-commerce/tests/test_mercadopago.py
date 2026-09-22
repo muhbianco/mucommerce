@@ -374,3 +374,70 @@ async def test_a_pix_through_mercado_pago_is_confirmed_by_its_signed_webhook(
     assert state["order_status"] == "payment_confirmed"
     assert state["payment"]["status"] == "approved"
     assert TOKEN not in hook.text and TOKEN not in paid.text
+
+
+async def test_the_order_waits_as_long_as_mercado_pago_takes_the_pix(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: tuple[Tenant, dict[str, str], dict[str, str]],  # noqa: F811
+    mp: FakeMP,
+) -> None:
+    """MP's Pix window is at least 30 minutes and can be longer than the order's own deadline;
+    the order has to wait for it, or the deadline job would kill a code the customer can pay."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.models.base import utcnow
+    from app.orders.jobs import run_expire_orders
+    from app.orders.models import Order
+    from app.tenancy.context import CROSS_TENANT_OPTION
+    from app.tenancy.service import Actor, TenantService
+
+    tenant, owner, me = shop
+    async with session_factory() as session:
+        service = TenantService(session)
+        await service.set_features(
+            await service.get_or_404(tenant.id), {"payments.mercadopago": True}, Actor.system("t")
+        )
+        await session.commit()
+    await client.put(
+        f"/api/v1/admin/tenants/{tenant.id}/payments/providers/mercadopago",
+        json={
+            "enabled": True,
+            "public_config": {"public_key": "APP_USR-pub"},
+            "credentials": {"access_token": TOKEN, "webhook_secret": SECRET},
+        },
+        headers=owner,
+    )
+    order, _ = await placed_order(client, session_factory, shop)
+    far = utcnow() + timedelta(minutes=45)  # beyond the 30 minutes the order was given
+
+    def created(r: httpx.Request) -> httpx.Response:
+        body = json.loads(r.content)
+        return httpx.Response(
+            201,
+            json=pix_payment(
+                transaction_amount=body["transaction_amount"],
+                external_reference=body["external_reference"],
+                date_of_expiration=far.isoformat(),
+            ),
+        )
+
+    mp.routes[("POST", "/v1/payments")] = created
+    paid = await client.post(
+        f"/api/v1/checkout/orders/{order['id']}/payments",
+        json={"provider": "mercadopago", "method": "pix"},
+        headers=me | {"Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert paid.status_code == 201, paid.text
+
+    async with session_factory() as session:
+        row = await session.scalar(
+            select(Order)
+            .where(Order.id == order["id"])
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+    assert row is not None and row.expires_at is not None
+    assert abs((row.expires_at - far).total_seconds()) < 2  # the order follows the Pix
+    assert await run_expire_orders(session_factory, utcnow() + timedelta(minutes=35)) == 0

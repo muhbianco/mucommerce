@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import get_logger
-from app.payments.models import Payment
+from app.payments.models import ACTIVE_PAYMENT_STATUSES, Payment, PaymentStatus
 from app.payments.service import PaymentService
 from app.tenancy.context import CROSS_TENANT_OPTION, bind_session_tenant
 from app.tenancy.resolver import TenantResolver
@@ -23,11 +23,14 @@ from app.tenancy.service import Actor
 logger = get_logger(__name__)
 BATCH = 100
 ACTOR = Actor.system("payment-reconciliation")
+# What reconcile acts on; leading the index (status, next_check_at) keeps the sweep off a scan.
+CHECKED = frozenset(ACTIVE_PAYMENT_STATUSES | {PaymentStatus.CANCELLED, PaymentStatus.EXPIRED})
 
 
 async def due_checks(session: AsyncSession, now: datetime) -> list[tuple[str, str]]:
     stmt = (
         select(Payment.id, Payment.tenant_id)
+        .where(Payment.status.in_(CHECKED))
         .where(Payment.next_check_at <= now)
         .order_by(Payment.next_check_at)
         .limit(BATCH)

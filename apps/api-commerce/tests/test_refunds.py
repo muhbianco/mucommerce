@@ -30,10 +30,11 @@ from app.payments import registry
 from app.payments.jobs import run_reconcile_payments
 from app.payments.models import Payment, Refund
 from app.payments.providers import fake
-from app.payments.refunds import run_process_refunds
+from app.payments.refunds import RefundService, run_process_refunds
 from app.payments.service import GRACE
-from app.tenancy.context import CROSS_TENANT_OPTION
+from app.tenancy.context import CROSS_TENANT_OPTION, bind_session_tenant
 from app.tenancy.models import Tenant
+from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor, TenantService
 from tests.conftest import create_admin, login
 from tests.test_catalog import member_headers
@@ -299,14 +300,31 @@ async def test_without_a_refund_api_the_store_completes_it_with_evidence(
 
 
 async def _expire(session_factory: async_sessionmaker[AsyncSession], order_id: str) -> None:
+    """Order, payment and the provider's own window all in the past (see test_payments)."""
+    past = utcnow() - GRACE - timedelta(minutes=1)
     async with session_factory() as session:
-        await session.execute(
-            update(Order)
-            .where(Order.id == order_id)
-            .values(expires_at=utcnow() - GRACE - timedelta(minutes=1))
-            .execution_options(synchronize_session=False, **CROSS)
+        provider_ids = (
+            (
+                await session.execute(
+                    select(Payment.provider_payment_id)
+                    .where(Payment.order_id == order_id)
+                    .execution_options(**CROSS)
+                )
+            )
+            .scalars()
+            .all()
         )
+        for model in (Order, Payment):
+            await session.execute(
+                update(model)
+                .where((model.id if model is Order else model.order_id) == order_id)
+                .values(expires_at=past)
+                .execution_options(synchronize_session=False, **CROSS)
+            )
         await session.commit()
+    for provider_id in provider_ids:
+        if provider_id in fake._LEDGER:
+            fake._LEDGER[provider_id] = replace(fake._LEDGER[provider_id], expires_at=past)
     assert await run_expire_orders(session_factory, utcnow()) == 1
 
 
@@ -394,3 +412,66 @@ async def test_a_chargeback_marks_the_order_and_leaves_the_stock(
     saved = await row(session_factory, Order, order["id"])
     assert saved.risk_flags == {"chargeback": payment["id"]}
     assert await balance(session_factory, variant) == (3000, 0)
+
+
+class SlowRefund(fake.FakeProvider):
+    """Refunds only after somebody else claimed the row (an expired lease, a retried task)."""
+
+    def __init__(self, factory: async_sessionmaker[AsyncSession], refund_id: str) -> None:
+        self.factory = factory
+        self.refund_id = refund_id
+
+    async def refund(self, creds: Any, ref: Any, amount_cents: int, *, idempotency: str) -> Any:
+        async with self.factory() as session:
+            await session.execute(
+                update(Refund)
+                .where(Refund.id == self.refund_id)
+                .values(attempts=Refund.attempts + 1, next_attempt_at=utcnow())
+                .execution_options(synchronize_session=False, **CROSS)
+            )
+            await session.commit()
+        return await super().refund(creds, ref, amount_cents, idempotency=idempotency)
+
+
+async def test_a_refund_whose_claim_was_taken_is_not_counted_twice(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: Shop,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two workers can end up sending the same refund (lease expired, task retried). The
+    provider deduplicates by the refund id, and the one that lost the claim must not book it
+    again — otherwise the payment looks fully refunded and the rest can never be sent back."""
+    tenant, owner, _ = shop
+    order, _, payment = await paid_order(client, session_factory, shop)
+    asked = await ask_refund(client, tenant, owner, order["id"], amount_cents=1000)
+    assert asked.json()["status"] == "completed"  # the first send went through
+
+    # A second refund, sent while somebody else takes over the row mid-call.
+    second = await ask_refund(client, tenant, owner, order["id"], amount_cents=1000)
+    assert second.json()["status"] == "completed"
+    stolen = second.json()["id"]
+    async with session_factory() as session:
+        await session.execute(
+            update(Refund)
+            .where(Refund.id == stolen)
+            .values(status="approved", next_attempt_at=utcnow())
+            .execution_options(synchronize_session=False, **CROSS)
+        )
+        await session.commit()
+    monkeypatch.setitem(registry._PROVIDERS, "fake", SlowRefund(session_factory, stolen))
+
+    async with session_factory() as session:
+        tenant_context = await TenantResolver(session).resolve_by_id(tenant.id)
+        bind_session_tenant(session, tenant.id)
+        outcome = await RefundService(session, tenant_context, Actor.system("tests")).process(
+            stolen
+        )
+        await session.commit()
+    assert outcome == "superseded"
+
+    payment_row = await row(session_factory, Payment, payment["id"])
+    assert payment_row.refunded_cents == 2000  # 1000 + 1000, not 3000
+    assert payment_row.status == "partially_refunded"  # the rest can still be refunded
+    left = await ask_refund(client, tenant, owner, order["id"])
+    assert left.json()["amount_cents"] == 1000

@@ -321,17 +321,18 @@ class OrderService:
             source=str(actor_kind),
             reason=reason,
             scopes=scopes,
+            has_approved_payment=bool(order.paid_at),
         )
         order.cancel_reason = (reason or None) and reason[:200]
         order.cancelled_by_actor = self.actor.id
         reservations = ReservationService(self.session, self.tenant, self.actor)
         if was == OrderStatus.AWAITING_PAYMENT:
-            # Coupon before balances, as everywhere else.
-            await CouponService(self.session, self.tenant, self.actor).release(order.id)
-            await reservations.release(order.id, reason="cancelled")
+            # The global lock order: order → payment → coupon → balances.
             await close_active_payment(
                 self.session, self.tenant.id, self.actor.id, order.id, reason="cancelled"
             )
+            await CouponService(self.session, self.tenant, self.actor).release(order.id)
+            await reservations.release(order.id, reason="cancelled")
         elif restock:
             await reservations.return_stock(order.id, reason="cancelled")
         await self._emit(
@@ -348,12 +349,13 @@ class OrderService:
         await self._transition(
             order, OrderStatus.FAILED, ActorKind.SYSTEM, source="system", reason="expired"
         )
+        # The global lock order: order → payment → coupon → balances.
+        await close_active_payment(
+            self.session, self.tenant.id, self.actor.id, order.id, reason="expired"
+        )
         await CouponService(self.session, self.tenant, self.actor).release(order.id)
         await ReservationService(self.session, self.tenant, self.actor).release(
             order.id, reason="expired", expired=True
-        )
-        await close_active_payment(
-            self.session, self.tenant.id, self.actor.id, order.id, reason="expired"
         )
         await self._emit(order, "order.failed", reason="expired")
         return True
@@ -364,7 +366,7 @@ class OrderService:
     ) -> Order:
         stmt = select(Order).where(Order.id == order_id).where(Order.customer_id == customer_id)
         if lock:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         order = await self.session.scalar(stmt)
         if order is None:
             raise NotFoundError("Pedido não encontrado.")
