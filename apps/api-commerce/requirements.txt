@@ -11,7 +11,7 @@ PyJWT==2.13.0
 pwdlib[argon2,bcrypt]==0.3.0
 celery[redis]==5.5.3
 redis==5.2.1
-cryptography==45.0.5
+cryptography==50.0.1
 dnspython==2.8.0
 uuid6==2025.0.1
 prometheus-fastapi-instrumentator==8.1.0

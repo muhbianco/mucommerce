@@ -1,5 +1,6 @@
-# Porta 1:1 do antigo .github/workflows/ci.yml: API (lint, tipos, testes SQLite), migrações +
-# isolamento + concorrência em MariaDB 10.11 real, web (lint, tipos, vitest, build) e gitleaks.
+# Porta 1:1 do antigo .github/workflows/ci.yml: API (lint, tipos, testes SQLite, pip-audit),
+# migrações + isolamento + concorrência em MariaDB 10.11 real, web (lint, tipos, vitest, build,
+# pnpm audit) e gitleaks.
 when:
   - event: [push, pull_request, manual]
 
@@ -24,6 +25,11 @@ steps:
       - ruff format --check .
       - mypy app
       - pytest -q
+      # Known vulnerabilities in the pinned runtime deps. PYSEC-2026-286 (asyncmy, no fixed
+      # release): SQL injection through attacker-chosen *dict keys* in query parameters;
+      # SQLAlchemy always binds its own generated names, so no input ever reaches that path.
+      - pip install --quiet pip-audit==2.10.1
+      - pip-audit -r requirements.txt --ignore-vuln PYSEC-2026-286
 
   api-mariadb:
     image: python:3.12-slim
@@ -50,6 +56,8 @@ steps:
       - pnpm typecheck
       - pnpm test
       - pnpm build
+      # High/critical advisories in production dependencies block the deploy.
+      - pnpm audit --prod --audit-level=high
 
   gitleaks:
     image: zricethezav/gitleaks:v8.30.1
