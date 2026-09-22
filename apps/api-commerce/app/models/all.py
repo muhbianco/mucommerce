@@ -7,6 +7,7 @@ from app.audit.models import (
     OutboxEvent,
     ProcessedEvent,
 )
+from app.cart.models import Cart, CartItem
 from app.catalog.models import Category, Product, ProductCategory, ProductVariant
 from app.customers.address_models import CustomerAddress
 from app.customers.legal_models import Consent, LegalDocument
@@ -37,6 +38,8 @@ __all__ = [
     "AdminUser",
     "AuditLog",
     "Base",
+    "Cart",
+    "CartItem",
     "Category",
     "Consent",
     "Customer",

@@ -162,3 +162,34 @@ class InvalidHandoffError(DomainError):
 class CsrfOriginError(PermissionDeniedError):
     error_code = "csrf_origin"
     message = "Requisição recusada: origem diferente da loja."
+
+
+# ----------------------------------------------------------------------------- cart / checkout
+class ItemUnavailableError(ConflictError):
+    error_code = "item_unavailable"
+    message = "Este item não está à venda agora."
+
+
+class OutOfStockError(ConflictError):
+    error_code = "out_of_stock"
+    message = "Estoque insuficiente para essa quantidade."
+
+
+class LotNotOnSaleError(ConflictError):
+    error_code = "lot_not_on_sale"
+    message = "Este lote de ingressos não está à venda agora."
+
+
+class InvalidModifiersError(ValidationError):
+    error_code = "invalid_modifiers"
+    message = "Escolha de adicionais inválida."
+
+
+class InvalidQuantityError(ValidationError):
+    error_code = "invalid_quantity"
+    message = "Quantidade inválida para este item."
+
+
+class CartLimitError(ConflictError):
+    error_code = "cart_limit"
+    message = "Limite do carrinho atingido."

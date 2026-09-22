@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     ops_outbox,
     ops_tenants,
     storefront,
+    storefront_cart,
     storefront_catalog,
 )
 
@@ -53,6 +54,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     {"name": "Interno", "description": "Consumidores de serviço: Traefik, Next.js, api-agents."},
     {"name": "Vitrine (público)", "description": "Resolvido pelo Host do tenant."},
     {
+        "name": "Carrinho e checkout",
+        "description": "Carrinho, pedido e pagamento do cliente (flag `checkout`, ADR 0011).",
+    },
+    {
         "name": "Clientes",
         "description": "Login Google dos clientes das lojas, sessão e pedido de acesso.",
     },
@@ -74,6 +79,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     internal.router,
     storefront.router,
     storefront_catalog.router,
+    storefront_cart.router,
     customer_auth.router,
     customer_addresses.router,
     legal.router,

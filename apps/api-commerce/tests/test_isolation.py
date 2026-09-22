@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.deps import (
     CATALOG_ACCESS_GUARD_ATTR,
+    CHECKOUT_GUARD_ATTR,
     CUSTOMER_GUARD_ATTR,
     PLATFORM_GUARD_ATTR,
     TENANT_GUARD_ATTR,
@@ -43,6 +44,8 @@ COVERED_TENANT_SCOPED_TABLES = {
     "events",
     "event_lots",
     "customer_addresses",
+    "carts",
+    "cart_items",
     "tenant_settings",
     "tenant_feature_flags",
     "tenant_sequences",
@@ -241,6 +244,7 @@ def _guards(route: APIRoute) -> set[str]:
             PLATFORM_GUARD_ATTR,
             TENANT_GUARD_ATTR,
             CATALOG_ACCESS_GUARD_ATTR,
+            CHECKOUT_GUARD_ATTR,
             CUSTOMER_GUARD_ATTR,
         ):
             if getattr(dependency.call, attr, False):
@@ -274,6 +278,15 @@ def test_every_customer_route_requires_a_session_of_the_store() -> None:
     assert routes
     unguarded = [
         f"{sorted(r.methods)} {r.path}" for r in routes if CUSTOMER_GUARD_ATTR not in _guards(r)
+    ]
+    assert not unguarded, unguarded
+
+
+def test_every_cart_and_checkout_route_requires_the_checkout_guard() -> None:
+    routes = [r for r in V1_ROUTES if r.path.startswith(("/cart", "/checkout"))]
+    assert routes
+    unguarded = [
+        f"{sorted(r.methods)} {r.path}" for r in routes if CHECKOUT_GUARD_ATTR not in _guards(r)
     ]
     assert not unguarded, unguarded
 
