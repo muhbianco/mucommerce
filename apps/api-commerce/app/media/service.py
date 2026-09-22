@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
 from app.audit.writer import audit
-from app.catalog.models import ProductStatus, ProductVariant
+from app.catalog.models import PUBLISHED_STATUSES, ProductStatus, ProductVariant
 from app.catalog.repository import CatalogRepository
 from app.core.config import settings
 from app.core.exceptions import (
@@ -211,7 +211,7 @@ class MediaService:
             product = await CatalogRepository(self.session).get_product(media.owner_id)
             ready = await self.repo.ready_for_owners(MediaOwner.PRODUCT, [media.owner_id])
             others = [m for m in ready.get(media.owner_id, []) if m.id != media.id]
-            if product is not None and product.status == ProductStatus.ACTIVE and not others:
+            if product is not None and product.status in PUBLISHED_STATUSES and not others:
                 raise ConflictError("Produto publicado precisa de ao menos uma imagem.")
         await self.session.execute(
             update(ProductVariant)

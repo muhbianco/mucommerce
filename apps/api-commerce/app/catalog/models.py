@@ -44,9 +44,15 @@ LONG_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql", "mariadb")
 
 class ProductStatus(StrEnum):
     DRAFT = "draft"
-    ACTIVE = "active"  # published: visible in the storefront
+    ACTIVE = "active"  # published and for sale
+    PAUSED = "paused"  # published, shown as unavailable: temporarily not for sale
     INACTIVE = "inactive"  # unpublished after having been active
     ARCHIVED = "archived"  # soft-deleted; kept because orders reference it
+
+
+# Shown in the storefront. Only ACTIVE is for sale: a check that forgets PAUSED hides the
+# product instead of selling it (fails closed).
+PUBLISHED_STATUSES = frozenset({ProductStatus.ACTIVE, ProductStatus.PAUSED})
 
 
 class ProductKind(StrEnum):
@@ -71,7 +77,12 @@ class SoldBy(StrEnum):
 
 class VariantStatus(StrEnum):
     ACTIVE = "active"
+    PAUSED = "paused"  # shown, not for sale (e.g. one size out for the week)
     INACTIVE = "inactive"
+
+
+# Variants the storefront lists; only ACTIVE ones are for sale.
+LIVE_VARIANT_STATUSES = frozenset({VariantStatus.ACTIVE, VariantStatus.PAUSED})
 
 
 class Category(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
@@ -134,6 +145,9 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     seo: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     published_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    paused_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    paused_reason: Mapped[str | None] = mapped_column(String(200))
+    paused_by_actor: Mapped[str | None] = mapped_column(String(120))
 
 
 class ProductVariant(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
@@ -163,6 +177,9 @@ class ProductVariant(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, Tenan
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=VariantStatus.ACTIVE)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    paused_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    paused_reason: Mapped[str | None] = mapped_column(String(200))
+    paused_by_actor: Mapped[str | None] = mapped_column(String(120))
 
 
 class ProductCategory(UUIDPrimaryKeyMixin, TenantScoped, Base):

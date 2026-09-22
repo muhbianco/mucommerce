@@ -30,7 +30,7 @@ Position = Annotated[int, Field(ge=-1_000_000, le=1_000_000)]
 
 ProductKindIn = Literal["physical", "made_to_order", "service", "digital", "ticket"]
 StockPolicyIn = Literal["tracked", "untracked", "made_to_order", "unlimited"]
-ProductStatusFilter = Literal["draft", "active", "inactive", "archived"]
+ProductStatusFilter = Literal["draft", "active", "paused", "inactive", "archived"]
 
 MAX_CATEGORIES_PER_PRODUCT = 20
 
@@ -127,6 +127,12 @@ class VariantUpdate(StrictModel):
     status: Literal["active", "inactive"] | None = None
 
 
+class PauseRequest(StrictModel):
+    """Why the product (or variant) is off sale; shown in the panel, never in the storefront."""
+
+    reason: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+
+
 class PriceRead(BaseModel):
     amount_cents: int
     compare_at_cents: int | None
@@ -146,6 +152,8 @@ class VariantRead(BaseModel):
     status: str
     position: int
     price: PriceRead
+    paused_at: datetime | None = None
+    paused_reason: str | None = None
 
 
 class ProductSummary(BaseModel):
@@ -183,6 +191,8 @@ class ProductRead(ProductSummary):
     has_variants: bool
     seo: ProductSeo | None
     archived_at: datetime | None
+    paused_at: datetime | None = None
+    paused_reason: str | None = None
     created_at: datetime
     category_ids: list[str]
     variants: list[VariantRead]

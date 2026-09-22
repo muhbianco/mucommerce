@@ -25,7 +25,8 @@ export interface StorePrice {
   currency: string;
 }
 
-export type Availability = "available" | "sold_out" | "made_to_order";
+/** `unavailable`: paused by the store (published, not for sale for now). */
+export type Availability = "available" | "sold_out" | "made_to_order" | "unavailable";
 
 export interface ProductCard {
   id: string;
@@ -100,10 +101,17 @@ export const AVAILABILITY_LABEL: Record<Availability, string> = {
   available: "Disponível",
   sold_out: "Esgotado",
   made_to_order: "Sob encomenda",
+  unavailable: "Indisponível",
 };
 
 export const SCHEMA_AVAILABILITY: Record<Availability, string> = {
   available: "https://schema.org/InStock",
   sold_out: "https://schema.org/OutOfStock",
   made_to_order: "https://schema.org/PreOrder",
+  unavailable: "https://schema.org/OutOfStock",
 };
+
+/** Not for sale right now (sold out or paused): shown with the muted "sold out" style. */
+export function offSale(availability: Availability): boolean {
+  return availability === "sold_out" || availability === "unavailable";
+}

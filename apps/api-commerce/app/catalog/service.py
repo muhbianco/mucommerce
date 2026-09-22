@@ -5,6 +5,8 @@ Rules that live here (and nowhere else):
 - SKU is unique per tenant across products and variants, and immutable;
 - a slug is unique per tenant, generated from the name when omitted;
 - publishing needs a price above zero, an active variant and at least one ready image;
+- a published product is `active` (for sale) or `paused` (shown as unavailable, with a reason);
+  only `active` sells, so a check that forgets `paused` fails closed;
 - categories nest at most two levels; archiving one with active children is refused.
 
 Writes are audited; product lifecycle changes also go to the outbox (the product is the
@@ -23,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.outbox import emit
 from app.audit.writer import audit
 from app.catalog.models import (
+    LIVE_VARIANT_STATUSES,
+    PUBLISHED_STATUSES,
     Category,
     Product,
     ProductStatus,
@@ -40,7 +44,12 @@ from app.catalog.schemas import (
     ProductUpdate,
     VariantUpdate,
 )
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    ConflictError,
+    InvalidTransitionError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.slugs import next_free_slug, slugify
 from app.inventory.models import InventoryBalance
 from app.media.models import MediaAsset, MediaOwner, MediaStatus
@@ -187,7 +196,7 @@ class CatalogService:
             "ends_at": changes.get("promo_ends_at", product.promo_ends_at),
         }
         check_promotion(**merged)
-        if product.status == ProductStatus.ACTIVE and merged["base_cents"] <= 0:
+        if product.status in PUBLISHED_STATUSES and merged["base_cents"] <= 0:
             raise ConflictError("Produto publicado precisa de preço maior que zero.")
         if "slug" in changes and changes["slug"] != product.slug:
             taken = await self.repo.product_slugs_like(changes["slug"], exclude_id=product.id)
@@ -246,8 +255,8 @@ class CatalogService:
     async def publish(self, product_id: str) -> ProductView:
         view = await self.get_product(product_id)
         product = view.product
-        if product.status == ProductStatus.ACTIVE:
-            return view
+        if product.status in PUBLISHED_STATUSES:
+            return view  # a paused product stays paused: resuming is its own action
         if product.status == ProductStatus.ARCHIVED:
             raise ConflictError("Produto arquivado não pode ser publicado.")
         problems: list[str] = []
@@ -273,15 +282,17 @@ class CatalogService:
     async def unpublish(self, product_id: str) -> ProductView:
         view = await self.get_product(product_id)
         product = view.product
-        if product.status != ProductStatus.ACTIVE:
+        if product.status not in PUBLISHED_STATUSES:
             return view
+        before = product.status
         product.status = ProductStatus.INACTIVE
+        _clear_pause(product)
         product.updated_by_actor = self.actor.id
         await self.session.flush()
         await self._audit(
             "product.unpublished",
             product,
-            before={"status": "active"},
+            before={"status": before},
             after={"status": "inactive"},
         )
         await self._emit(product, "product.unpublished")
@@ -301,17 +312,19 @@ class CatalogService:
             if name in changes and changes[name] is None:
                 raise ValidationError("Campos obrigatórios não podem ser nulos.", fields=[name])
         if (
-            product.status == ProductStatus.ACTIVE
+            product.status in PUBLISHED_STATUSES
             and changes.get("status") == VariantStatus.INACTIVE
-            and variant.status == VariantStatus.ACTIVE
+            and variant.status in LIVE_VARIANT_STATUSES
         ):
             siblings = (await self.repo.variants_for([product.id])).get(product.id, [])
-            if not any(v.status == VariantStatus.ACTIVE and v.id != variant.id for v in siblings):
+            if not any(v.status in LIVE_VARIANT_STATUSES and v.id != variant.id for v in siblings):
                 raise ConflictError("Produto publicado precisa de ao menos uma variante ativa.")
         fields = ("name", "price_cents", "cost_cents", "status")
         before = _snapshot(variant, fields)
         for name, value in changes.items():
             setattr(variant, name, value)
+        if variant.status != VariantStatus.PAUSED:
+            _clear_pause(variant)  # a status set here ends the pause
         after = _snapshot(variant, fields)
         if after == before:
             return await self.get_product(product.id)
@@ -332,6 +345,110 @@ class CatalogService:
         )
         await self._emit(product, "product.updated")
         return view
+
+    # ------------------------------------------------------------------ pause
+    async def pause_product(self, product_id: str, *, reason: str | None = None) -> ProductView:
+        """Keeps the product in the storefront as unavailable. Idempotent: pausing twice is a
+        no-op (no audit, no event); only a product for sale can be paused."""
+        view = await self.get_product(product_id)
+        product = view.product
+        if product.status == ProductStatus.PAUSED:
+            return view
+        if product.status != ProductStatus.ACTIVE:
+            raise InvalidTransitionError(
+                "Só produto publicado pode ser pausado.", code="not_published"
+            )
+        product.status = ProductStatus.PAUSED
+        _set_pause(product, reason, self.actor.id)
+        product.updated_by_actor = self.actor.id
+        await self.session.flush()
+        await self._audit(
+            "product.paused",
+            product,
+            before={"status": "active"},
+            after={"status": "paused", "reason": reason},
+        )
+        await self._emit(product, "product.paused", reason=reason, actor=self.actor.id)
+        return view
+
+    async def resume_product(self, product_id: str) -> ProductView:
+        view = await self.get_product(product_id)
+        product = view.product
+        if product.status == ProductStatus.ACTIVE:
+            return view
+        if product.status != ProductStatus.PAUSED:
+            raise InvalidTransitionError("Produto não está pausado.", code="not_paused")
+        reason = product.paused_reason
+        product.status = ProductStatus.ACTIVE
+        _clear_pause(product)
+        product.updated_by_actor = self.actor.id
+        await self.session.flush()
+        await self._audit(
+            "product.resumed",
+            product,
+            before={"status": "paused", "reason": reason},
+            after={"status": "active"},
+        )
+        await self._emit(product, "product.resumed", actor=self.actor.id)
+        return view
+
+    async def pause_variant(
+        self, product_id: str, variant_id: str, *, reason: str | None = None
+    ) -> ProductView:
+        return await self._set_variant_paused(product_id, variant_id, paused=True, reason=reason)
+
+    async def resume_variant(self, product_id: str, variant_id: str) -> ProductView:
+        return await self._set_variant_paused(product_id, variant_id, paused=False, reason=None)
+
+    async def _set_variant_paused(
+        self, product_id: str, variant_id: str, *, paused: bool, reason: str | None
+    ) -> ProductView:
+        product = await self._product_or_404(product_id)
+        if product.status == ProductStatus.ARCHIVED:
+            raise ConflictError("Produto arquivado não pode ser editado.")
+        variant = await self.repo.get_variant(product.id, variant_id)
+        if variant is None:
+            raise NotFoundError("Variante não encontrada.")
+        target, source = (
+            (VariantStatus.PAUSED, VariantStatus.ACTIVE)
+            if paused
+            else (VariantStatus.ACTIVE, VariantStatus.PAUSED)
+        )
+        if variant.status == target:
+            return await self.get_product(product.id)
+        if variant.status != source:
+            raise InvalidTransitionError(
+                "Variante inativa não pode ser pausada."
+                if paused
+                else "Variante não está pausada.",
+                code="variant_inactive" if paused else "not_paused",
+            )
+        previous_reason = variant.paused_reason
+        variant.status = target
+        if paused:
+            _set_pause(variant, reason, self.actor.id)
+        else:
+            _clear_pause(variant)
+        variant.updated_by_actor = self.actor.id
+        await self.session.flush()
+        action = "product.variant_paused" if paused else "product.variant_resumed"
+        await audit(
+            self.session,
+            actor=self.actor.id,
+            action=action,
+            entity_type="product_variant",
+            entity_id=variant.id,
+            tenant_id=self.tenant.id,
+            before={"status": source, **({} if paused else {"reason": previous_reason})},
+            after={"status": target, **({"reason": reason} if paused else {})},
+            ip=self.actor.ip,
+            user_agent=self.actor.user_agent,
+        )
+        extra: dict[str, Any] = {"variant_id": variant.id, "actor": self.actor.id}
+        if paused:
+            extra["reason"] = reason
+        await self._emit(product, action, **extra)
+        return await self.get_product(product.id)
 
     # ------------------------------------------------------------------ categories
     async def create_category(self, data: CategoryCreate) -> Category:
@@ -513,7 +630,7 @@ class CatalogService:
             user_agent=self.actor.user_agent,
         )
 
-    async def _emit(self, product: Product, event_type: str) -> None:
+    async def _emit(self, product: Product, event_type: str, **extra: Any) -> None:
         await emit(
             self.session,
             aggregate_type="product",
@@ -524,6 +641,19 @@ class CatalogService:
                 "sku": product.sku,
                 "slug": product.slug,
                 "status": product.status,
+                **extra,
             },
             tenant_id=self.tenant.id,
         )
+
+
+def _set_pause(row: Product | ProductVariant, reason: str | None, actor: str) -> None:
+    row.paused_at = utcnow()
+    row.paused_reason = reason
+    row.paused_by_actor = actor
+
+
+def _clear_pause(row: Product | ProductVariant) -> None:
+    row.paused_at = None
+    row.paused_reason = None
+    row.paused_by_actor = None

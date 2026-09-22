@@ -99,8 +99,9 @@ export interface Variant {
   name: string;
   price_cents: number | null;
   cost_cents: number | null;
-  status: string;
+  status: "active" | "paused" | "inactive";
   price: Price;
+  paused_reason: string | null;
 }
 
 export interface ProductSummary {
@@ -108,7 +109,7 @@ export interface ProductSummary {
   sku: string;
   slug: string;
   name: string;
-  status: "draft" | "active" | "inactive" | "archived";
+  status: "draft" | "active" | "paused" | "inactive" | "archived";
   kind: string;
   base_price_cents: number;
   price: Price;
@@ -130,6 +131,8 @@ export interface Product extends ProductSummary {
   unit_label: string;
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
+  paused_at: string | null;
+  paused_reason: string | null;
   variants: Variant[];
   media: Media[];
 }
@@ -172,6 +175,7 @@ export interface Movement {
 export const PRODUCT_STATUS_LABEL: Record<string, string> = {
   draft: "rascunho",
   active: "publicado",
+  paused: "pausado",
   inactive: "despublicado",
   archived: "arquivado",
 };

@@ -71,7 +71,7 @@ class ProductCard(BaseModel):
     name: str
     short_description: str | None
     price: Price
-    availability: Literal["available", "sold_out", "made_to_order"]
+    availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
     image: Image | None
 
 
@@ -88,7 +88,7 @@ class VariantOption(BaseModel):
     sku: str
     name: str
     price: Price
-    availability: Literal["available", "sold_out", "made_to_order"]
+    availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
 
 
 class ProductSeo(BaseModel):

@@ -16,7 +16,7 @@ import { Flash } from "../flash";
 
 export const metadata: Metadata = { title: "Produtos" };
 
-const STATUSES = ["", "draft", "active", "inactive", "archived"];
+const STATUSES = ["", "draft", "active", "paused", "inactive", "archived"];
 
 export default async function Products({
   params,

@@ -13,6 +13,8 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import (
+    LIVE_VARIANT_STATUSES,
+    PUBLISHED_STATUSES,
     Category,
     Product,
     ProductCategory,
@@ -27,7 +29,7 @@ from app.media.models import MediaAsset, MediaOwner
 from app.media.repository import MediaRepository
 from app.media.service import rendition_urls
 
-Availability = Literal["available", "sold_out", "made_to_order"]
+Availability = Literal["available", "sold_out", "made_to_order", "unavailable"]
 STOREFRONT_PAGE_MAX = 48
 SITEMAP_MAX = 5000
 
@@ -35,6 +37,8 @@ SITEMAP_MAX = 5000
 def variant_availability(
     variant: ProductVariant, product: Product, balance: InventoryBalance | None
 ) -> Availability:
+    if product.status == ProductStatus.PAUSED or variant.status == VariantStatus.PAUSED:
+        return "unavailable"  # paused by the store: not for sale, whatever the stock
     policy = variant.stock_policy or product.stock_policy
     if policy == StockPolicy.MADE_TO_ORDER:
         return "made_to_order"
@@ -45,11 +49,15 @@ def variant_availability(
     return "sold_out"
 
 
-def product_availability(labels: Sequence[Availability]) -> Availability:
+def product_availability(labels: Sequence[Availability], *, paused: bool = False) -> Availability:
+    if paused:
+        return "unavailable"
     if "available" in labels:
         return "available"
     if "made_to_order" in labels:
         return "made_to_order"
+    if labels and all(label == "unavailable" for label in labels):
+        return "unavailable"
     return "sold_out"
 
 
@@ -110,7 +118,7 @@ class StorefrontCatalog:
         """Published products by (position, id); `limit + 1` rows for keyset paging."""
         stmt = (
             select(Product)
-            .where(Product.status == ProductStatus.ACTIVE)
+            .where(Product.status.in_(PUBLISHED_STATUSES))
             .order_by(Product.position, Product.id)
             .limit(limit + 1)
         )
@@ -145,7 +153,7 @@ class StorefrontCatalog:
         stmt = (
             select(Product)
             .where(Product.slug == slug)
-            .where(Product.status == ProductStatus.ACTIVE)
+            .where(Product.status.in_(PUBLISHED_STATUSES))
         )
         product = (await self.session.execute(stmt)).scalar_one_or_none()
         if product is None:
@@ -181,7 +189,10 @@ class StorefrontCatalog:
         card = CardData(
             product,
             self._price(product),
-            product_availability([v.availability for v in variant_data]),
+            product_availability(
+                [v.availability for v in variant_data],
+                paused=product.status == ProductStatus.PAUSED,
+            ),
             images[0] if images else None,
         )
         return ProductData(card, variant_data, images, categories)
@@ -190,7 +201,7 @@ class StorefrontCatalog:
         products = (
             await self.session.execute(
                 select(Product.slug, Product.updated_at)
-                .where(Product.status == ProductStatus.ACTIVE)
+                .where(Product.status.in_(PUBLISHED_STATUSES))
                 .order_by(Product.id)
                 .limit(SITEMAP_MAX)
             )
@@ -221,7 +232,7 @@ class StorefrontCatalog:
         stmt = (
             select(ProductVariant)
             .where(ProductVariant.product_id.in_(list(product_ids)))
-            .where(ProductVariant.status == VariantStatus.ACTIVE)
+            .where(ProductVariant.status.in_(LIVE_VARIANT_STATUSES))
             .where(ProductVariant.archived_at.is_(None))
             .order_by(ProductVariant.product_id, ProductVariant.position, ProductVariant.id)
         )
@@ -254,7 +265,7 @@ class StorefrontCatalog:
                 CardData(
                     product,
                     self._price(product),
-                    product_availability(labels),
+                    product_availability(labels, paused=product.status == ProductStatus.PAUSED),
                     first_images[0] if first_images else None,
                 )
             )

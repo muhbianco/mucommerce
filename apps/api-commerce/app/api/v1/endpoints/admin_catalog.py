@@ -12,6 +12,7 @@ from app.catalog.schemas import (
     CategoryCreate,
     CategoryRead,
     CategoryUpdate,
+    PauseRequest,
     PriceRead,
     ProductCreate,
     ProductRead,
@@ -94,6 +95,8 @@ def _product_read(view: ProductView) -> ProductRead:
         has_variants=product.has_variants,
         seo=ProductSeo.model_validate(product.seo) if product.seo else None,
         archived_at=product.archived_at,
+        paused_at=product.paused_at,
+        paused_reason=product.paused_reason,
         created_at=product.created_at,
         category_ids=view.category_ids,
         variants=[
@@ -109,6 +112,8 @@ def _product_read(view: ProductView) -> ProductRead:
                 status=v.status,
                 position=v.position,
                 price=_price(price_of_variant(product, v, now)),
+                paused_at=v.paused_at,
+                paused_reason=v.paused_reason,
             )
             for v in view.variants
         ],
@@ -252,6 +257,72 @@ async def unpublish_product(
     product_id: ProductId,
 ) -> ProductRead:
     return _product_read(await _service(request, session, user, tenant).unpublish(product_id))
+
+
+@router.post(
+    "/products/{product_id}/pause",
+    response_model=ProductRead,
+    summary="Pausa a venda (continua na vitrine como indisponível)",
+)
+async def pause_product(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogPublishTenant,
+    product_id: ProductId,
+    body: PauseRequest | None = None,
+) -> ProductRead:
+    reason = body.reason if body else None
+    view = await _service(request, session, user, tenant).pause_product(product_id, reason=reason)
+    return _product_read(view)
+
+
+@router.post("/products/{product_id}/resume", response_model=ProductRead, summary="Retoma a venda")
+async def resume_product(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogPublishTenant,
+    product_id: ProductId,
+) -> ProductRead:
+    return _product_read(await _service(request, session, user, tenant).resume_product(product_id))
+
+
+@router.post(
+    "/products/{product_id}/variants/{variant_id}/pause",
+    response_model=ProductRead,
+    summary="Pausa a venda de uma variante",
+)
+async def pause_variant(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogPublishTenant,
+    product_id: ProductId,
+    variant_id: VariantId,
+    body: PauseRequest | None = None,
+) -> ProductRead:
+    view = await _service(request, session, user, tenant).pause_variant(
+        product_id, variant_id, reason=body.reason if body else None
+    )
+    return _product_read(view)
+
+
+@router.post(
+    "/products/{product_id}/variants/{variant_id}/resume",
+    response_model=ProductRead,
+    summary="Retoma a venda de uma variante",
+)
+async def resume_variant(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogPublishTenant,
+    product_id: ProductId,
+    variant_id: VariantId,
+) -> ProductRead:
+    view = await _service(request, session, user, tenant).resume_variant(product_id, variant_id)
+    return _product_read(view)
 
 
 @router.patch(

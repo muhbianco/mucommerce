@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isIndexable, jsonLd, srcSet } from "./storefront";
+import { AVAILABILITY_LABEL, isIndexable, jsonLd, offSale, SCHEMA_AVAILABILITY, srcSet } from "./storefront";
 import type { StorefrontContext } from "./tenant";
 
 function context(overrides: Partial<StorefrontContext> = {}, indexable = true): StorefrontContext {
@@ -55,5 +55,15 @@ describe("images", () => {
         ],
       }),
     ).toBe("https://s/320.webp 320w, https://s/orig.webp 1200w");
+  });
+});
+
+describe("availability", () => {
+  it("treats a paused product like a sold-out one, with its own label", () => {
+    expect(offSale("unavailable")).toBe(true);
+    expect(offSale("sold_out")).toBe(true);
+    expect(offSale("made_to_order")).toBe(false);
+    expect(AVAILABILITY_LABEL.unavailable).toBe("Indisponível");
+    expect(SCHEMA_AVAILABILITY.unavailable).toBe("https://schema.org/OutOfStock");
   });
 });

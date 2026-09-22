@@ -14,7 +14,14 @@ import {
 } from "@/lib/panel/types";
 
 import styles from "../../../../../panel.module.css";
-import { deleteMedia, setProductStatus, updateMediaAlt, updateProduct, updateVariant } from "../../actions";
+import {
+  deleteMedia,
+  setProductStatus,
+  setVariantPause,
+  updateMediaAlt,
+  updateProduct,
+  updateVariant,
+} from "../../actions";
 import { Flash } from "../../flash";
 import { ImageUploader } from "../../image-uploader";
 
@@ -52,6 +59,8 @@ export default async function ProductPage({
     </>
   );
   const ready = product.media.filter((m) => m.status === "ready").length;
+  const published = product.status === "active" || product.status === "paused";
+  const canPublish = scopes.can("catalog:publish") && product.status !== "archived";
 
   return (
     <>
@@ -63,14 +72,14 @@ export default async function ProductPage({
       </h2>
       <Flash ok={ok} erro={erro} />
 
-      {scopes.can("catalog:publish") && product.status !== "archived" ? (
+      {canPublish ? (
         <section className={styles.card}>
           <h2>Vitrine</h2>
           <p>
             Preço atual: {formatMoney(product.price.amount_cents)}
             {product.price.compare_at_cents ? ` (de ${formatMoney(product.price.compare_at_cents)})` : ""} ·
             Imagens prontas: {ready}
-            {product.status === "active" && context.primary_host ? (
+            {published && context.primary_host ? (
               <>
                 {" · "}
                 <a
@@ -86,11 +95,33 @@ export default async function ProductPage({
           <div className={styles.form}>
             <form action={setProductStatus}>
               {hidden}
-              <input type="hidden" name="action" value={product.status === "active" ? "unpublish" : "publish"} />
-              <button type="submit" className={styles.button}>
-                {product.status === "active" ? "Tirar da vitrine" : "Publicar"}
+              <input type="hidden" name="action" value={published ? "unpublish" : "publish"} />
+              <button type="submit" className={published ? styles.buttonGhost : styles.button}>
+                {published ? "Tirar da vitrine" : "Publicar"}
               </button>
             </form>
+            {product.status === "active" ? (
+              <form action={setProductStatus}>
+                {hidden}
+                <input type="hidden" name="action" value="pause" />
+                <label>
+                  Motivo (só você vê)
+                  <input name="reason" maxLength={200} placeholder="ex.: forno em manutenção" />
+                </label>
+                <button type="submit" className={styles.button}>
+                  Pausar venda
+                </button>
+              </form>
+            ) : null}
+            {product.status === "paused" ? (
+              <form action={setProductStatus}>
+                {hidden}
+                <input type="hidden" name="action" value="resume" />
+                <button type="submit" className={styles.button}>
+                  Retomar venda
+                </button>
+              </form>
+            ) : null}
             {scopes.can("catalog:write") ? (
               <form action={setProductStatus}>
                 {hidden}
@@ -101,7 +132,14 @@ export default async function ProductPage({
               </form>
             ) : null}
           </div>
-          <p className="muted">Para publicar: preço maior que zero e ao menos uma imagem pronta.</p>
+          {product.status === "paused" ? (
+            <p>
+              Venda pausada{product.paused_reason ? `: ${product.paused_reason}` : ""}. Na vitrine, o produto
+              aparece como indisponível.
+            </p>
+          ) : (
+            <p className="muted">Para publicar: preço maior que zero e ao menos uma imagem pronta.</p>
+          )}
         </section>
       ) : null}
 
@@ -259,29 +297,54 @@ export default async function ProductPage({
       <section className={styles.card}>
         <h2>Variante e estoque</h2>
         {product.variants.map((variant) => (
-          <form key={variant.id} action={updateVariant} className={styles.form}>
-            {hidden}
-            <input type="hidden" name="variant_id" value={variant.id} />
-            <span>
-              {variant.name} · {variant.sku}
-            </span>
-            <label>
-              Preço próprio (vazio = do produto)
-              <input name="price" inputMode="decimal" defaultValue={moneyInput(variant.price_cents)} disabled={!canWrite} />
-            </label>
-            <label>
-              Custo
-              <input name="cost" inputMode="decimal" defaultValue={moneyInput(variant.cost_cents)} disabled={!canWrite} />
-            </label>
-            {canWrite ? (
-              <button type="submit" className={styles.buttonGhost}>
-                Salvar variante
-              </button>
+          <div key={variant.id}>
+            <form action={updateVariant} className={styles.form}>
+              {hidden}
+              <input type="hidden" name="variant_id" value={variant.id} />
+              <span>
+                {variant.name} · {variant.sku}
+                {variant.status === "paused" ? (
+                  <>
+                    {" "}
+                    <span className={styles.badge}>pausada</span>
+                    {variant.paused_reason ? ` ${variant.paused_reason}` : ""}
+                  </>
+                ) : null}
+              </span>
+              <label>
+                Preço próprio (vazio = do produto)
+                <input name="price" inputMode="decimal" defaultValue={moneyInput(variant.price_cents)} disabled={!canWrite} />
+              </label>
+              <label>
+                Custo
+                <input name="cost" inputMode="decimal" defaultValue={moneyInput(variant.cost_cents)} disabled={!canWrite} />
+              </label>
+              {canWrite ? (
+                <button type="submit" className={styles.buttonGhost}>
+                  Salvar variante
+                </button>
+              ) : null}
+              {context.features.inventory && product.stock_policy === "tracked" ? (
+                <Link href={`${base}/estoque/${variant.id}`}>Estoque e extrato →</Link>
+              ) : null}
+            </form>
+            {canPublish && (variant.status === "active" || variant.status === "paused") ? (
+              <form action={setVariantPause} className={styles.form}>
+                {hidden}
+                <input type="hidden" name="variant_id" value={variant.id} />
+                <input type="hidden" name="action" value={variant.status === "paused" ? "resume" : "pause"} />
+                {variant.status === "active" ? (
+                  <label>
+                    Motivo da pausa
+                    <input name="reason" maxLength={200} />
+                  </label>
+                ) : null}
+                <button type="submit" className={styles.buttonGhost}>
+                  {variant.status === "paused" ? "Retomar variante" : "Pausar variante"}
+                </button>
+              </form>
             ) : null}
-            {context.features.inventory && product.stock_policy === "tracked" ? (
-              <Link href={`${base}/estoque/${variant.id}`}>Estoque e extrato →</Link>
-            ) : null}
-          </form>
+          </div>
         ))}
       </section>
     </>

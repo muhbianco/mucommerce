@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { AVAILABILITY_LABEL, formatPrice, type ProductCard as Card } from "@/lib/storefront";
+import { AVAILABILITY_LABEL, formatPrice, offSale, type ProductCard as Card } from "@/lib/storefront";
 
 import { StoreImage } from "./store-image";
 import styles from "./store.module.css";
@@ -27,7 +27,7 @@ export function ProductCard({ product }: { product: Card }) {
         ) : null}
       </span>
       {product.availability !== "available" ? (
-        <span className={product.availability === "sold_out" ? styles.soldOut : styles.tag}>
+        <span className={offSale(product.availability) ? styles.soldOut : styles.tag}>
           {AVAILABILITY_LABEL[product.availability]}
         </span>
       ) : null}

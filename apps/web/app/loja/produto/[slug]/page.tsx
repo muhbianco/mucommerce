@@ -11,6 +11,7 @@ import {
   formatPrice,
   isIndexable,
   jsonLd,
+  offSale,
   type ProductDetail,
   SCHEMA_AVAILABILITY,
   storeOrigin,
@@ -135,7 +136,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             ) : null}
           </p>
           <p>
-            <span className={product.availability === "sold_out" ? styles.soldOut : styles.tag}>
+            <span className={offSale(product.availability) ? styles.soldOut : styles.tag}>
               {AVAILABILITY_LABEL[product.availability]}
             </span>
           </p>

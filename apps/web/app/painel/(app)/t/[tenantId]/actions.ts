@@ -119,9 +119,35 @@ export async function setProductStatus(form: FormData): Promise<void> {
       await api(`${path}/products/${productId}`, { method: "DELETE" });
       return `${page}/produtos?ok=arquivado`;
     }
-    if (action !== "publish" && action !== "unpublish") throw new FormError("acao_invalida");
+    if (action === "pause") {
+      await api(`${path}/products/${productId}/pause`, { method: "POST", json: pauseBody(form) });
+      return;
+    }
+    if (action !== "publish" && action !== "unpublish" && action !== "resume") {
+      throw new FormError("acao_invalida");
+    }
     await api(`${path}/products/${productId}/${action}`, { method: "POST" });
   });
+}
+
+/** Pause or resume one variant (published but not for sale, with an optional reason). */
+export async function setVariantPause(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  const variantId = id(text(form, "variant_id"));
+  const action = text(form, "action");
+  await run(`${page}/produtos/${productId}`, `variante_${action}`, async () => {
+    if (action !== "pause" && action !== "resume") throw new FormError("acao_invalida");
+    await api(`${path}/products/${productId}/variants/${variantId}/${action}`, {
+      method: "POST",
+      ...(action === "pause" ? { json: pauseBody(form) } : {}),
+    });
+  });
+}
+
+function pauseBody(form: FormData): { reason: string | null } {
+  const reason = text(form, "reason").slice(0, 200);
+  return { reason: reason || null };
 }
 
 export async function updateVariant(form: FormData): Promise<void> {
