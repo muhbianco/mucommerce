@@ -63,6 +63,12 @@ class ProductKind(StrEnum):
     TICKET = "ticket"
 
 
+class EventStatus(StrEnum):
+    SCHEDULED = "scheduled"
+    POSTPONED = "postponed"  # date to be announced: sales stop, the page stays
+    CANCELLED = "cancelled"
+
+
 class StockPolicy(StrEnum):
     TRACKED = "tracked"
     UNTRACKED = "untracked"
@@ -241,3 +247,57 @@ class ProductTag(UUIDPrimaryKeyMixin, TenantScoped, Base):
 
     product_id: Mapped[str] = mapped_column(String(36), nullable=False)
     tag_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+
+class Event(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
+    """When and where a ticket product happens. Name, description, images, price and publishing
+    stay on the product (kind `ticket`); each lot of tickets is one of its variants."""
+
+    __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "product_id", name="uq_events_product"),
+        UniqueConstraint("tenant_id", "id", name="uq_events_tenant_row"),
+        ForeignKeyConstraint(
+            ["tenant_id", "product_id"],
+            ["products.tenant_id", "products.id"],
+            name="fk_events_product",
+        ),
+        Index("ix_events_starts", "tenant_id", "starts_at", "id"),
+    )
+
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    venue_name: Mapped[str | None] = mapped_column(String(160))
+    venue_address: Mapped[str | None] = mapped_column(String(300))
+    city: Mapped[str | None] = mapped_column(String(120))
+    online_url: Mapped[str | None] = mapped_column(String(500))
+    capacity: Mapped[int | None] = mapped_column(Integer)  # NULL: no overall limit
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default=EventStatus.SCHEDULED)
+    status_note: Mapped[str | None] = mapped_column(String(300))
+
+
+class EventLot(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
+    """A batch of tickets ("1º lote") with its own price, quantity and sales window. The tickets
+    themselves are the stock of `variant_id`; `quantity` is how many the lot was given."""
+
+    __tablename__ = "event_lots"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "variant_id", name="uq_event_lots_variant"),
+        ForeignKeyConstraint(
+            ["tenant_id", "event_id"], ["events.tenant_id", "events.id"], name="fk_event_lots_event"
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "variant_id"],
+            ["product_variants.tenant_id", "product_variants.id"],
+            name="fk_event_lots_variant",
+        ),
+        Index("ix_event_lots_event", "tenant_id", "event_id", "position"),
+    )
+
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    variant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    sales_starts_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    sales_ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

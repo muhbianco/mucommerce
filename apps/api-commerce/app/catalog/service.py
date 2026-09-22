@@ -4,7 +4,8 @@ Rules that live here (and nowhere else):
 - every product has a default variant, created with it and sharing its SKU;
 - SKU is unique per tenant across products and variants, and immutable;
 - a slug is unique per tenant, generated from the name when omitted;
-- publishing needs a price above zero, an active variant and at least one ready image;
+- publishing needs a price above zero, an active variant and at least one ready image; a ticket
+  needs its event with a lot instead of a base price (lots carry the prices, and may be free);
 - a published product is `active` (for sale) or `paused` (shown as unavailable, with a reason);
   only `active` sells, so a check that forgets `paused` fails closed;
 - categories nest at most two levels; archiving one with active children is refused;
@@ -36,6 +37,7 @@ from app.catalog.models import (
     PUBLISHED_STATUSES,
     Category,
     Product,
+    ProductKind,
     ProductStatus,
     ProductVariant,
     Tag,
@@ -57,6 +59,7 @@ from app.catalog.schemas import (
     ProductUpdate,
     VariantUpdate,
 )
+from app.catalog.skus import next_variant_sku
 from app.core.exceptions import (
     ConflictError,
     InvalidTransitionError,
@@ -215,7 +218,8 @@ class CatalogService:
             "ends_at": changes.get("promo_ends_at", product.promo_ends_at),
         }
         check_promotion(**merged)
-        if product.status in PUBLISHED_STATUSES and merged["base_cents"] <= 0:
+        needs_price = product.kind != ProductKind.TICKET
+        if needs_price and product.status in PUBLISHED_STATUSES and merged["base_cents"] <= 0:
             raise ConflictError("Produto publicado precisa de preço maior que zero.")
         if "slug" in changes and changes["slug"] != product.slug:
             taken = await self.repo.product_slugs_like(changes["slug"], exclude_id=product.id)
@@ -289,7 +293,10 @@ class CatalogService:
         if product.status == ProductStatus.ARCHIVED:
             raise ConflictError("Produto arquivado não pode ser publicado.")
         problems: list[str] = []
-        if product.base_price_cents <= 0:
+        if product.kind == ProductKind.TICKET:
+            if not await self.repo.has_event_lots(product.id):
+                problems.append("event")
+        elif product.base_price_cents <= 0:
             problems.append("price")
         if not any(v.status == VariantStatus.ACTIVE for v in view.variants):
             problems.append("active_variant")
@@ -380,6 +387,8 @@ class CatalogService:
         product = await self._product_or_404(product_id, lock=True)
         if product.status == ProductStatus.ARCHIVED:
             raise ConflictError("Produto arquivado não pode ser editado.")
+        if product.kind == ProductKind.TICKET:
+            raise ConflictError("Ingressos usam lotes, não opções.", code="ticket_uses_lots")
         options = _checked_options(data.options)
         if options == (product.options or []):
             return await self.get_product(product.id)
@@ -428,7 +437,7 @@ class CatalogService:
             if variant is None:
                 variant = ProductVariant(
                     product_id=product.id,
-                    sku=_next_variant_sku(product.sku, taken),
+                    sku=next_variant_sku(product.sku, taken),
                     status=VariantStatus.ACTIVE,
                     created_by_actor=self.actor.id,
                 )
@@ -865,20 +874,6 @@ def _matrix(options: list[dict[str, Any]]) -> list[tuple[str, ...]]:
 
 def _combo_key(values: dict[str, Any] | None) -> tuple[tuple[str, str], ...]:
     return tuple(sorted((k.casefold(), str(v).casefold()) for k, v in (values or {}).items()))
-
-
-def _next_variant_sku(product_sku: str, taken: set[str]) -> str:
-    """`<product SKU>-1`, `-2`… skipping any SKU already in use in the store."""
-    for number in itertools.count(1):
-        candidate = f"{product_sku}-{number}"
-        if len(candidate) > 64:
-            raise ValidationError(
-                "SKU do produto longo demais para gerar variantes.", fields=["sku"]
-            )
-        if candidate not in taken:
-            taken.add(candidate)
-            return candidate
-    raise AssertionError("unreachable")
 
 
 def _checked_modifier_groups(

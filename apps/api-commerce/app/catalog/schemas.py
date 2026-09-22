@@ -312,3 +312,72 @@ class CategoryRead(BaseModel):
     position: int
     created_at: datetime
     updated_at: datetime
+
+
+# ----------------------------------------------------------------------------- events
+EventStatusIn = Literal["scheduled", "postponed", "cancelled"]
+LotState = Literal["upcoming", "on_sale", "sold_out", "ended", "unavailable"]
+Tickets = Annotated[int, Field(ge=0, le=1_000_000)]
+LotName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
+MAX_LOTS = 20
+
+
+class EventUpsert(StrictModel):
+    """The whole event (PUT): absent optional fields are cleared."""
+
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime | None = None
+    venue_name: Annotated[str, Field(min_length=1, max_length=160)] | None = None
+    venue_address: Annotated[str, Field(min_length=1, max_length=300)] | None = None
+    city: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    online_url: Annotated[str, Field(max_length=500, pattern=r"^https://[^\s]+$")] | None = None
+    capacity: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
+    status: EventStatusIn = "scheduled"
+    status_note: Annotated[str, Field(max_length=300)] | None = None
+
+
+class LotCreate(StrictModel):
+    name: LotName
+    price_cents: Money
+    quantity: Tickets
+    sales_starts_at: AwareDatetime | None = None
+    sales_ends_at: AwareDatetime | None = None
+
+
+class LotUpdate(StrictModel):
+    """Partial: only the fields present change; `null` clears a sales bound."""
+
+    name: LotName | None = None
+    price_cents: Money | None = None
+    quantity: Tickets | None = None
+    sales_starts_at: AwareDatetime | None = None
+    sales_ends_at: AwareDatetime | None = None
+
+
+class LotRead(BaseModel):
+    id: str
+    variant_id: str
+    sku: str
+    name: str
+    price_cents: int
+    quantity: int
+    available: int  # tickets left in stock
+    sales_starts_at: datetime | None
+    sales_ends_at: datetime | None
+    position: int
+    state: LotState
+
+
+class EventRead(BaseModel):
+    product_id: str
+    starts_at: datetime
+    ends_at: datetime | None
+    venue_name: str | None
+    venue_address: str | None
+    city: str | None
+    online_url: str | None
+    capacity: int | None
+    allocated: int  # sum of the lots' quantities
+    status: str
+    status_note: str | None
+    lots: list[LotRead]

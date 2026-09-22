@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import (
     Category,
+    Event,
+    EventLot,
     Product,
     ProductCategory,
     ProductStatus,
@@ -82,6 +84,15 @@ class CatalogRepository:
             stmt = select(column).where(column.startswith(prefix, autoescape=True)).limit(1000)
             taken.update((await self.session.execute(stmt)).scalars())
         return taken
+
+    async def has_event_lots(self, product_id: str) -> bool:
+        stmt = (
+            select(EventLot.id)
+            .join(Event, Event.id == EventLot.event_id)
+            .where(Event.product_id == product_id)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).first() is not None
 
     async def all_variants(self, product_id: str) -> list[ProductVariant]:
         """Every variant of the product, archived ones included (the matrix revives them)."""
