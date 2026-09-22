@@ -22,6 +22,8 @@ from app.cart.schemas import (
     CartItemRead,
     CartModifierRead,
     CartRead,
+    CouponIn,
+    CouponRead,
     FulfillmentChoiceIn,
     FulfillmentOptions,
     FulfillmentQuoteRead,
@@ -116,6 +118,15 @@ def cart_read(view: CartView, tenant: TenantContext) -> CartRead:
             ),
             problems=len(quote.problems),
             can_checkout=quote.can_checkout,
+            coupon=(
+                CouponRead(
+                    code=quote.coupon.code,
+                    discount_cents=quote.coupon.discount_cents,
+                    problem=quote.coupon.problem,
+                )
+                if quote.coupon is not None
+                else None
+            ),
         ),
         options=FulfillmentOptions(
             modes=public["modes"],
@@ -199,3 +210,22 @@ async def set_fulfillment(
 ) -> CartRead:
     choice = body.model_dump(mode="json", exclude_none=True)
     return _read(await _service(session, shopper).set_fulfillment(choice), shopper)
+
+
+@router.put(
+    "/cart/coupon",
+    response_model=CartRead,
+    summary="Usa um cupom (o motivo aparece na hora se ele não valer)",
+    dependencies=_WRITE,
+)
+async def set_coupon(session: DbSession, shopper: CheckoutShopper, body: CouponIn) -> CartRead:
+    service = CartService(session, shopper.tenant, shopper.viewer.customer_id, utcnow())
+    return cart_read(await service.set_coupon(body.code), shopper.tenant)
+
+
+@router.delete(
+    "/cart/coupon", response_model=CartRead, summary="Tira o cupom do carrinho", dependencies=_WRITE
+)
+async def clear_coupon(session: DbSession, shopper: CheckoutShopper) -> CartRead:
+    service = CartService(session, shopper.tenant, shopper.viewer.customer_id, utcnow())
+    return cart_read(await service.clear_coupon(), shopper.tenant)

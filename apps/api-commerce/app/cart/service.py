@@ -32,6 +32,7 @@ from app.core.exceptions import (
     NotFoundError,
     OutOfStockError,
 )
+from app.coupons.service import CouponInvalidError, CouponService, normalize
 from app.customers.address_models import CustomerAddress
 from app.customers.addresses import AddressService
 from app.fulfillment.service import FulfillmentChoice, offered_modes
@@ -41,6 +42,7 @@ from app.media.repository import MediaRepository
 from app.pricing.quote import MILLI, LineInput, LineProblem, Quote
 from app.pricing.service import PricingService
 from app.tenancy.context import TenantContext
+from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import fulfillment_settings
 
 
@@ -188,6 +190,36 @@ class CartService:
         await self._touch(cart)
         return await self._view(cart, await self.items(cart))
 
+    async def set_coupon(self, code: str) -> CartView:
+        """Put a coupon on the cart. A code that cannot be used now is refused right here, with
+        the reason, instead of surprising the customer at checkout."""
+        cart = await self.active(create=True, lock=True)
+        assert cart is not None
+        items = await self.items(cart)
+        view = await self._view(cart, items)
+        coupons = CouponService(self.session, self.tenant, Actor.system("cart"))
+        _, outcome = await coupons.check(
+            code,
+            subtotal_cents=view.quote.subtotal_cents,
+            customer_id=self.customer_id,
+            now=self.now,
+        )
+        if not outcome.ok:
+            raise CouponInvalidError(
+                problem=outcome.problem or "coupon_not_found", limits=outcome.detail
+            )
+        cart.coupon_code = normalize(code)
+        await self._touch(cart)
+        return await self._view(cart, items)
+
+    async def clear_coupon(self) -> CartView:
+        cart = await self.active(lock=True)
+        if cart is None:
+            return await self.view()
+        cart.coupon_code = None
+        await self._touch(cart)
+        return await self._view(cart, await self.items(cart))
+
     # ------------------------------------------------------------------ helpers
     async def _owned_item(self, item_id: str) -> tuple[Cart, CartItem]:
         cart = await self.active(lock=True)
@@ -253,7 +285,11 @@ class CartService:
     async def _view(self, cart: Cart | None, items: list[CartItem]) -> CartView:
         choice, address = await self.choice(cart)
         quote = await PricingService(self.session, self.tenant, self.now).quote(
-            [self._line(item) for item in items], choice=choice, address=address
+            [self._line(item) for item in items],
+            choice=choice,
+            address=address,
+            coupon_code=cart.coupon_code if cart else None,
+            customer_id=self.customer_id,
         )
         products = await self._products([item.variant_id for item in items])
         product_ids = sorted({p.id for _, p in products.values()})

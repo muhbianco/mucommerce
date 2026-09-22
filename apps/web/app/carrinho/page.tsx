@@ -9,7 +9,7 @@ import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice, type StorePrice } from "@/lib/storefront";
 
 import { CART_ERRORS } from "../_store/add-to-cart";
-import { chooseFulfillment, removeCartItem, setCartQuantity } from "../_store/cart-actions";
+import { applyCoupon, chooseFulfillment, removeCartItem, removeCoupon, setCartQuantity } from "../_store/cart-actions";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
 
@@ -51,6 +51,7 @@ interface Cart {
     fulfillment: { type: string; fee_cents: number; snapshot: Record<string, unknown>; problems: string[] } | null;
     problems: number;
     can_checkout: boolean;
+    coupon: { code: string; discount_cents: number; problem: string | null } | null;
   };
   options: {
     modes: string[];
@@ -67,6 +68,16 @@ const PROBLEM: Record<string, string> = {
   invalid_modifiers: "Os adicionais mudaram; escolha de novo.",
   invalid_quantity: "Quantidade inválida.",
   lot_not_on_sale: "Este lote não está à venda agora.",
+};
+
+const COUPON_PROBLEM: Record<string, string> = {
+  coupon_not_found: "Esse cupom não existe nesta loja.",
+  coupon_inactive: "Esse cupom não está valendo agora.",
+  coupon_not_started: "Esse cupom ainda não começou a valer.",
+  coupon_expired: "Esse cupom já passou da validade.",
+  coupon_min_subtotal: "O pedido ainda não chegou ao valor mínimo do cupom.",
+  coupon_exhausted: "Esse cupom acabou.",
+  coupon_customer_limit: "Você já usou esse cupom o número de vezes permitido.",
 };
 
 const FULFILLMENT_PROBLEM: Record<string, string> = {
@@ -228,6 +239,27 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
 
           <section className={styles.section}>
             <p>Subtotal: {money(quote.subtotal_cents, currency)}</p>
+            {quote.coupon && !quote.coupon.problem ? (
+              <p>
+                Cupom {quote.coupon.code} aplicado.{" "}
+                <form action={removeCoupon} style={{ display: "inline" }}>
+                  <button type="submit" className="muted">
+                    tirar
+                  </button>
+                </form>
+              </p>
+            ) : (
+              <form action={applyCoupon}>
+                <label>
+                  Cupom de desconto
+                  <input name="code" maxLength={40} placeholder="ex.: BEMVINDO" />
+                </label>
+                <button type="submit">Aplicar cupom</button>
+              </form>
+            )}
+            {quote.coupon?.problem ? (
+              <p role="alert">{COUPON_PROBLEM[quote.coupon.problem] ?? "Cupom indisponível."}</p>
+            ) : null}
             {quote.discount_cents ? <p>Desconto: −{money(quote.discount_cents, currency)}</p> : null}
             {quote.delivery_fee_cents ? <p>Entrega: {money(quote.delivery_fee_cents, currency)}</p> : null}
             <p>

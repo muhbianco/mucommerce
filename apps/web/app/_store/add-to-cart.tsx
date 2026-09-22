@@ -45,5 +45,6 @@ export const CART_ERRORS: Record<string, string> = {
   invalid_quantity: "Quantidade inválida.",
   cart_limit: "Seu carrinho já tem itens demais.",
   fulfillment_invalid: "Escolha como receber o pedido.",
+  coupon_invalid: "Esse cupom não pode ser usado neste pedido.",
   not_found: "Item não encontrado.",
 };

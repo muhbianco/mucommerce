@@ -418,3 +418,69 @@ async def test_two_refunds_at_once_never_exceed_what_was_paid(
         bind_session_tenant(session, tenant.id)
         amounts = (await session.execute(select(Refund.amount_cents))).scalars().all()
     assert list(amounts) == [share]
+
+
+# ----------------------------------------------------------------------------- coupons (stage E)
+async def test_a_coupon_for_three_is_used_three_times_under_ten_checkouts(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Ten people check out at once with the same coupon limited to three uses: three get the
+    discount, the rest are told the cart changed — and the count never passes three."""
+    from sqlalchemy import update
+
+    from app.cart.models import Cart
+    from app.core.exceptions import CartChangedError
+    from app.coupons.models import Coupon, CouponRedemption
+    from app.coupons.service import CouponService
+    from app.orders.commands import CartSource, Contact, PlaceOrder
+    from app.orders.service import OrderService
+
+    tenant = await _selling_context(session_factory, "alpha")
+    variant = await _published(session_factory, tenant, "Brownie", 50)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        await CouponService(session, tenant, ACTOR).create(
+            "TRES",
+            {"kind": "percent", "percent_bps": 1000, "max_redemptions": 3, "status": "active"},
+        )
+        await session.commit()
+
+    carts = []
+    for _ in range(10):
+        customer_id, version, total, cart_id = await _cart(session_factory, tenant, [variant])
+        async with session_factory() as session:
+            bind_session_tenant(session, tenant.id)
+            await session.execute(update(Cart).where(Cart.id == cart_id).values(coupon_code="TRES"))
+            await session.commit()
+        discounted = total - (total * 1000 + 5000) // 10000
+        carts.append((customer_id, version, discounted, cart_id))
+
+    async def place(cart: tuple[str, int, int, str]) -> str:
+        customer_id, version, expected, cart_id = cart
+        async with session_factory() as session:
+            bind_session_tenant(session, tenant.id)
+            try:
+                await OrderService(session, tenant, ACTOR).place(
+                    PlaceOrder(
+                        origin="storefront",
+                        customer_id=customer_id,
+                        idempotency_key=cart_id,
+                        source=CartSource(cart_id, version),
+                        contact=Contact("Cliente"),
+                        expected_total_cents=expected,
+                    )
+                )
+            except CartChangedError:
+                await session.rollback()
+                return "changed"
+            await session.commit()
+            return "ok"
+
+    outcomes = await asyncio.gather(*(place(cart) for cart in carts))
+    assert outcomes.count("ok") == 3, outcomes
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        coupon = (await session.execute(select(Coupon))).scalar_one()
+        used = (await session.execute(select(CouponRedemption.discount_cents))).scalars().all()
+    assert coupon.redemptions_count == 3
+    assert sorted(used) == [10, 10, 10]  # 10% of the R$ 1,00 item, three times

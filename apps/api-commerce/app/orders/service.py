@@ -34,6 +34,7 @@ from app.core.exceptions import (
     TooManyOpenOrdersError,
 )
 from app.core.metrics import ORDERS_PLACED
+from app.coupons.service import CouponService
 from app.customers.addresses import address_snapshot
 from app.customers.legal import Acceptance, LegalService
 from app.identity.models import Customer
@@ -103,6 +104,9 @@ class OrderService:
             LineInput(i.variant_id, i.quantity_milli, tuple(i.modifier_ids or ()), key=i.id)
             for i in items
         ]
+        coupons = CouponService(self.session, self.tenant, self.actor)
+        # Lock order: cart → coupon → balances. The coupon row is held from here to the commit.
+        coupon = await coupons.by_code(cart.coupon_code, lock=True) if cart.coupon_code else None
         inventory = InventoryRepository(self.session)
         found = await inventory.variants_with_products([line.variant_id for line in lines])
         tracked = sorted(
@@ -112,7 +116,12 @@ class OrderService:
         carts = CartService(self.session, self.tenant, cmd.customer_id, now)
         choice, address = await carts.choice(cart)
         quote = await PricingService(self.session, self.tenant, now).quote(
-            lines, choice=choice, address=address, balances=balances
+            lines,
+            choice=choice,
+            address=address,
+            balances=balances,
+            coupon=coupon,
+            customer_id=cmd.customer_id,
         )
         self._check_quote(quote, cmd.expected_total_cents)
         consents = await self._consents(cmd, now)
@@ -122,6 +131,8 @@ class OrderService:
         fq = quote.fulfillment
         assert fq is not None  # _check_quote
         fulfillment = dict(fq.snapshot)
+        # The coupon was locked before the balances, so what the quote used is what is charged.
+        applied = quote.coupon if quote.coupon and quote.coupon.discount_cents else None
         if address is not None and fq.type == "delivery":
             fulfillment["address"] = address_snapshot(address)
         order = self._insert_order(
@@ -133,6 +144,7 @@ class OrderService:
             cart_id=cart.id,
             idempotency_hash=ihash,
             currency=self.tenant.currency,
+            coupon_code=applied.code if applied else None,
             subtotal_cents=quote.subtotal_cents,
             discount_cents=quote.discount_cents,
             delivery_fee_cents=quote.delivery_fee_cents,
@@ -169,6 +181,13 @@ class OrderService:
         await ReservationService(self.session, self.tenant, self.actor).reserve(
             order.id, needs, balances
         )
+        if applied is not None and coupon is not None:
+            await coupons.redeem(
+                coupon,
+                order_id=order.id,
+                customer_id=cmd.customer_id,
+                discount_cents=applied.discount_cents,
+            )
         cart.status = CartStatus.CONVERTED
         cart.active_customer_id = None
         cart.converted_order_id = order.id
@@ -307,6 +326,8 @@ class OrderService:
         order.cancelled_by_actor = self.actor.id
         reservations = ReservationService(self.session, self.tenant, self.actor)
         if was == OrderStatus.AWAITING_PAYMENT:
+            # Coupon before balances, as everywhere else.
+            await CouponService(self.session, self.tenant, self.actor).release(order.id)
             await reservations.release(order.id, reason="cancelled")
             await close_active_payment(
                 self.session, self.tenant.id, self.actor.id, order.id, reason="cancelled"
@@ -327,6 +348,7 @@ class OrderService:
         await self._transition(
             order, OrderStatus.FAILED, ActorKind.SYSTEM, source="system", reason="expired"
         )
+        await CouponService(self.session, self.tenant, self.actor).release(order.id)
         await ReservationService(self.session, self.tenant, self.actor).release(
             order.id, reason="expired", expired=True
         )

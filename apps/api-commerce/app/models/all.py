@@ -9,6 +9,7 @@ from app.audit.models import (
 )
 from app.cart.models import Cart, CartItem
 from app.catalog.models import Category, Product, ProductCategory, ProductVariant
+from app.coupons.models import Coupon, CouponRedemption
 from app.customers.address_models import CustomerAddress
 from app.customers.legal_models import Consent, LegalDocument
 from app.customers.models import CustomerAuthFlow, CustomerPhoneChallenge
@@ -56,6 +57,8 @@ __all__ = [
     "CartItem",
     "Category",
     "Consent",
+    "Coupon",
+    "CouponRedemption",
     "Customer",
     "CustomerAddress",
     "CustomerAuthFlow",

@@ -69,6 +69,17 @@ class PricedLine:
 
 
 @dataclass(frozen=True, slots=True)
+class CouponQuote:
+    """The coupon on the cart: what it takes off, or why it cannot be used now."""
+
+    code: str
+    discount_cents: int
+    coupon_id: str | None = None
+    problem: str | None = None
+    detail: dict[str, int] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Quote:
     lines: list[PricedLine]
     problems: list[LineProblem]
@@ -78,6 +89,7 @@ class Quote:
     total_cents: int
     # None: some line needs pickup or delivery and none was chosen yet.
     fulfillment: FulfillmentQuote | None
+    coupon: CouponQuote | None = None
 
     @property
     def needs_fulfillment(self) -> bool:

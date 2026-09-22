@@ -95,6 +95,16 @@ class FulfillmentQuoteRead(BaseModel):
     problems: list[str]
 
 
+class CouponRead(BaseModel):
+    code: str
+    discount_cents: int
+    problem: str | None  # why it is not being applied right now
+
+
+class CouponIn(StrictModel):
+    code: Annotated[str, Field(min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")]
+
+
 class QuoteRead(BaseModel):
     subtotal_cents: int
     discount_cents: int
@@ -105,6 +115,7 @@ class QuoteRead(BaseModel):
     fulfillment: FulfillmentQuoteRead | None
     problems: int  # lines with a problem
     can_checkout: bool
+    coupon: CouponRead | None
 
 
 class CartRead(BaseModel):

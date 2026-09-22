@@ -81,3 +81,16 @@ export async function chooseFulfillment(form: FormData): Promise<void> {
   }
   await attempt("/carrinho", "/carrinho", () => customerApi("/cart/fulfillment", { method: "PUT", json: body }));
 }
+
+/** Use a coupon on the cart. A code that cannot be used comes back with the reason. */
+export async function applyCoupon(form: FormData): Promise<void> {
+  const code = field(form, "code").toUpperCase().slice(0, 40);
+  if (!/^[A-Z0-9_-]{3,40}$/.test(code)) redirect("/carrinho?erro=coupon_invalid");
+  await attempt("/carrinho", "/carrinho?ok=cupom", () =>
+    customerApi("/cart/coupon", { method: "PUT", json: { code } }),
+  );
+}
+
+export async function removeCoupon(): Promise<void> {
+  await attempt("/carrinho", "/carrinho", () => customerApi("/cart/coupon", { method: "DELETE" }));
+}

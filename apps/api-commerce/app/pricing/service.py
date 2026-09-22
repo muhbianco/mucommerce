@@ -22,6 +22,9 @@ from app.catalog.events import EventRepository, lot_state
 from app.catalog.models import ProductKind, ProductStatus, SoldBy, StockPolicy, VariantStatus
 from app.catalog.pricing import price_with_modifiers, variant_price
 from app.core.exceptions import ValidationError
+from app.coupons.models import Coupon
+from app.coupons.rules import evaluate as evaluate_coupon
+from app.coupons.service import CouponService
 from app.fulfillment.service import (
     DeliveryAddress,
     FulfillmentChoice,
@@ -34,6 +37,7 @@ from app.inventory.service import effective_policy
 from app.pricing.quote import (
     MILLI,
     PHYSICAL_KINDS,
+    CouponQuote,
     LineInput,
     LineProblem,
     LotRef,
@@ -42,6 +46,7 @@ from app.pricing.quote import (
     line_subtotal,
 )
 from app.tenancy.context import TenantContext
+from app.tenancy.service import Actor
 
 
 class PricingService:
@@ -156,10 +161,16 @@ class PricingService:
         choice: FulfillmentChoice | None,
         address: DeliveryAddress | None = None,
         balances: Mapping[str, InventoryBalance] | None = None,
+        coupon: Coupon | None = None,
+        coupon_code: str | None = None,
+        customer_id: str | None = None,
     ) -> Quote:
+        """`coupon` is the row (locked by `place`, plain read for the cart); `coupon_code` is
+        what the customer typed, so a code that matches nothing still gets an answer."""
         priced, problems = await self.price(lines, balances=balances)
         subtotal = sum(line.subtotal_cents for line in priced)
-        discount = 0  # coupons (S17)
+        applied = await self._coupon(coupon, coupon_code, subtotal, customer_id)
+        discount = applied.discount_cents if applied else 0
         needs = any(line.product.kind in PHYSICAL_KINDS for line in priced)
         fulfillment: FulfillmentQuote | None
         if not needs:
@@ -183,6 +194,35 @@ class PricingService:
             delivery_fee_cents=fee,
             total_cents=subtotal - discount + fee,
             fulfillment=fulfillment,
+            coupon=applied,
+        )
+
+    async def _coupon(
+        self,
+        coupon: Coupon | None,
+        code: str | None,
+        subtotal_cents: int,
+        customer_id: str | None,
+    ) -> CouponQuote | None:
+        """Read-only: what the coupon is worth on this cart, or why it is not."""
+        if coupon is None and not code:
+            return None
+        service = CouponService(self.session, self.tenant, Actor.system("pricing"))
+        found = coupon if coupon is not None else await service.by_code(code or "")
+        uses = (
+            await service.customer_uses(found.id, customer_id)
+            if found is not None and customer_id
+            else 0
+        )
+        outcome = evaluate_coupon(
+            found, subtotal_cents=subtotal_cents, customer_uses=uses, now=self.now
+        )
+        return CouponQuote(
+            code=(found.code if found is not None else (code or "").strip().upper()),
+            discount_cents=outcome.discount_cents,
+            coupon_id=found.id if found is not None else None,
+            problem=outcome.problem,
+            detail=outcome.detail,
         )
 
     @staticmethod

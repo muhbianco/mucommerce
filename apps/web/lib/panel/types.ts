@@ -505,3 +505,21 @@ export const DELIVERY_STATUS_LABEL: Record<string, string> = {
   failed: "Falhou",
   skipped: "Não enviado (sem e-mail configurado)",
 };
+
+// ------------------------------------------------------------------------------- coupons
+export interface Coupon {
+  id: string;
+  code: string;
+  kind: string;
+  percent_bps: number | null;
+  amount_cents: number | null;
+  min_subtotal_cents: number;
+  max_discount_cents: number | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  max_redemptions: number | null;
+  per_customer_limit: number | null;
+  redemptions_count: number;
+  status: string;
+  note: string | null;
+}

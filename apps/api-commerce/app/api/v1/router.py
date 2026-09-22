@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin_catalog,
+    admin_coupons,
     admin_customers,
     admin_events,
     admin_inventory,
@@ -44,6 +45,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     {
         "name": "Painel — Eventos",
         "description": "Evento de um ingresso: data, local, capacidade e lotes (flag `events`).",
+    },
+    {
+        "name": "Painel — Cupons",
+        "description": "Cupons de desconto da loja (flag `coupons`).",
     },
     {
         "name": "Painel — Pedidos",
@@ -91,6 +96,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     ops_outbox.payments_router,
     admin_tenants.router,
     admin_catalog.router,
+    admin_coupons.router,
     admin_events.router,
     admin_media.router,
     admin_orders.router,
