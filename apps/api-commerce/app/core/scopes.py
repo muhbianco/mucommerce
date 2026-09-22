@@ -52,7 +52,9 @@ _ALL_TENANT_SCOPES = frozenset(Scope)
 
 _TENANT_ROLE_SCOPES: dict[TenantRole, frozenset[Scope]] = {
     TenantRole.OWNER: _ALL_TENANT_SCOPES,
-    TenantRole.ADMIN: _ALL_TENANT_SCOPES - {Scope.CUSTOMERS_ERASE, Scope.MEMBERS_WRITE},
+    # Payment credentials are the owner's alone (ADR 0011 §8).
+    TenantRole.ADMIN: _ALL_TENANT_SCOPES
+    - {Scope.CUSTOMERS_ERASE, Scope.MEMBERS_WRITE, Scope.PAYMENTS_CONFIG},
     TenantRole.OPS: frozenset(
         {
             Scope.CATALOG_READ,

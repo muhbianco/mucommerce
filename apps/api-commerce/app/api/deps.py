@@ -80,13 +80,15 @@ PlatformSuperadmin = Annotated[AdminUser, Depends(require_platform_role(Platform
 
 
 def require_tenant_scopes(
-    *scopes: Scope, features: tuple[str, ...] = ()
+    *scopes: Scope, features: tuple[str, ...] = (), members_only: bool = False
 ) -> Callable[..., Awaitable[TenantContext]]:
     """Tenant comes from the path and is validated against the user's memberships.
 
     Platform staff pass regardless of membership (support access), but the
     action is still audited with their actor id. `features` must all be enabled for the
     tenant (panel routes of a module that is switched off answer 403 `feature_disabled`).
+    `members_only`: platform staff get no bypass — only the store's own members, by their
+    role (payment credentials: who sets the token decides where the money goes).
     """
 
     async def dependency(
@@ -94,8 +96,10 @@ def require_tenant_scopes(
         user: CurrentAdmin,
         tenant_id: Annotated[str, Path(min_length=36, max_length=36)],
     ) -> TenantContext:
-        if not user.is_platform_admin:
+        if members_only or not user.is_platform_admin:
             membership = await AdminUserRepository(session).membership(user.id, tenant_id)
+            if membership is None and user.is_platform_admin:
+                raise PermissionDeniedError("Só a equipe da loja pode fazer esta operação.")
             if membership is None:
                 # 404, not 403: never confirm that a tenant id exists to outsiders.
                 raise NotFoundError("Tenant não encontrado.")

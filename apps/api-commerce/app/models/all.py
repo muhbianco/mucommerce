@@ -30,6 +30,12 @@ from app.inventory.models import (
 from app.media.models import MediaAsset
 from app.models.base import Base
 from app.orders.models import Order, OrderItem, OrderStatusHistory
+from app.payments.models import (
+    Payment,
+    PaymentEvent,
+    PaymentWebhookInbox,
+    TenantPaymentConfig,
+)
 from app.tenancy.models import (
     Tenant,
     TenantDomain,
@@ -66,6 +72,9 @@ __all__ = [
     "OrderStatusHistory",
     "OutboxDelivery",
     "OutboxEvent",
+    "Payment",
+    "PaymentEvent",
+    "PaymentWebhookInbox",
     "ProcessedEvent",
     "Product",
     "ProductCategory",
@@ -76,6 +85,7 @@ __all__ = [
     "TenantFeatureFlag",
     "TenantIntegrationCredential",
     "TenantMembership",
+    "TenantPaymentConfig",
     "TenantSequence",
     "TenantSetting",
 ]

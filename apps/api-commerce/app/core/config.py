@@ -129,6 +129,16 @@ class Settings(BaseSettings):
     # Where the handoff lands after the central callback; `{host}` is the store host.
     storefront_origin_template: str = "https://{host}"
 
+    # --- payments (stage E) ------------------------------------------------------------
+    # Providers this deployment may use at all (comma separated); `fake` exists for tests and
+    # the E2E suite and is refused in production.
+    payments_allowed_providers: str = "mercadopago,infinitepay"
+    payments_fake_webhook_secret: SecretStr = SecretStr("")
+    payments_http_timeout_seconds: float = 10.0
+    mercadopago_api_base: str = "https://api.mercadopago.com"
+    # No payment deadline goes beyond this, whatever the provider allows.
+    checkout_max_order_age_minutes: int = 120
+
     # --- cors -----------------------------------------------------------------------
     cors_origins: str = ""
 
@@ -169,6 +179,10 @@ class Settings(BaseSettings):
                 raise ValueError("GOOGLE_OIDC_* must point to Google in production")
             if not self.storefront_origin_template.startswith("https://"):
                 raise ValueError("STOREFRONT_ORIGIN_TEMPLATE must be https in production")
+            if "fake" in self.payments_allowed_provider_list:
+                raise ValueError("The fake payment provider is not allowed in production")
+            if self.mercadopago_api_base != "https://api.mercadopago.com":
+                raise ValueError("MERCADOPAGO_API_BASE must be Mercado Pago's API in production")
         if len(self.jwt_secret.get_secret_value()) < 32 and self.environment != "development":
             raise ValueError("JWT_SECRET must have at least 32 characters")
         return self
@@ -244,6 +258,10 @@ class Settings(BaseSettings):
             self.google_customer_redirect_uri
             or f"https://{self.api_public_host}/api/v1/auth/google/callback"
         )
+
+    @property
+    def payments_allowed_provider_list(self) -> list[str]:
+        return [p.strip() for p in self.payments_allowed_providers.split(",") if p.strip()]
 
     def storefront_origin(self, host: str) -> str:
         return self.storefront_origin_template.format(host=host).rstrip("/")

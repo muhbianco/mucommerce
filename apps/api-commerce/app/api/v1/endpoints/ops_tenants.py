@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Path, Query, Request, status
+from pydantic import BaseModel
 
 from app.api.deps import DbSession, PlatformOperator, admin_actor
 from app.audit.idempotency import idempotent
@@ -362,3 +364,29 @@ async def disable_domain(
         raise NotFoundError("Domínio não encontrado.")
     await service.disable_domain(tenant, domain, admin_actor(request, user))
     return _domain_read(domain)
+
+
+class PaymentSummary(BaseModel):
+    provider: str
+    flag_on: bool
+    enabled: bool
+    configured: bool
+    last_test_at: datetime | None
+    last_test_ok: bool | None
+    last_webhook_at: datetime | None
+
+
+@router.get(
+    "/{tenant_id}/payments",
+    response_model=list[PaymentSummary],
+    summary="Situação dos meios de pagamento da loja (sem segredos, nem mascarados)",
+)
+async def tenant_payments(
+    request: Request, session: DbSession, user: PlatformOperator, tenant_id: TenantId
+) -> list[PaymentSummary]:
+    from app.payments.config_service import PaymentConfigService
+    from app.tenancy.resolver import TenantResolver
+
+    tenant = await TenantResolver(session).resolve_by_id(tenant_id)
+    service = PaymentConfigService(session, tenant, admin_actor(request, user))
+    return [PaymentSummary(**row) for row in await service.ops_summary()]
