@@ -55,3 +55,15 @@ export async function deleteAddress(form: FormData): Promise<void> {
   if (!ID.test(addressId)) throw new Error("bad address id");
   await attempt("apagado", () => customerApi(`/me/addresses/${addressId}`, { method: "DELETE" }));
 }
+
+/** Cancel one of my orders (before payment, or paid within the store's window). */
+export async function cancelOrder(form: FormData): Promise<void> {
+  const orderId = field(form, "order_id");
+  if (!ID.test(orderId)) throw new Error("bad order id");
+  const back = `/conta/pedidos/${orderId}`;
+  await attempt(
+    "cancelado",
+    () => customerApi(`/me/orders/${orderId}/cancel`, { json: { reason: field(form, "reason").slice(0, 200) || null } }),
+    back,
+  );
+}

@@ -11,6 +11,7 @@ import { formatPrice } from "@/lib/storefront";
 
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
+import { cancelOrder } from "../../actions";
 
 export const metadata: Metadata = { title: "Pedido", robots: { index: false, follow: false } };
 
@@ -25,7 +26,7 @@ export default async function OrderPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ ok?: string }>;
+  searchParams: Promise<{ ok?: string; erro?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context) notFound();
@@ -35,13 +36,13 @@ export default async function OrderPage({
   if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect(`/entrar?next=${encodeURIComponent(back)}`);
   let order: Order;
   try {
-    order = await customerApi<Order>(`/checkout/orders/${id}`);
+    order = await customerApi<Order>(`/me/orders/${id}`);
   } catch (error) {
     if (error instanceof CustomerApiError && error.status === 401) redirect(`/entrar?next=${encodeURIComponent(back)}`);
     if (error instanceof CustomerApiError && error.status === 404) notFound();
     throw error;
   }
-  const { ok } = await searchParams;
+  const { ok, erro } = await searchParams;
   const zone = context.tenant.timezone;
   const when = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: zone }).format(new Date(iso));
@@ -54,6 +55,12 @@ export default async function OrderPage({
       </p>
       <h1>Pedido #{order.number}</h1>
       {ok === "pedido" ? <p role="status">Pedido recebido!</p> : null}
+      {ok === "cancelado" ? <p role="status">Pedido cancelado.</p> : null}
+      {erro === "cancel_window_closed" ? (
+        <p role="alert">Este pedido não pode mais ser cancelado por aqui. Fale com a loja.</p>
+      ) : erro ? (
+        <p role="alert">Não foi possível cancelar. Tente de novo.</p>
+      ) : null}
       <p>
         <strong>{orderStatusLabel(order.status)}</strong>
         {order.status === "awaiting_payment" && order.expires_at ? ` — pague até ${when(order.expires_at)}` : ""}
@@ -81,6 +88,14 @@ export default async function OrderPage({
       {order.fulfillment_type === "delivery" ? <p>Entrega: {place}</p> : null}
       {order.scheduled_start ? <p>Horário: {when(order.scheduled_start)}</p> : null}
       {order.status === "awaiting_payment" ? <p className="muted">O pagamento online chega em breve nesta loja.</p> : null}
+      {["awaiting_payment", "payment_confirmed", "accepted"].includes(order.status) ? (
+        <form action={cancelOrder}>
+          <input type="hidden" name="order_id" value={order.id} />
+          <button type="submit" className="muted">
+            Cancelar pedido
+          </button>
+        </form>
+      ) : null}
       <h2>Andamento</h2>
       <ul>
         {order.timeline.map((event, i) => (

@@ -73,3 +73,19 @@ test("checkout: revisa, aceita os termos quando houver e faz o pedido", async ({
   await page.goto(`${STORE}/carrinho`);
   await expect(page.getByText("Seu carrinho está vazio.")).toBeVisible();
 });
+
+test("meus pedidos: lista e cancela o pedido que aguarda pagamento", async ({ page }) => {
+  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
+  await page.goto(`${STORE}/conta/pedidos`);
+  await expect(page).toHaveURL(/\/entrar\?next=%2Fconta%2Fpedidos$/);
+  await page.getByRole("link", { name: "Entrar com Google" }).click();
+  await expect(page).toHaveURL(`${STORE}/conta/pedidos`);
+
+  const row = page.getByRole("row", { name: /Pedido #\d+/ }).first();
+  await expect(row).toContainText("Aguardando pagamento");
+  await row.getByRole("link").click();
+  await page.getByRole("button", { name: "Cancelar pedido" }).click();
+  await expect(page.getByText("Pedido cancelado.")).toBeVisible();
+  await expect(page.getByText("Cancelado", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancelar pedido" })).toHaveCount(0);
+});

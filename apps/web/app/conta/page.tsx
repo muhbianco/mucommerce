@@ -37,11 +37,15 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         {session.customer.email_masked ? ` · ${session.customer.email_masked}` : null}
       </p>
       <PhoneConfirm context={context} back="/conta" error={tel} />
-      {context.features.checkout ? (
-        <p>
-          <Link href="/conta/enderecos">Meus endereços</Link>
-        </p>
-      ) : null}
+      <p>
+        <Link href="/conta/pedidos">Meus pedidos</Link>
+        {context.features.checkout ? (
+          <>
+            {" · "}
+            <Link href="/conta/enderecos">Meus endereços</Link>
+          </>
+        ) : null}
+      </p>
       <form action="/auth/sair" method="post">
         <button type="submit" className="muted">
           Sair
