@@ -5,9 +5,10 @@ import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 
 import { api, ApiError } from "@/lib/panel/api";
-import { localToUtcIso, parseMoney, parseQuantity } from "@/lib/panel/format";
+import { localToUtcIso, parseModifierLines, parseMoney, parseQuantity } from "@/lib/panel/format";
 import {
   type Media,
+  MODIFIER_GROUP_ROWS,
   type Product,
   PRODUCT_OPTION_ROWS,
   type TenantPanelContext,
@@ -158,6 +159,29 @@ export async function setProductOptions(form: FormData): Promise<void> {
         .filter(Boolean),
     })).filter((option) => option.name || option.values.length);
     await api(`${path}/products/${productId}/options`, { method: "PUT", json: { options } });
+  });
+}
+
+/** Modifier groups from the panel form: name, min, max and "Nome = preço" lines per group. */
+export async function setProductModifiers(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const productId = id(text(form, "product_id"));
+  await run(`${page}/produtos/${productId}`, "adicionais", async () => {
+    const groups = [];
+    for (let i = 0; i < MODIFIER_GROUP_ROWS; i++) {
+      const name = text(form, `group_name_${i}`);
+      const lines = text(form, `group_items_${i}`);
+      if (!name && !lines.trim()) continue;
+      const modifiers = parseModifierLines(lines);
+      if (!modifiers || !modifiers.length || !name) throw new FormError("adicionais_invalidos");
+      groups.push({
+        name,
+        min_select: Number(text(form, `group_min_${i}`) || 0),
+        max_select: Number(text(form, `group_max_${i}`) || 1),
+        modifiers,
+      });
+    }
+    await api(`${path}/products/${productId}/modifiers`, { method: "PUT", json: { groups } });
   });
 }
 

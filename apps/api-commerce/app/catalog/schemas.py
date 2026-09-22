@@ -37,6 +37,8 @@ MAX_TAGS_PER_PRODUCT = 20
 MAX_OPTIONS = 3
 MAX_OPTION_VALUES = 20
 MAX_VARIANTS = 100
+MAX_MODIFIER_GROUPS = 10
+MAX_MODIFIERS_PER_GROUP = 30
 
 # A tag is given by name; its slug (and the tag itself, on first use) come from it.
 TagName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
@@ -156,6 +158,49 @@ class ProductOptionRead(BaseModel):
     values: list[str]
 
 
+ModifierLabel = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)
+]
+SelectCount = Annotated[int, Field(ge=0, le=MAX_MODIFIERS_PER_GROUP)]
+
+
+class ModifierIn(StrictModel):
+    # Omitted: the modifier with the same name in the same group keeps its id, else a new one.
+    id: EntityId | None = None
+    name: ModifierLabel
+    price_cents: Money = 0
+    active: bool = True
+
+
+class ModifierGroupIn(StrictModel):
+    id: EntityId | None = None
+    name: ModifierLabel
+    min_select: SelectCount = 0
+    max_select: Annotated[int, Field(ge=1, le=MAX_MODIFIERS_PER_GROUP)] = 1
+    modifiers: Annotated[list[ModifierIn], Field(min_length=1, max_length=MAX_MODIFIERS_PER_GROUP)]
+
+
+class ProductModifiersUpdate(StrictModel):
+    """The full list of modifier groups; `[]` removes them all."""
+
+    groups: Annotated[list[ModifierGroupIn], Field(max_length=MAX_MODIFIER_GROUPS)]
+
+
+class ModifierRead(BaseModel):
+    id: str
+    name: str
+    price_cents: int
+    active: bool
+
+
+class ModifierGroupRead(BaseModel):
+    id: str
+    name: str
+    min_select: int
+    max_select: int
+    modifiers: list[ModifierRead]
+
+
 class TagRef(BaseModel):
     slug: str
     name: str
@@ -224,6 +269,7 @@ class ProductRead(ProductSummary):
     daily_capacity: int | None
     has_variants: bool
     options: list[ProductOptionRead] = []
+    modifier_groups: list[ModifierGroupRead] = []
     seo: ProductSeo | None
     archived_at: datetime | None
     paused_at: datetime | None = None

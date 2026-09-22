@@ -35,8 +35,10 @@ test.describe("vitrine pública (loja modelo)", () => {
     await expect(status).toContainText(/R\$\s*59,00/);
     await expect(status).toContainText("Disponível");
 
-    await page.getByRole("radio", { name: "G" }).check();
+    await page.getByRole("checkbox", { name: /Personalizada/ }).check(); // + R$ 10,00
     await expect(status).toContainText(/R\$\s*69,00/);
+    await page.getByRole("radio", { name: "G" }).check();
+    await expect(status).toContainText(/R\$\s*79,00/);
     await page.getByRole("radio", { name: "M" }).check();
     await expect(status).toContainText("Indisponível"); // paused in the seed
 

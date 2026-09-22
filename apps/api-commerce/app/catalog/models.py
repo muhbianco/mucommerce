@@ -157,6 +157,9 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     has_variants: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # [{"name": "Tamanho", "values": ["P", "M"]}, …]: the variant matrix is their product.
     options: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
+    # [{"id", "name", "min_select", "max_select", "modifiers": [{"id", "name", "price_cents",
+    # "active"}]}]: ids are stable across edits (the cart and order lines refer to them).
+    modifier_groups: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     seo: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     published_at: Mapped[datetime | None] = mapped_column(UtcDateTime)

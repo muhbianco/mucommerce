@@ -9,6 +9,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   type Category,
   type Product,
+  MODIFIER_GROUP_ROWS,
   PRODUCT_OPTION_ROWS,
   PRODUCT_STATUS_LABEL,
   type TagRef,
@@ -18,6 +19,7 @@ import {
 import styles from "../../../../../panel.module.css";
 import {
   deleteMedia,
+  setProductModifiers,
   setProductOptions,
   setProductStatus,
   setVariantPause,
@@ -348,6 +350,54 @@ export default async function ProductPage({
           {canWrite ? (
             <button type="submit" className={styles.buttonGhost}>
               Salvar opções
+            </button>
+          ) : null}
+        </form>
+      </section>
+
+      <section className={styles.card}>
+        <h2>Adicionais</h2>
+        <p className="muted">
+          Extras que o cliente escolhe e que somam ao preço (ex.: cobertura, embalagem para presente). Um por linha, no
+          formato <code>Nome = 3,50</code>; sem preço, sai de graça. Mínimo 1 torna a escolha obrigatória.
+        </p>
+        <form action={setProductModifiers} className={styles.form}>
+          {hidden}
+          {Array.from({ length: MODIFIER_GROUP_ROWS }, (_, i) => {
+            const group = product.modifier_groups[i];
+            return (
+              <fieldset key={i} style={{ flexBasis: "100%" }} disabled={!canWrite}>
+                <legend>Grupo {i + 1}</legend>
+                <label>
+                  Nome
+                  <input name={`group_name_${i}`} maxLength={60} defaultValue={group?.name ?? ""} />
+                </label>
+                <label>
+                  Mínimo
+                  <input name={`group_min_${i}`} type="number" min={0} max={30} defaultValue={group?.min_select ?? 0} />
+                </label>
+                <label>
+                  Máximo
+                  <input name={`group_max_${i}`} type="number" min={1} max={30} defaultValue={group?.max_select ?? 1} />
+                </label>
+                <label style={{ flexBasis: "100%" }}>
+                  Adicionais
+                  <textarea
+                    name={`group_items_${i}`}
+                    rows={3}
+                    maxLength={3000}
+                    defaultValue={(group?.modifiers ?? [])
+                      .filter((m) => m.active)
+                      .map((m) => (m.price_cents ? `${m.name} = ${moneyInput(m.price_cents)}` : m.name))
+                      .join("\n")}
+                  />
+                </label>
+              </fieldset>
+            );
+          })}
+          {canWrite ? (
+            <button type="submit" className={styles.buttonGhost}>
+              Salvar adicionais
             </button>
           ) : null}
         </form>

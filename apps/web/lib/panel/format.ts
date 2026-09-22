@@ -24,6 +24,23 @@ export function parseMoney(raw: string): number | null {
   return Math.round(Number(text) * 100);
 }
 
+/**
+ * One modifier per line, "Nome = 3,50" (no price: free). Returns null when a line is not in
+ * that shape or its price is not money.
+ */
+export function parseModifierLines(raw: string): { name: string; price_cents: number }[] | null {
+  const items: { name: string; price_cents: number }[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const [name = "", price = "", ...rest] = line.split("=");
+    if (rest.length || !name.trim()) return null;
+    const cents = parseMoney(price);
+    if (Number.isNaN(cents)) return null;
+    items.push({ name: name.trim(), price_cents: cents ?? 0 });
+  }
+  return items;
+}
+
 /** Offset (minutes east of UTC) of `timeZone` at `instant`. */
 function offsetMinutes(instant: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {

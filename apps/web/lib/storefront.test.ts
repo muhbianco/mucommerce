@@ -11,6 +11,7 @@ import {
   SCHEMA_AVAILABILITY,
   srcSet,
   type StoreVariant,
+  withDefaults,
 } from "./storefront";
 import type { StorefrontContext } from "./tenant";
 
@@ -102,5 +103,14 @@ describe("variants", () => {
     expect(productOffers(product, "u")).toMatchObject({ "@type": "AggregateOffer", lowPrice: "10.00", highPrice: "12.00", offerCount: 2 });
     const single = { ...product, variants: variants.slice(0, 1) } as ProductDetail;
     expect(productOffers(single, "u")).toMatchObject({ "@type": "Offer", price: "10.00" });
+  });
+});
+
+describe("older API answers", () => {
+  it("default the fields stage D added", () => {
+    const old = { variants: [{ id: "v" }] } as unknown as ProductDetail;
+    const product = withDefaults(old);
+    expect([product.options, product.modifier_groups, product.tags]).toEqual([[], [], []]);
+    expect(product.variants[0]?.option_values).toBeNull();
   });
 });

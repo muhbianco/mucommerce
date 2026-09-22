@@ -14,6 +14,7 @@ import {
   offSale,
   type ProductDetail,
   productOffers,
+  withDefaults,
   storeOrigin,
 } from "@/lib/storefront";
 
@@ -27,7 +28,11 @@ import { VariantPicker } from "../../../_store/variant-picker";
 const loadProduct = cache(async (slug: string) => {
   const context = await getStorefrontContext();
   if (!context) return { kind: "not_found" as const };
-  return storefrontApi<ProductDetail>(context, `/catalog/products/${encodeURIComponent(slug.slice(0, 160))}`);
+  const result = await storefrontApi<ProductDetail>(
+    context,
+    `/catalog/products/${encodeURIComponent(slug.slice(0, 160))}`,
+  );
+  return result.kind === "ok" ? { ...result, data: withDefaults(result.data) } : result;
 });
 
 function shareImage(product: ProductDetail): string | undefined {
@@ -144,8 +149,8 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
               ))}
             </p>
           ) : null}
-          {product.options.length ? (
-            <VariantPicker options={product.options} variants={product.variants} />
+          {product.options.length || product.modifier_groups.length ? (
+            <VariantPicker options={product.options} variants={product.variants} modifierGroups={product.modifier_groups} />
           ) : product.variants.length > 1 ? (
             <ul>
               {product.variants.map((variant) => (

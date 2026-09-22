@@ -24,6 +24,8 @@ const WEB_ENV = {
   PLATFORM_BASE_DOMAIN: "loja.localhost",
   MUHBIANCO_ACCOUNTS_URL: `http://127.0.0.1:${ACCOUNTS_PORT}`,
   NEXT_TELEMETRY_DISABLED: "1",
+  // The fetch cache persists in .next across runs; each run reseeds the API with new ids.
+  STOREFRONT_REVALIDATE_SECONDS: "0",
 };
 
 export default defineConfig({

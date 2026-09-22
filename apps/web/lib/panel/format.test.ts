@@ -4,6 +4,7 @@ import {
   formatQuantity,
   localToUtcIso,
   moneyInput,
+  parseModifierLines,
   parseMoney,
   parseQuantity,
   utcToLocalInput,
@@ -48,5 +49,22 @@ describe("quantities", () => {
     expect(parseQuantity("1.2345")).toBeNull();
     expect(formatQuantity("12.000", "un")).toBe("12 un");
     expect(formatQuantity("250.500", "g")).toBe("250,5 g");
+  });
+});
+
+
+describe("modifier lines", () => {
+  it("reads one modifier per line, price optional", () => {
+    expect(parseModifierLines("Chocolate = 3,50\n\n  Sem cobertura  \nVela=1")).toEqual([
+      { name: "Chocolate", price_cents: 350 },
+      { name: "Sem cobertura", price_cents: 0 },
+      { name: "Vela", price_cents: 100 },
+    ]);
+  });
+
+  it("refuses lines it cannot read", () => {
+    expect(parseModifierLines("Chocolate = três")).toBeNull();
+    expect(parseModifierLines("= 3,00")).toBeNull();
+    expect(parseModifierLines("a = 1 = 2")).toBeNull();
   });
 });

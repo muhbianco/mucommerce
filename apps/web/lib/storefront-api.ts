@@ -16,7 +16,8 @@ export type StoreResult<T> =
 
 const ACCESS_PROBLEMS = new Set<string>(["access_required", "access_pending", "access_blocked"]);
 
-export const PUBLIC_REVALIDATE_SECONDS = 60;
+// STOREFRONT_REVALIDATE_SECONDS=0 turns the cache off (E2E: every run reseeds the database).
+export const PUBLIC_REVALIDATE_SECONDS = Number(process.env.STOREFRONT_REVALIDATE_SECONDS ?? 60);
 
 /**
  * Server-side call to the storefront API as the web service: `X-Tenant-Host` picks the tenant,
@@ -45,7 +46,7 @@ export async function storefrontApi<T>(
   const query = new URLSearchParams({ _host: host });
   for (const [key, value] of Object.entries(params)) if (value) query.set(key, value);
   const cache =
-    context.access_mode === "public" && !options.fresh
+    context.access_mode === "public" && !options.fresh && PUBLIC_REVALIDATE_SECONDS > 0
       ? ({ next: { revalidate: PUBLIC_REVALIDATE_SECONDS } } as const)
       : ({ cache: "no-store" } as const);
   const requestHeaders: Record<string, string> = {

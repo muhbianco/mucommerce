@@ -11,7 +11,9 @@ Rules that live here (and nowhere else):
 - tags are given by name and created on first use (slug from the name, one per slug);
 - options (≤3, ≤20 values, ≤100 combinations) define the variant matrix: setting them keeps
   the variants whose combination stays (the default variant becomes the first combination),
-  revives archived ones that come back, creates the rest and archives what dropped out.
+  revives archived ones that come back, creates the rest and archives what dropped out;
+- modifier groups keep stable ids: an entry sent without id takes the id of the same name
+  (ignoring case) in the same group, so the panel can edit by name without losing references.
 
 Writes are audited; product lifecycle changes also go to the outbox (the product is the
 aggregate; categories are not).
@@ -47,7 +49,9 @@ from app.catalog.schemas import (
     PRODUCT_REQUIRED_FIELDS,
     CategoryCreate,
     CategoryUpdate,
+    ModifierGroupIn,
     ProductCreate,
+    ProductModifiersUpdate,
     ProductOption,
     ProductOptionsUpdate,
     ProductUpdate,
@@ -59,6 +63,7 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from app.core.ids import new_id
 from app.core.slugs import next_free_slug, slugify
 from app.inventory.models import InventoryBalance
 from app.media.models import MediaAsset, MediaOwner, MediaStatus
@@ -467,6 +472,27 @@ class CatalogService:
         await self._emit(product, "product.updated")
         return await self.get_product(product.id)
 
+    # ------------------------------------------------------------------ modifiers
+    async def set_modifiers(self, product_id: str, data: ProductModifiersUpdate) -> ProductView:
+        product = await self._product_or_404(product_id, lock=True)
+        if product.status == ProductStatus.ARCHIVED:
+            raise ConflictError("Produto arquivado não pode ser editado.")
+        before = product.modifier_groups or []
+        groups = _checked_modifier_groups(data.groups, before)
+        if groups == before:
+            return await self.get_product(product.id)
+        product.modifier_groups = groups or None
+        product.updated_by_actor = self.actor.id
+        await self.session.flush()
+        await self._audit(
+            "product.modifiers_updated",
+            product,
+            before={"modifier_groups": before},
+            after={"modifier_groups": groups},
+        )
+        await self._emit(product, "product.updated")
+        return await self.get_product(product.id)
+
     # ------------------------------------------------------------------ pause
     async def pause_product(self, product_id: str, *, reason: str | None = None) -> ProductView:
         """Keeps the product in the storefront as unavailable. Idempotent: pausing twice is a
@@ -853,3 +879,59 @@ def _next_variant_sku(product_sku: str, taken: set[str]) -> str:
             taken.add(candidate)
             return candidate
     raise AssertionError("unreachable")
+
+
+def _checked_modifier_groups(
+    groups: list[ModifierGroupIn], current: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Distinct names, reachable limits, and ids kept (by id, else by name) or newly minted."""
+    by_id = {g["id"]: g for g in current}
+    by_name = {g["name"].casefold(): g for g in current}
+    if len({g.name.casefold() for g in groups}) != len(groups):
+        raise ValidationError("Grupos de adicionais com o mesmo nome.", fields=["groups"])
+    result: list[dict[str, Any]] = []
+    for group in groups:
+        if group.id is not None and group.id not in by_id:
+            raise ValidationError("Grupo de adicionais desconhecido.", fields=["groups"])
+        previous = by_id.get(group.id or "") or by_name.get(group.name.casefold())
+        if len({m.name.casefold() for m in group.modifiers}) != len(group.modifiers):
+            raise ValidationError(
+                "Adicionais repetidos num grupo.", fields=["groups"], group=group.name
+            )
+        active = sum(1 for m in group.modifiers if m.active)
+        if group.min_select > group.max_select or group.min_select > active:
+            raise ValidationError(
+                "Mínimo maior que o máximo ou que os adicionais ativos.",
+                fields=["groups"],
+                group=group.name,
+            )
+        if group.max_select > len(group.modifiers):
+            raise ValidationError(
+                "Máximo maior que o número de adicionais.", fields=["groups"], group=group.name
+            )
+        old_items = (previous or {}).get("modifiers", [])
+        old_by_id = {m["id"]: m for m in old_items}
+        old_by_name = {m["name"].casefold(): m for m in old_items}
+        modifiers = []
+        for modifier in group.modifiers:
+            if modifier.id is not None and modifier.id not in old_by_id:
+                raise ValidationError("Adicional desconhecido.", fields=["groups"])
+            kept = old_by_id.get(modifier.id or "") or old_by_name.get(modifier.name.casefold())
+            modifiers.append(
+                {
+                    "id": kept["id"] if kept else new_id(),
+                    "name": modifier.name,
+                    "price_cents": modifier.price_cents,
+                    "active": modifier.active,
+                }
+            )
+        result.append(
+            {
+                "id": previous["id"] if previous else new_id(),
+                "name": group.name,
+                "min_select": group.min_select,
+                "max_select": group.max_select,
+                "modifiers": modifiers,
+            }
+        )
+    return result

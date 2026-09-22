@@ -103,6 +103,20 @@ class ProductSeo(BaseModel):
     description: str | None
 
 
+class ModifierRef(BaseModel):
+    id: str
+    name: str
+    price_cents: int
+
+
+class ModifierGroupRef(BaseModel):
+    id: str
+    name: str
+    min_select: int
+    max_select: int
+    modifiers: list[ModifierRef]  # active ones only
+
+
 class OptionRef(BaseModel):
     name: str
     values: list[str]
@@ -111,6 +125,7 @@ class OptionRef(BaseModel):
 class ProductDetail(ProductCard):
     sku: str
     options: list[OptionRef]
+    modifier_groups: list[ModifierGroupRef]
     description_md: str | None
     unit_label: str
     sold_by: str
@@ -153,6 +168,23 @@ def _card(card: CardData, currency: str) -> ProductCard:
         availability=card.availability,
         image=Image(**image_payload(card.image)) if card.image else None,
     )
+
+
+def _modifier_groups(groups: list[dict[str, Any]] | None) -> list[ModifierGroupRef]:
+    return [
+        ModifierGroupRef(
+            id=group["id"],
+            name=group["name"],
+            min_select=group["min_select"],
+            max_select=group["max_select"],
+            modifiers=[
+                ModifierRef(id=m["id"], name=m["name"], price_cents=m["price_cents"])
+                for m in group["modifiers"]
+                if m.get("active", True)
+            ],
+        )
+        for group in groups or []
+    ]
 
 
 def _category(category: Any) -> CategoryRef:
@@ -246,6 +278,7 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
         **card.model_dump(),
         sku=product.sku,
         options=[OptionRef(**option) for option in product.options or []],
+        modifier_groups=_modifier_groups(product.modifier_groups),
         description_md=product.description_md,
         unit_label=product.unit_label,
         sold_by=product.sold_by,

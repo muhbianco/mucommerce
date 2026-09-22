@@ -75,7 +75,10 @@ import uvicorn  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
 from app.catalog.schemas import (  # noqa: E402
+    ModifierGroupIn,
+    ModifierIn,
     ProductCreate,
+    ProductModifiersUpdate,
     ProductOption,
     ProductOptionsUpdate,
     VariantUpdate,
@@ -133,7 +136,7 @@ async def _publish_products(session: AsyncSession, tenant_id: str) -> None:
 
 
 async def _variant_product(session: AsyncSession, tenant_id: str) -> None:
-    """Sizes P/M/G (G dearer, M paused), always available, tagged: picker, tags and offers."""
+    """Sizes P/M/G (G dearer, M paused), an optional paid print, tagged `algodão`."""
     context = await TenantResolver(session).resolve_by_id(tenant_id)
     catalog = CatalogService(session, context, ACTOR)
     view = await catalog.create_product(
@@ -150,6 +153,9 @@ async def _variant_product(session: AsyncSession, tenant_id: str) -> None:
     view = await catalog.set_options(product_id, ProductOptionsUpdate(options=[size]))
     _, medium, large = view.variants
     await catalog.update_variant(product_id, large.id, VariantUpdate(price_cents=6900))
+    print_ = ModifierIn(name="Personalizada", price_cents=1000)
+    extras = ModifierGroupIn(name="Estampa", max_select=1, modifiers=[print_])
+    await catalog.set_modifiers(product_id, ProductModifiersUpdate(groups=[extras]))
     await catalog.publish(product_id)
     await catalog.pause_variant(product_id, medium.id, reason="E2E")
 

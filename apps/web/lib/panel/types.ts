@@ -135,11 +135,23 @@ export interface Product extends ProductSummary {
   tags: TagRef[];
   has_variants: boolean;
   options: { name: string; values: string[] }[];
+  modifier_groups: ModifierGroup[];
   paused_at: string | null;
   paused_reason: string | null;
   variants: Variant[];
   media: Media[];
 }
+
+export interface ModifierGroup {
+  id: string;
+  name: string;
+  min_select: number;
+  max_select: number;
+  modifiers: { id: string; name: string; price_cents: number; active: boolean }[];
+}
+
+/** Groups shown in the panel's modifiers form (the API allows up to 10). */
+export const MODIFIER_GROUP_ROWS = 4;
 
 /** Rows of the panel's options form (the API allows up to 3 options). */
 export const PRODUCT_OPTION_ROWS = 3;

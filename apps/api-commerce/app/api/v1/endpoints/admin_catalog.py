@@ -12,9 +12,11 @@ from app.catalog.schemas import (
     CategoryCreate,
     CategoryRead,
     CategoryUpdate,
+    ModifierGroupRead,
     PauseRequest,
     PriceRead,
     ProductCreate,
+    ProductModifiersUpdate,
     ProductOptionRead,
     ProductOptionsUpdate,
     ProductRead,
@@ -97,6 +99,7 @@ def _product_read(view: ProductView) -> ProductRead:
         daily_capacity=product.daily_capacity,
         has_variants=product.has_variants,
         options=[ProductOptionRead(**option) for option in product.options or []],
+        modifier_groups=[ModifierGroupRead(**group) for group in product.modifier_groups or []],
         seo=ProductSeo.model_validate(product.seo) if product.seo else None,
         archived_at=product.archived_at,
         paused_at=product.paused_at,
@@ -278,6 +281,23 @@ async def set_product_options(
     body: ProductOptionsUpdate,
 ) -> ProductRead:
     view = await _service(request, session, user, tenant).set_options(product_id, body)
+    return _product_read(view)
+
+
+@router.put(
+    "/products/{product_id}/modifiers",
+    response_model=ProductRead,
+    summary="Define os grupos de adicionais (ex.: cobertura, embalagem) e seus preços",
+)
+async def set_product_modifiers(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CatalogWriteTenant,
+    product_id: ProductId,
+    body: ProductModifiersUpdate,
+) -> ProductRead:
+    view = await _service(request, session, user, tenant).set_modifiers(product_id, body)
     return _product_read(view)
 
 

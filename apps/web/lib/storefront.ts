@@ -56,6 +56,14 @@ export interface ProductOption {
   values: string[];
 }
 
+export interface StoreModifierGroup {
+  id: string;
+  name: string;
+  min_select: number;
+  max_select: number;
+  modifiers: { id: string; name: string; price_cents: number }[];
+}
+
 export interface StoreVariant {
   id: string;
   sku: string;
@@ -68,6 +76,7 @@ export interface StoreVariant {
 export interface ProductDetail extends ProductCard {
   sku: string;
   options: ProductOption[];
+  modifier_groups: StoreModifierGroup[];
   description_md: string | null;
   unit_label: string;
   sold_by: string;
@@ -139,6 +148,33 @@ export function findVariant(variants: StoreVariant[], selection: Record<string, 
     const names = Object.keys(values);
     return names.length === Object.keys(selection).length && names.every((name) => selection[name] === values[name]);
   });
+}
+
+/**
+ * Fields added after the first release default to empty, so a web newer than the API it talks to
+ * (mid-deploy, or a cached answer) still renders the product instead of failing.
+ */
+export function withDefaults(product: ProductDetail): ProductDetail {
+  return {
+    ...product,
+    options: product.options ?? [],
+    modifier_groups: product.modifier_groups ?? [],
+    tags: product.tags ?? [],
+    variants: product.variants.map((variant) => ({ ...variant, option_values: variant.option_values ?? null })),
+  };
+}
+
+/** "(escolha 1)", "(até 2)", "(de 1 a 3)": the rule of a modifier group, for its legend. */
+export function modifierRule(group: StoreModifierGroup): string {
+  if (group.min_select === group.max_select) return `(escolha ${group.max_select})`;
+  if (group.min_select === 0) return `(opcional, até ${group.max_select})`;
+  return `(de ${group.min_select} a ${group.max_select})`;
+}
+
+/** Sum of the chosen modifiers' prices (display only: the API prices and validates orders). */
+export function modifiersTotal(groups: StoreModifierGroup[], chosen: readonly string[]): number {
+  const wanted = new Set(chosen);
+  return groups.flatMap((group) => group.modifiers).reduce((sum, m) => sum + (wanted.has(m.id) ? m.price_cents : 0), 0);
 }
 
 /** schema.org offers: one Offer, or an AggregateOffer when the variants' prices differ. */
