@@ -500,11 +500,13 @@ async def storefront_landing(
     }
     categories = {c.id: c for c in (await catalog.categories() if show_catalog else [])}
 
+    catalog_on = tenant.feature("storefront") and tenant.feature("catalog")
     resolved: list[dict[str, Any]] = []
     for block in blocks:
         kind = block["type"]
-        if kind in {"featured_products", "categories"} and not show_catalog:
-            continue  # never leak the catalog of a store that requires login
+        catalog_block = kind in {"featured_products", "categories"}
+        if catalog_block and not catalog_on:
+            continue  # the store has no catalog at all: the block exists for nobody
         out = {k: v for k, v in block.items() if k not in {"media_id", "media_ids"}}
         if block.get("media_id"):
             image = media.get(block["media_id"])
@@ -525,5 +527,10 @@ async def storefront_landing(
                 if cid in categories
             ]
             del out["category_ids"]
+        if catalog_block and not show_catalog:
+            # Login or approval missing: keep the section and the store's own title, marked as
+            # locked, so the visitor sees there is more after signing in. The lists built above
+            # are empty here — no product or category ever leaves the store this way.
+            out["locked"] = True
         resolved.append(out)
     return resolved

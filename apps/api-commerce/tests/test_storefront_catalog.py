@@ -261,7 +261,15 @@ async def test_landing_resolves_blocks_and_hides_catalog_blocks_when_closed(
 
     await set_access(session_factory, tenant, "whitelist")
     closed = (await client.get("/api/v1/storefront/landing", headers=shopper)).json()
-    assert [b["type"] for b in closed] == ["hero", "contact"]
+    # The section stays, locked and empty: the visitor sees there is a catalog behind the login,
+    # and no product name or id leaves the store.
+    assert [b["type"] for b in closed] == ["hero", "featured_products", "contact"]
+    assert closed[1] == {
+        "type": "featured_products",
+        "title": "Destaques",
+        "products": [],
+        "locked": True,
+    }
 
     empty = await catalog_tenant(session_factory, "vazia")
     assert empty

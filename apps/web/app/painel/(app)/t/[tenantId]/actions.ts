@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 
 import { api, ApiError } from "@/lib/panel/api";
+import { normalizeEmail, normalizeInstagram, normalizeWhatsapp } from "@/lib/panel/contact";
 import { localToUtcIso, parseModifierLines, parseQuantity } from "@/lib/panel/format";
 import {
   type Media,
@@ -421,6 +422,15 @@ type Block = Record<string, unknown> & { type: string };
 
 const EDITABLE_BLOCKS = ["hero", "featured_products", "text", "contact"];
 
+// The contact block is typed by hand: normalise what people actually type (see lib/panel/contact)
+// and name the offending field when it cannot be read, instead of bouncing the whole page back
+// with "algum campo está inválido".
+const CONTACT_FIELDS = [
+  ["whatsapp_e164", normalizeWhatsapp, "whatsapp_invalido"],
+  ["instagram", normalizeInstagram, "instagram_invalido"],
+  ["email", normalizeEmail, "email_invalido"],
+] as const;
+
 /** The landing editor posts every block as `b<i>.<field>`; rebuild the list in order. */
 function blocksFromForm(form: FormData): Block[] {
   const count = Number(text(form, "block_count") || 0);
@@ -430,9 +440,16 @@ function blocksFromForm(form: FormData): Block[] {
     const type = get("type");
     if (!type || form.get(`b${i}.remove`) === "on") continue;
     const block: Block = { type };
-    for (const name of ["title", "subtitle", "cta_label", "body", "whatsapp_e164", "instagram", "email", "address", "hours"]) {
+    for (const name of ["title", "subtitle", "cta_label", "body", "address", "hours"]) {
       const value = get(name);
       if (value !== null) block[name] = value;
+    }
+    for (const [name, normalize, code] of CONTACT_FIELDS) {
+      const value = get(name);
+      if (value === null) continue;
+      const clean = normalize(value);
+      if (clean === null) throw new FormError(code);
+      block[name] = clean;
     }
     const media = get("media_id");
     if (media) block.media_id = id(media);

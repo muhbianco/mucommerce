@@ -60,6 +60,7 @@ export default async function Payments({
               {spec.label} {p.enabled ? "— ativo" : "— desligado"}
               {p.is_default ? " (padrão)" : ""}
             </h2>
+            {spec.hint ? <p className="muted">{spec.hint}</p> : null}
             {!p.flag_on ? (
               <p className="muted">Este meio não está liberado para a loja. Fale com o suporte para liberar.</p>
             ) : null}

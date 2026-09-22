@@ -117,6 +117,7 @@ function Block({
     }
     case "featured_products": {
       const products = (block.products as Card[] | undefined) ?? [];
+      if (block.locked === true) return <LockedSection title={title} label="Entrar para ver os produtos" />;
       if (products.length === 0) return null;
       return (
         <section className={styles.section}>
@@ -131,6 +132,7 @@ function Block({
     }
     case "categories": {
       const categories = (block.categories as CategoryRef[] | undefined) ?? [];
+      if (block.locked === true) return <LockedSection title={title} label="Entrar para ver as categorias" />;
       if (categories.length === 0) return null;
       return (
         <section className={styles.section}>
@@ -198,4 +200,17 @@ function Block({
     default:
       return null;
   }
+}
+
+/** Catalog block of a store that asks for login/approval: the title stays, the products do not. */
+function LockedSection({ title, label }: { title: string | null; label: string }) {
+  return (
+    <section className={styles.section}>
+      {title ? <h2>{title}</h2> : null}
+      <p className="muted">Esta loja atende clientes cadastrados. Entre com a sua conta para ver.</p>
+      <Link className="button" href="/entrar">
+        {label}
+      </Link>
+    </section>
+  );
 }

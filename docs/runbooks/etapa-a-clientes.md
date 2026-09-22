@@ -35,6 +35,11 @@ O api-agents precisa do **mesmo** valor do `INTERNAL_TOKEN_AGENTS` da stack comm
 
 1. Em Módulos, ligar **Login de clientes (Google)** e, se quiser, **WhatsApp dos clientes (confirmação)**.
 2. Em Quem vê a vitrine, escolher **Só clientes aprovados** (whitelist) ou **Só com login**.
+   - Nesses dois modos, os blocos de **produtos em destaque** e de **categorias** da página inicial
+     aparecem para quem não tem acesso como uma seção com o título da loja e o botão "Entrar para
+     ver os produtos" — nenhum produto, preço ou id sai da loja. Com a vitrine **Pública** eles
+     mostram os produtos para qualquer visitante. O aviso disso está no painel, em Configurações →
+     Página inicial.
 3. No painel da loja, em Configurações → Termos e privacidade, publicar os textos. As versões publicadas aparecem no `/entrar` e são gravadas como aceite no login.
 
 ## 5. Verificar

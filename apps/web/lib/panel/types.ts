@@ -340,12 +340,14 @@ export interface PaymentProviderSpec {
   methods: string[];
   public: { key: string; label: string }[];
   secrets: { key: string; label: string }[];
+  hint?: string;
 }
 
 /** What each provider asks the owner for (ours to show; the API validates). */
 export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
   mercadopago: {
     label: "Mercado Pago",
+    hint: "Pix e cartão dentro da loja: o cliente paga sem sair do site. A taxa do cartão é do lojista; o juro do parcelamento segue a configuração da sua conta no Mercado Pago.",
     methods: ["pix", "card"],
     public: [{ key: "public_key", label: "Public key" }],
     secrets: [
@@ -355,6 +357,7 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
   },
   infinitepay: {
     label: "InfinitePay",
+    hint: "É o mesmo link de pagamento que você cria no app da InfinitePay, só que gerado com o número do pedido: o cliente escolhe Pix ou cartão na página da InfinitePay, e o juro do parcelamento é cobrado dele.",
     methods: ["link"],
     public: [{ key: "handle", label: "InfiniteTag (sem o $)" }],
     secrets: [],
@@ -362,7 +365,11 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
   fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
 };
 
-export const PAYMENT_METHOD_LABEL: Record<string, string> = { pix: "Pix", card: "Cartão", link: "Link de pagamento" };
+export const PAYMENT_METHOD_LABEL: Record<string, string> = {
+  pix: "Pix",
+  card: "Cartão",
+  link: "Link de pagamento (Pix ou cartão)",
+};
 
 // ------------------------------------------------------------------------------- orders
 export interface OrderSummary {

@@ -15,6 +15,12 @@ export const metadata: Metadata = { title: "Configurações" };
 
 type Block = Record<string, unknown> & { type: string };
 
+const ACCESS_LABEL: Record<string, string> = {
+  public: "aberta a qualquer pessoa",
+  login_required: "só com login",
+  whitelist: "só para clientes aprovados",
+};
+
 const BLOCK_LABEL: Record<string, string> = {
   hero: "Destaque principal",
   featured_products: "Produtos em destaque",
@@ -49,6 +55,7 @@ export default async function Settings({
     api<LegalOverview>(`${path}/legal-documents`),
   ]);
   const branding = context.settings.branding ?? {};
+  const accessMode = String(context.settings.storefront?.access_mode ?? "public");
   const seo = context.settings.seo ?? {};
   const blocks = ((context.settings.landing?.blocks as Block[] | undefined) ?? []).filter(
     // The editor handles these types; others (made elsewhere) are kept out of the form.
@@ -164,6 +171,13 @@ export default async function Settings({
 
       <section className={styles.card}>
         <h2>Página inicial</h2>
+        {accessMode !== "public" &&
+        blocks.some((block) => block.type === "featured_products" || block.type === "categories") ? (
+          <p className="muted">
+            A vitrine está {ACCESS_LABEL[accessMode] ?? accessMode}: quem ainda não tem acesso vê os blocos de
+            produtos como “entre para ver”, sem os produtos. Para abrir a loja, fale com o suporte.
+          </p>
+        ) : null}
         <div className={styles.flags}>
           {landingMedia.map((media, index) => (
             <div key={media.id}>
@@ -244,16 +258,26 @@ export default async function Settings({
                 {block.type === "contact" ? (
                   <>
                     <label>
-                      WhatsApp (+55…)
-                      <input name={`b${i}.whatsapp_e164`} defaultValue={String(block.whatsapp_e164 ?? "")} placeholder="+5511999999999" />
+                      WhatsApp
+                      <input
+                        name={`b${i}.whatsapp_e164`}
+                        inputMode="tel"
+                        defaultValue={String(block.whatsapp_e164 ?? "")}
+                        placeholder="11 99999-9999"
+                      />
                     </label>
                     <label>
                       Instagram
-                      <input name={`b${i}.instagram`} defaultValue={String(block.instagram ?? "")} placeholder="sem @" />
+                      <input name={`b${i}.instagram`} defaultValue={String(block.instagram ?? "")} placeholder="nomedaloja" />
                     </label>
                     <label>
                       E-mail
-                      <input name={`b${i}.email`} type="email" defaultValue={String(block.email ?? "")} />
+                      <input
+                        name={`b${i}.email`}
+                        inputMode="email"
+                        defaultValue={String(block.email ?? "")}
+                        placeholder="contato@sualoja.com.br"
+                      />
                     </label>
                     <label>
                       Endereço
