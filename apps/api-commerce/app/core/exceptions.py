@@ -267,3 +267,8 @@ class PayloadTooLargeError(DomainError):
     status_code = 413
     error_code = "payload_too_large"
     message = "Corpo da requisição grande demais."
+
+
+class StaleOrderError(ConflictError):
+    error_code = "stale_order"
+    message = "O pedido mudou enquanto a tela estava aberta. Recarregue e tente de novo."

@@ -363,3 +363,145 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
 };
 
 export const PAYMENT_METHOD_LABEL: Record<string, string> = { pix: "Pix", card: "Cartão", link: "Link de pagamento" };
+
+// ------------------------------------------------------------------------------- orders
+export interface OrderSummary {
+  id: string;
+  number: number;
+  status: string;
+  fulfillment_type: string;
+  fulfillment_status: string;
+  total_cents: number;
+  currency: string;
+  customer_name: string | null;
+  placed_at: string;
+  paid_at: string | null;
+  refund_status: string;
+}
+
+export interface OrderDetail {
+  order: {
+    id: string;
+    number: number;
+    status: string;
+    currency: string;
+    subtotal_cents: number;
+    discount_cents: number;
+    delivery_fee_cents: number;
+    total_cents: number;
+    fulfillment_type: string;
+    fulfillment_status: string;
+    fulfillment: Record<string, unknown> | null;
+    scheduled_start: string | null;
+    placed_at: string;
+    expires_at: string | null;
+    paid_at: string | null;
+    cancelled_at: string | null;
+    refund_status: string;
+    items: {
+      line_no: number;
+      name: string;
+      sku: string;
+      quantity: string;
+      unit_label: string;
+      modifiers: { name: string; price_cents: number }[];
+      unit_price_cents: number;
+      total_cents: number;
+      event: { lot_name?: string } | null;
+    }[];
+    timeline: { status: string; at: string; reason: string | null }[];
+  };
+  customer: { name?: string; phone?: string; email?: string };
+  payments: {
+    id: string;
+    provider: string;
+    method: string;
+    status: string;
+    amount_cents: number;
+    installments: number;
+    created_at: string;
+    failure_code: string | null;
+    card: { brand?: string; last_four?: string } | null;
+  }[];
+  refunds: {
+    id: string;
+    amount_cents: number;
+    kind: string;
+    method: string;
+    status: string;
+    reason: string;
+    requested_at: string;
+  }[];
+  emails: {
+    id: string;
+    template_key: string;
+    recipient: string;
+    subject: string;
+    status: string;
+    attempts: number;
+    sent_at: string | null;
+    last_error: string | null;
+  }[];
+  allowed_transitions: string[];
+  version: number;
+  risk_flags: Record<string, unknown> | null;
+  notes: string | null;
+}
+
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  awaiting_payment: "Aguardando pagamento",
+  payment_confirmed: "Pago",
+  accepted: "Aceito",
+  in_production: "Em preparo",
+  ready_for_pickup: "Pronto para retirar",
+  shipped: "Saiu para entrega",
+  delivered: "Entregue",
+  cancelled: "Cancelado",
+  failed: "Expirado sem pagamento",
+};
+
+/** What the button that moves the order to each status says. */
+export const TRANSITION_LABEL: Record<string, string> = {
+  accepted: "Aceitar pedido",
+  in_production: "Começar preparo",
+  ready_for_pickup: "Pronto para retirar",
+  shipped: "Saiu para entrega",
+  delivered: "Marcar entregue",
+  cancelled: "Cancelar pedido",
+};
+
+export const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  pending: "Confirmando",
+  requires_action: "Aguardando o cliente",
+  approved: "Aprovado",
+  rejected: "Recusado",
+  cancelled: "Cancelado",
+  expired: "Expirado",
+  partially_refunded: "Parcialmente devolvido",
+  refunded: "Devolvido",
+  chargeback: "Contestado",
+};
+
+export const REFUND_STATUS_LABEL: Record<string, string> = {
+  requested: "Aguardando aprovação",
+  approved: "Aprovada, enviando",
+  processing: "Enviando ao provedor",
+  completed: "Concluída",
+  failed: "Falhou",
+  rejected: "Recusada",
+};
+
+export const REFUND_KIND_LABEL: Record<string, string> = {
+  customer_cancel: "cancelamento do cliente",
+  operator: "decisão da loja",
+  late_payment: "pagamento fora do prazo",
+  duplicate_payment: "pagamento em dobro",
+};
+
+export const DELIVERY_STATUS_LABEL: Record<string, string> = {
+  queued: "Na fila",
+  sending: "Enviando",
+  sent: "Enviado",
+  failed: "Falhou",
+  skipped: "Não enviado (sem e-mail configurado)",
+};

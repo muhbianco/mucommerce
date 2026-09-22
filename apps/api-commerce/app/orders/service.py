@@ -30,6 +30,7 @@ from app.core.exceptions import (
     ConsentRequiredError,
     FulfillmentInvalidError,
     NotFoundError,
+    StaleOrderError,
     TooManyOpenOrdersError,
 )
 from app.core.metrics import ORDERS_PLACED
@@ -48,6 +49,7 @@ from app.orders.state_machine import (
     FulfillmentStatus,
     OrderSnapshot,
     OrderStatus,
+    allowed_targets,
     check_transition,
     fulfillment_after,
 )
@@ -358,6 +360,66 @@ class OrderService:
         )
         if before_id is not None:
             stmt = stmt.where(Order.id < before_id)
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def transition(
+        self,
+        order: Order,
+        target: str,
+        *,
+        reason: str | None,
+        scopes: frozenset[str],
+        expected_version: int | None = None,
+    ) -> None:
+        """The store moving an order along (accept, preparing, ready, shipped, delivered).
+        Cancelling is not here: it goes through `payments.cancellation.cancel_order`, which
+        gives the money back too. The caller holds the order lock."""
+        if expected_version is not None and expected_version != order.version:
+            raise StaleOrderError(version=order.version, expected=expected_version)
+        await self._transition(
+            order, target, ActorKind.OPERATOR, source="panel", reason=reason, scopes=scopes
+        )
+
+    def allowed_transitions(self, order: Order, scopes: frozenset[str]) -> list[str]:
+        """What this person may do with the order right now (the panel shows exactly these)."""
+        snapshot = OrderSnapshot(
+            status=order.status,
+            fulfillment_type=order.fulfillment_type,
+            has_approved_payment=bool(order.paid_at),
+            customer_cancel_until=checkout_settings(self.tenant.settings).customer_cancel_until,
+        )
+        return allowed_targets(snapshot, ActorKind.OPERATOR, scopes)
+
+    async def list_for_store(
+        self,
+        *,
+        limit: int,
+        status: str | None = None,
+        search: str | None = None,
+        before_id: str | None = None,
+    ) -> list[Order]:
+        """Newest first, keyset by id; `limit + 1` rows. `search` matches the order number or
+        the start of the customer's name."""
+        stmt = select(Order).order_by(Order.id.desc()).limit(limit + 1)
+        if status:
+            stmt = stmt.where(Order.status == status)
+        if before_id is not None:
+            stmt = stmt.where(Order.id < before_id)
+        if search:
+            term = search.strip()[:60]
+            if term.isdigit():
+                stmt = stmt.where(Order.number == int(term))
+            else:
+                stmt = stmt.where(Order.customer_snapshot["name"].as_string().startswith(term))
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def history(self, order_id: str) -> list[OrderStatusHistory]:
+        stmt = (
+            select(OrderStatusHistory)
+            .where(OrderStatusHistory.order_id == order_id)
+            .order_by(OrderStatusHistory.occurred_at, OrderStatusHistory.id)
+            .limit(100)
+        )
         return list((await self.session.execute(stmt)).scalars())
 
     async def items(self, order_id: str) -> list[OrderItem]:

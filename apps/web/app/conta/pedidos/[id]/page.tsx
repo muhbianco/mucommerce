@@ -56,6 +56,7 @@ export default async function OrderPage({
   const when = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: zone }).format(new Date(iso));
   const place = order.fulfillment ? String(order.fulfillment.name ?? "") : "";
+  const instructions = order.fulfillment ? String(order.fulfillment.instructions ?? "") : "";
 
   return (
     <StoreShell context={context}>
@@ -98,6 +99,7 @@ export default async function OrderPage({
         <strong>Total: {money(order.total_cents, order.currency)}</strong>
       </p>
       {order.fulfillment_type === "pickup" ? <p>Retirada: {place}</p> : null}
+      {instructions ? <p className="muted">{instructions}</p> : null}
       {order.fulfillment_type === "delivery" ? <p>Entrega: {place}</p> : null}
       {order.scheduled_start ? <p>Horário: {when(order.scheduled_start)}</p> : null}
       {payment ? <PaymentSection state={payment} when={when} /> : null}
