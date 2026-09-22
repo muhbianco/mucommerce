@@ -136,7 +136,7 @@ export default async function OrderPage({
               {hidden}
               <input type="hidden" name="to" value="cancelled" />
               <label>
-                Motivo
+                Motivo do cancelamento
                 <input name="reason" maxLength={200} placeholder="ex.: sem ingrediente" />
               </label>
               <label>
@@ -230,7 +230,7 @@ export default async function OrderPage({
               <input name="amount" inputMode="decimal" placeholder="ex.: 12,50" />
             </label>
             <label style={{ flexGrow: 2 }}>
-              Motivo
+              Motivo da devolução
               <input name="reason" maxLength={200} required />
             </label>
             <button type="submit">Devolver dinheiro</button>

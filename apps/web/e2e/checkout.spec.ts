@@ -104,6 +104,14 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await expect(page).toHaveURL(/\/carrinho\?ok=adicionado$/);
   await page.getByLabel(/Retirar em Loja MuhBianco/).check();
   await page.getByRole("button", { name: "Usar esta opção" }).click();
+
+  // A coupon takes 10% off the goods (never off the delivery).
+  await page.getByLabel("Cupom de desconto").fill("e2e10");
+  await page.getByRole("button", { name: "Aplicar cupom" }).click();
+  await expect(page.getByText("Cupom E2E10 aplicado.")).toBeVisible();
+  await expect(page.getByText(/Desconto:\s*−?R\$\s*5,90/)).toBeVisible();
+  await expect(page.getByText(/Total:\s*R\$\s*53,10/)).toBeVisible();
+
   await page.getByRole("link", { name: "Finalizar compra" }).click();
   const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
   if (await accept.count()) await accept.check();

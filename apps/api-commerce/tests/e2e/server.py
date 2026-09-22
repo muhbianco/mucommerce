@@ -6,7 +6,8 @@ No Docker, MariaDB, Redis or MinIO: Celery runs eagerly, rate limits and caches 
 memory, and images are written as already processed. Stores (hosts resolve to 127.0.0.1 in
 Chromium, `*.localhost` is a secure context so `__Host-` cookies work over http):
 
-- `loja.localhost`           tenant `muhbianco`, public, with published products (one with sizes
+- `loja.localhost`           tenant `muhbianco`, public, with a 10% coupon `E2E10` and published
+                             products (one with sizes
                              P/M/G, M paused, tagged `algodão`)
                              and a workshop event (`events` on) with two lots
 - `fechada.loja.localhost`   tenant `fechada`, whitelist (catalog needs an approved customer);
@@ -109,6 +110,9 @@ from app.catalog.schemas import (  # noqa: E402
 from app.catalog.service import CatalogService  # noqa: E402
 from app.cli import _seed_platform_in_session  # noqa: E402
 from app.core.database import SessionFactory, create_app_engine  # noqa: E402
+from app.core.scopes import TenantRole  # noqa: E402
+from app.coupons.service import CouponService  # noqa: E402
+from app.identity.models import AdminUser, TenantMembership  # noqa: E402
 from app.main import app  # noqa: E402
 from app.media.models import MediaAsset, MediaStatus  # noqa: E402
 from app.models.all import Base  # noqa: E402  (every model, for create_all)
@@ -246,6 +250,7 @@ async def seed() -> None:
                 "checkout": True,
                 "pickup": True,
                 "customer_login": True,
+                "coupons": True,
             },
             ACTOR,
         )
@@ -254,6 +259,18 @@ async def seed() -> None:
         await service.set_setting(
             store, "fulfillment", {"pickup": {"enabled": True, "locations": [pickup]}}, ACTOR
         )
+        # The MuhBianco admin owns the model store, as in production: the panel user who signs
+        # in through fake-accounts is both platform staff and this store's owner.
+        admin = AdminUser(
+            email="e2e-admin@muhbianco.test",
+            full_name="Admin E2E",
+            external_account_id="00000000-0000-4000-8000-00000000e2e0",
+        )
+        session.add(admin)
+        await session.flush()
+        session.add(
+            TenantMembership(tenant_id=store.id, admin_user_id=admin.id, role=TenantRole.OWNER)
+        )
         await session.commit()
         await _publish_products(session, store.id)
         await _variant_product(session, store.id)
@@ -261,6 +278,9 @@ async def seed() -> None:
         context = await TenantResolver(session).resolve_by_id(store.id)
         await PaymentConfigService(session, context, ACTOR).save(
             "fake", PaymentConfigIn(enabled=True, is_default=True, methods=["pix"])
+        )
+        await CouponService(session, context, ACTOR).create(
+            "E2E10", {"kind": "percent", "percent_bps": 1000, "status": "active"}
         )
         await session.commit()
 
