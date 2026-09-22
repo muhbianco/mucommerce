@@ -10,6 +10,7 @@ import {
   type Category,
   type Product,
   PRODUCT_STATUS_LABEL,
+  type TagRef,
   STOCK_POLICIES,
 } from "@/lib/panel/types";
 
@@ -49,7 +50,11 @@ export default async function ProductPage({
     if (error instanceof ApiError && (error.status === 404 || error.status === 422)) notFound();
     throw error;
   }
-  const categories = await api<Category[]>(`${path}/categories`);
+  const [categories, tags] = await Promise.all([
+    api<Category[]>(`${path}/categories`),
+    api<TagRef[]>(`${path}/tags`),
+  ]);
+  const otherTags = tags.filter((tag) => !product.tags.some((mine) => mine.slug === tag.slug));
   const canWrite = scopes.can("catalog:write") && product.status !== "archived";
   const zone = context.timezone;
   const hidden = (
@@ -277,6 +282,20 @@ export default async function ProductPage({
                 ))}
               </div>
             </fieldset>
+            <label style={{ flexBasis: "100%" }}>
+              Tags (separadas por vírgula; filtram a vitrine)
+              <input
+                name="tags"
+                maxLength={1300}
+                defaultValue={product.tags.map((tag) => tag.name).join(", ")}
+                placeholder="ex.: vegano, sem glúten"
+              />
+            </label>
+            {otherTags.length ? (
+              <p className="muted" style={{ flexBasis: "100%" }}>
+                Já usadas na loja: {otherTags.slice(0, 30).map((tag) => tag.name).join(", ")}
+              </p>
+            ) : null}
             <label>
               Título para buscadores
               <input name="seo_title" maxLength={70} defaultValue={product.seo?.title ?? ""} />

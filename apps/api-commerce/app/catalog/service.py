@@ -7,7 +7,8 @@ Rules that live here (and nowhere else):
 - publishing needs a price above zero, an active variant and at least one ready image;
 - a published product is `active` (for sale) or `paused` (shown as unavailable, with a reason);
   only `active` sells, so a check that forgets `paused` fails closed;
-- categories nest at most two levels; archiving one with active children is refused.
+- categories nest at most two levels; archiving one with active children is refused;
+- tags are given by name and created on first use (slug from the name, one per slug).
 
 Writes are audited; product lifecycle changes also go to the outbox (the product is the
 aggregate; categories are not).
@@ -31,10 +32,11 @@ from app.catalog.models import (
     Product,
     ProductStatus,
     ProductVariant,
+    Tag,
     VariantStatus,
 )
 from app.catalog.pricing import EffectivePrice, check_promotion, effective_price, variant_price
-from app.catalog.repository import MAX_CATEGORIES, CatalogRepository
+from app.catalog.repository import MAX_CATEGORIES, MAX_TAGS, CatalogRepository
 from app.catalog.schemas import (
     CATEGORY_REQUIRED_FIELDS,
     PRODUCT_REQUIRED_FIELDS,
@@ -81,6 +83,7 @@ class ProductView:
     variants: list[ProductVariant]
     category_ids: list[str]
     media: list[MediaAsset] = field(default_factory=list)
+    tags: list[Tag] = field(default_factory=list)
 
 
 def product_price(product: Product, now: datetime) -> EffectivePrice:
@@ -132,12 +135,13 @@ class CatalogService:
             ends_at=data.promo_ends_at,
         )
         category_ids = await self._checked_category_ids(data.category_ids)
+        tags = await self._resolve_tags(data.tags)
         sku = data.sku or await self._generate_sku()
         if data.sku and await self.repo.sku_taken(sku):
             raise ConflictError("SKU já usado nesta loja.", sku=sku)
         slug = await self._product_slug(data.slug, data.name)
 
-        fields = data.model_dump(exclude={"sku", "slug", "category_ids", "seo"})
+        fields = data.model_dump(exclude={"sku", "slug", "category_ids", "seo", "tags"})
         product = Product(
             **fields,
             sku=sku,
@@ -165,26 +169,29 @@ class CatalogService:
         # (no concurrent INSERTs, whose gap locks are what deadlocks upserts on MariaDB).
         self.session.add(InventoryBalance(variant_id=variant.id, on_hand_milli=0, reserved_milli=0))
         await self.repo.replace_product_categories(product.id, category_ids)
+        await self.repo.replace_product_tags(product.id, [t.id for t in tags])
         await self.session.flush()
 
-        await self._audit(
-            "product.created", product, after=_snapshot(product, ("sku", *_PRODUCT_AUDITED))
-        )
+        after = _snapshot(product, ("sku", *_PRODUCT_AUDITED))
+        if tags:
+            after["tags"] = [t.slug for t in tags]
+        await self._audit("product.created", product, after=after)
         await self._emit(product, "product.created")
-        return ProductView(product, [variant], sorted(category_ids))
+        return ProductView(product, [variant], sorted(category_ids), tags=tags)
 
     async def get_product(self, product_id: str) -> ProductView:
         product = await self._product_or_404(product_id)
         variants = (await self.repo.variants_for([product.id])).get(product.id, [])
         categories = (await self.repo.category_ids_for([product.id])).get(product.id, [])
         media = await MediaRepository(self.session).for_owner(MediaOwner.PRODUCT, product.id)
-        return ProductView(product, variants, categories, list(media))
+        tags = (await self.repo.tags_for([product.id])).get(product.id, [])
+        return ProductView(product, variants, categories, list(media), tags)
 
     async def update_product(self, product_id: str, data: ProductUpdate) -> ProductView:
         product = await self._product_or_404(product_id)
         if product.status == ProductStatus.ARCHIVED:
             raise ConflictError("Produto arquivado não pode ser editado.")
-        changes = data.model_dump(exclude_unset=True, exclude={"category_ids", "seo"})
+        changes = data.model_dump(exclude_unset=True, exclude={"category_ids", "seo", "tags"})
         nulled = sorted(k for k, v in changes.items() if v is None and k in PRODUCT_REQUIRED_FIELDS)
         if nulled:
             raise ValidationError("Campos obrigatórios não podem ser nulos.", fields=nulled)
@@ -209,6 +216,10 @@ class CatalogService:
         categories = categories_before
         if data.category_ids is not None:
             categories = await self._checked_category_ids(data.category_ids)
+        tags_before = (await self.repo.tags_for([product.id])).get(product.id, [])
+        tags = tags_before
+        if data.tags is not None:
+            tags = await self._resolve_tags(data.tags)
 
         if "seo" in data.model_fields_set:
             changes["seo"] = data.seo.model_dump(exclude_none=True) if data.seo else None
@@ -221,6 +232,12 @@ class CatalogService:
                 product.id, categories, current=categories_before
             )
             changed.append("category_ids")
+        tag_ids_before = {t.id for t in tags_before}
+        if {t.id for t in tags} != tag_ids_before:
+            await self.repo.replace_product_tags(
+                product.id, [t.id for t in tags], current=tag_ids_before
+            )
+            changed.append("tags")
         if not changed:
             return await self.get_product(product.id)
 
@@ -228,15 +245,15 @@ class CatalogService:
         await self._flush_unique("Slug já usado nesta loja.")
         # Values only for the short, meaningful fields; long text is listed by name.
         audited = [name for name in changed if name in _PRODUCT_AUDITED]
-        await self._audit(
-            "product.updated",
-            product,
-            before={"fields": changed, **_snapshot_values(old, audited)},
-            after=_snapshot(product, tuple(audited)),
-        )
+        before = {"fields": changed, **_snapshot_values(old, audited)}
+        after = _snapshot(product, tuple(audited))
+        if "tags" in changed:
+            before["tags"] = [t.slug for t in tags_before]
+            after["tags"] = [t.slug for t in tags]
+        await self._audit("product.updated", product, before=before, after=after)
         await self._emit(product, "product.updated")
         variants = (await self.repo.variants_for([product.id])).get(product.id, [])
-        return ProductView(product, variants, categories)
+        return ProductView(product, variants, categories, tags=tags)
 
     async def archive_product(self, product_id: str) -> None:
         product = await self._product_or_404(product_id)
@@ -449,6 +466,39 @@ class CatalogService:
             extra["reason"] = reason
         await self._emit(product, action, **extra)
         return await self.get_product(product.id)
+
+    # ------------------------------------------------------------------ tags
+    async def list_tags(self) -> list[Tag]:
+        return await self.repo.list_tags()
+
+    async def _resolve_tags(self, names: list[str]) -> list[Tag]:
+        """Tags for these names, created when new; same slug → same tag (first name wins)."""
+        wanted: dict[str, str] = {}
+        for raw in names:
+            name = " ".join(raw.split())
+            slug = slugify(name, max_length=80)
+            if not slug:
+                raise ValidationError("Tag sem letras ou números.", fields=["tags"])
+            wanted.setdefault(slug, name)
+        if not wanted:
+            return []
+        found = {t.slug: t for t in await self.repo.tags_by_slug(wanted)}
+        missing = [slug for slug in wanted if slug not in found]
+        if missing:
+            if await self.repo.count_tags() + len(missing) > MAX_TAGS:
+                raise ConflictError("Limite de tags atingido.", limit=MAX_TAGS)
+            for slug in missing:
+                tag = Tag(
+                    slug=slug,
+                    name=wanted[slug],
+                    created_by_actor=self.actor.id,
+                    updated_by_actor=self.actor.id,
+                )
+                self.session.add(tag)
+                found[slug] = tag
+            # Two writers creating the same new tag: the loser gets a 409 and retries.
+            await self._flush_unique("Tag criada ao mesmo tempo em outra edição; tente de novo.")
+        return sorted((found[slug] for slug in wanted), key=lambda t: t.name.casefold())
 
     # ------------------------------------------------------------------ categories
     async def create_category(self, data: CategoryCreate) -> Category:

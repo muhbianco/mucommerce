@@ -19,8 +19,10 @@ from app.catalog.models import (
     Product,
     ProductCategory,
     ProductStatus,
+    ProductTag,
     ProductVariant,
     StockPolicy,
+    Tag,
     VariantStatus,
 )
 from app.catalog.pricing import EffectivePrice, effective_price, variant_price
@@ -82,6 +84,7 @@ class ProductData:
     variants: list[VariantData]
     images: list[MediaAsset]
     categories: list[Category]
+    tags: list[Tag]
 
 
 class StorefrontCatalog:
@@ -105,6 +108,21 @@ class StorefrontCatalog:
         stmt = select(Category).where(Category.slug == slug).where(Category.archived_at.is_(None))
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    # ------------------------------------------------------------------ tags
+    async def tags(self) -> list[Tag]:
+        """Tags with at least one published product (the storefront's filter chips)."""
+        in_use = (
+            select(ProductTag.tag_id)
+            .join(Product, Product.id == ProductTag.product_id)
+            .where(Product.status.in_(PUBLISHED_STATUSES))
+        )
+        stmt = select(Tag).where(Tag.id.in_(in_use)).order_by(Tag.name, Tag.id).limit(200)
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def tag_by_slug(self, slug: str) -> Tag | None:
+        stmt = select(Tag).where(Tag.slug == slug)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     # ------------------------------------------------------------------ products
     async def list_cards(
         self,
@@ -113,6 +131,7 @@ class StorefrontCatalog:
         after: tuple[int, str] | None = None,
         q: str | None = None,
         category: Category | None = None,
+        tag: Tag | None = None,
         product_ids: Sequence[str] | None = None,
     ) -> list[CardData]:
         """Published products by (position, id); `limit + 1` rows for keyset paging."""
@@ -144,6 +163,9 @@ class StorefrontCatalog:
                 )
             )
             stmt = stmt.where(Product.id.in_(linked))
+        if tag is not None:
+            tagged = select(ProductTag.product_id).where(ProductTag.tag_id == tag.id)
+            stmt = stmt.where(Product.id.in_(tagged))
         if product_ids is not None:
             stmt = stmt.where(Product.id.in_(list(product_ids)))
         products = list((await self.session.execute(stmt)).scalars())
@@ -186,6 +208,13 @@ class StorefrontCatalog:
             .order_by(Category.parent_id.is_not(None), Category.position)
         )
         categories = list((await self.session.execute(category_stmt)).scalars())
+        tag_stmt = (
+            select(Tag)
+            .join(ProductTag, ProductTag.tag_id == Tag.id)
+            .where(ProductTag.product_id == product.id)
+            .order_by(Tag.name)
+        )
+        tags = list((await self.session.execute(tag_stmt)).scalars())
         card = CardData(
             product,
             self._price(product),
@@ -195,7 +224,7 @@ class StorefrontCatalog:
             ),
             images[0] if images else None,
         )
-        return ProductData(card, variant_data, images, categories)
+        return ProductData(card, variant_data, images, categories, tags)
 
     async def sitemap(self) -> tuple[list[tuple[str, datetime]], list[str]]:
         products = (

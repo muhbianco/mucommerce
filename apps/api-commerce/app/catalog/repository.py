@@ -9,11 +9,20 @@ from collections.abc import Collection, Sequence
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.models import Category, Product, ProductCategory, ProductStatus, ProductVariant
+from app.catalog.models import (
+    Category,
+    Product,
+    ProductCategory,
+    ProductStatus,
+    ProductTag,
+    ProductVariant,
+    Tag,
+)
 
 # Bounds for the slug-suffix lookup and for a tenant's category tree.
 SLUG_SCAN_LIMIT = 1000
 MAX_CATEGORIES = 200
+MAX_TAGS = 500
 
 
 class CatalogRepository:
@@ -126,6 +135,52 @@ class CatalogRepository:
             )
         for category_id in sorted(wanted - existing):
             self.session.add(ProductCategory(product_id=product_id, category_id=category_id))
+
+    # ------------------------------------------------------------------ tags
+    async def tags_for(self, product_ids: Collection[str]) -> dict[str, list[Tag]]:
+        if not product_ids:
+            return {}
+        stmt = (
+            select(ProductTag.product_id, Tag)
+            .join(Tag, Tag.id == ProductTag.tag_id)
+            .where(ProductTag.product_id.in_(list(product_ids)))
+            .order_by(ProductTag.product_id, Tag.name)
+        )
+        grouped: dict[str, list[Tag]] = defaultdict(list)
+        for product_id, tag in (await self.session.execute(stmt)).all():
+            grouped[product_id].append(tag)
+        return dict(grouped)
+
+    async def tags_by_slug(self, slugs: Collection[str]) -> list[Tag]:
+        if not slugs:
+            return []
+        stmt = select(Tag).where(Tag.slug.in_(list(slugs)))
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def list_tags(self) -> list[Tag]:
+        stmt = select(Tag).order_by(Tag.name, Tag.id).limit(MAX_TAGS)
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def count_tags(self) -> int:
+        stmt = select(func.count()).select_from(Tag)
+        return int((await self.session.execute(stmt)).scalar_one())
+
+    async def replace_product_tags(
+        self, product_id: str, tag_ids: Collection[str], *, current: Collection[str] = ()
+    ) -> None:
+        """Link exactly `tag_ids`; `current` is what is linked now (the caller has it)."""
+        wanted = set(tag_ids)
+        existing = set(current)
+        removed = existing - wanted
+        if removed:
+            await self.session.execute(
+                delete(ProductTag)
+                .where(ProductTag.product_id == product_id)
+                .where(ProductTag.tag_id.in_(list(removed)))
+                .execution_options(synchronize_session=False)
+            )
+        for tag_id in sorted(wanted - existing):
+            self.session.add(ProductTag(product_id=product_id, tag_id=tag_id))
 
     # ------------------------------------------------------------------ categories
     async def get_category(self, category_id: str) -> Category | None:

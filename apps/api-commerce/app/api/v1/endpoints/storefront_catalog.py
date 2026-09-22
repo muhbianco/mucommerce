@@ -83,6 +83,11 @@ class CategoryRef(BaseModel):
     description: str | None
 
 
+class TagRef(BaseModel):
+    slug: str
+    name: str
+
+
 class VariantOption(BaseModel):
     id: str
     sku: str
@@ -104,6 +109,7 @@ class ProductDetail(ProductCard):
     variants: list[VariantOption]
     images: list[Image]
     categories: list[CategoryRef]
+    tags: list[TagRef]
     seo: ProductSeo
     updated_at: datetime
 
@@ -161,15 +167,26 @@ async def storefront_categories(session: DbSession, tenant: CatalogReader) -> li
 
 
 @router.get(
+    "/catalog/tags",
+    response_model=list[TagRef],
+    summary="Tags com produto publicado (filtros da vitrine)",
+)
+async def storefront_tags(session: DbSession, tenant: CatalogReader) -> list[TagRef]:
+    tags = await StorefrontCatalog(session, utcnow()).tags()
+    return [TagRef(slug=t.slug, name=t.name) for t in tags]
+
+
+@router.get(
     "/catalog/products",
     response_model=Page[ProductCard],
-    summary="Produtos publicados (busca, categoria; paginação por cursor)",
+    summary="Produtos publicados (busca, categoria, tag; paginação por cursor)",
 )
 async def storefront_products(
     session: DbSession,
     tenant: CatalogReader,
     q: Annotated[str | None, Query(min_length=2, max_length=100)] = None,
     category: Annotated[str | None, Query(max_length=160)] = None,
+    tag: Annotated[str | None, Query(max_length=80)] = None,
     limit: Annotated[int, Query(ge=1, le=STOREFRONT_PAGE_MAX)] = 24,
     cursor: Annotated[str | None, Query(max_length=256)] = None,
 ) -> Page[ProductCard]:
@@ -179,6 +196,11 @@ async def storefront_products(
         selected = await catalog.category_by_slug(category)
         if selected is None:
             raise NotFoundError("Categoria não encontrada.")
+    selected_tag = None
+    if tag:
+        selected_tag = await catalog.tag_by_slug(tag)
+        if selected_tag is None:
+            raise NotFoundError("Tag não encontrada.")
     after = None
     if cursor:
         raw = decode_cursor(cursor, "p", "id")
@@ -186,7 +208,9 @@ async def storefront_products(
             after = (int(raw["p"]), raw["id"])
         except ValueError as exc:
             raise ValidationError("Cursor inválido.") from exc
-    cards = await catalog.list_cards(limit=limit, after=after, q=q, category=selected)
+    cards = await catalog.list_cards(
+        limit=limit, after=after, q=q, category=selected, tag=selected_tag
+    )
     page = cards[:limit]
     next_cursor = (
         encode_cursor(p=str(page[-1].product.position), id=page[-1].product.id)
@@ -228,6 +252,7 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
         ],
         images=[Image(**image_payload(m)) for m in data.images],
         categories=[_category(c) for c in data.categories],
+        tags=[TagRef(slug=t.slug, name=t.name) for t in data.tags],
         seo=ProductSeo(title=seo.get("title"), description=seo.get("description")),
         updated_at=product.updated_at,
     )

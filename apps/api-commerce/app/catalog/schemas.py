@@ -33,6 +33,10 @@ StockPolicyIn = Literal["tracked", "untracked", "made_to_order", "unlimited"]
 ProductStatusFilter = Literal["draft", "active", "paused", "inactive", "archived"]
 
 MAX_CATEGORIES_PER_PRODUCT = 20
+MAX_TAGS_PER_PRODUCT = 20
+
+# A tag is given by name; its slug (and the tag itself, on first use) come from it.
+TagName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
 
 
 class ProductSeo(StrictModel):
@@ -70,6 +74,7 @@ class ProductCreate(_ProductFields):
     category_ids: Annotated[
         list[EntityId], Field(default_factory=list, max_length=MAX_CATEGORIES_PER_PRODUCT)
     ]
+    tags: Annotated[list[TagName], Field(default_factory=list, max_length=MAX_TAGS_PER_PRODUCT)]
 
 
 class ProductUpdate(StrictModel):
@@ -102,6 +107,8 @@ class ProductUpdate(StrictModel):
     category_ids: Annotated[list[EntityId], Field(max_length=MAX_CATEGORIES_PER_PRODUCT)] | None = (
         None
     )
+    # The full list: tags not in it are unlinked from the product.
+    tags: Annotated[list[TagName], Field(max_length=MAX_TAGS_PER_PRODUCT)] | None = None
 
 
 # Fields that may not be set to null in a PATCH (the column is NOT NULL).
@@ -125,6 +132,11 @@ class VariantUpdate(StrictModel):
     price_cents: Money | None = None
     cost_cents: Money | None = None
     status: Literal["active", "inactive"] | None = None
+
+
+class TagRef(BaseModel):
+    slug: str
+    name: str
 
 
 class PauseRequest(StrictModel):
@@ -195,6 +207,7 @@ class ProductRead(ProductSummary):
     paused_reason: str | None = None
     created_at: datetime
     category_ids: list[str]
+    tags: list[TagRef] = []
     variants: list[VariantRead]
     media: list[MediaRead]
 

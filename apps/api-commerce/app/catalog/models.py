@@ -107,6 +107,20 @@ class Category(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScope
     archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
+class Tag(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
+    """A free label ("vegano", "sem glúten") the storefront filters by; created on first use."""
+
+    __tablename__ = "tags"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "slug", name="uq_tags_slug"),
+        UniqueConstraint("tenant_id", "id", name="uq_tags_tenant_row"),
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name="fk_tags_tenant"),
+    )
+
+    slug: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+
+
 class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
     __tablename__ = "products"
     __table_args__ = (
@@ -203,3 +217,22 @@ class ProductCategory(UUIDPrimaryKeyMixin, TenantScoped, Base):
 
     product_id: Mapped[str] = mapped_column(String(36), nullable=False)
     category_id: Mapped[str] = mapped_column(String(36), nullable=False)
+
+
+class ProductTag(UUIDPrimaryKeyMixin, TenantScoped, Base):
+    __tablename__ = "product_tags"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "product_id", "tag_id", name="uq_product_tags_pair"),
+        ForeignKeyConstraint(
+            ["tenant_id", "product_id"],
+            ["products.tenant_id", "products.id"],
+            name="fk_product_tags_product",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "tag_id"], ["tags.tenant_id", "tags.id"], name="fk_product_tags_tag"
+        ),
+        Index("ix_product_tags_tag", "tenant_id", "tag_id", "product_id"),
+    )
+
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    tag_id: Mapped[str] = mapped_column(String(36), nullable=False)

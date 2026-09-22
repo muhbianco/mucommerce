@@ -141,6 +141,15 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </span>
           </p>
           {product.short_description ? <p>{product.short_description}</p> : null}
+          {product.tags.length ? (
+            <p className={styles.nav}>
+              {product.tags.map((tag) => (
+                <Link key={tag.slug} href={`/loja?tag=${encodeURIComponent(tag.slug)}`} className={styles.tag}>
+                  {tag.name}
+                </Link>
+              ))}
+            </p>
+          ) : null}
           {product.variants.length > 1 ? (
             <ul>
               {product.variants.map((variant) => (

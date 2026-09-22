@@ -20,6 +20,7 @@ from app.catalog.schemas import (
     ProductStatusFilter,
     ProductSummary,
     ProductUpdate,
+    TagRef,
     VariantRead,
     VariantUpdate,
 )
@@ -99,6 +100,7 @@ def _product_read(view: ProductView) -> ProductRead:
         paused_reason=product.paused_reason,
         created_at=product.created_at,
         category_ids=view.category_ids,
+        tags=[TagRef(slug=t.slug, name=t.name) for t in view.tags],
         variants=[
             VariantRead(
                 id=v.id,
@@ -343,6 +345,19 @@ async def update_variant(
         product_id, variant_id, body
     )
     return _product_read(view)
+
+
+# ----------------------------------------------------------------------------- tags
+@router.get(
+    "/tags",
+    response_model=list[TagRef],
+    summary="Tags da loja (sugestões ao editar produto; criadas pelo nome ao salvar)",
+)
+async def list_tags(
+    request: Request, session: DbSession, user: CurrentAdmin, tenant: CatalogReadTenant
+) -> list[TagRef]:
+    tags = await _service(request, session, user, tenant).list_tags()
+    return [TagRef(slug=t.slug, name=t.name) for t in tags]
 
 
 # ----------------------------------------------------------------------------- categories

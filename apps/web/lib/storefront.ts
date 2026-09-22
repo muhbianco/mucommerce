@@ -46,6 +46,11 @@ export interface CategoryRef {
   description: string | null;
 }
 
+export interface TagRef {
+  slug: string;
+  name: string;
+}
+
 export interface ProductDetail extends ProductCard {
   sku: string;
   description_md: string | null;
@@ -54,6 +59,7 @@ export interface ProductDetail extends ProductCard {
   variants: { id: string; sku: string; name: string; price: StorePrice; availability: Availability }[];
   images: StoreImage[];
   categories: CategoryRef[];
+  tags: TagRef[];
   seo: { title: string | null; description: string | null };
   updated_at: string;
 }

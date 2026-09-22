@@ -131,10 +131,16 @@ export interface Product extends ProductSummary {
   unit_label: string;
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
+  tags: TagRef[];
   paused_at: string | null;
   paused_reason: string | null;
   variants: Variant[];
   media: Media[];
+}
+
+export interface TagRef {
+  slug: string;
+  name: string;
 }
 
 export interface Category {

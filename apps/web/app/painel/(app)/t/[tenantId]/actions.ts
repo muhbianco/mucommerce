@@ -79,6 +79,14 @@ export async function createProduct(form: FormData): Promise<void> {
   });
 }
 
+/** "Vegano, sem glúten" → ["Vegano", "sem glúten"]; the API dedupes by slug and validates. */
+function tagNames(form: FormData): string[] {
+  return text(form, "tags")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
 export async function updateProduct(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   const productId = id(text(form, "product_id"));
@@ -104,6 +112,7 @@ export async function updateProduct(form: FormData): Promise<void> {
         unit_label: text(form, "unit_label") || "un",
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
+        tags: tagNames(form),
         seo: { title: optional(form, "seo_title"), description: optional(form, "seo_description") },
       },
     });
