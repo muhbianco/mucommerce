@@ -14,6 +14,9 @@ redis==5.2.1
 cryptography==50.0.1
 dnspython==2.8.0
 uuid6==2025.0.1
+# IANA time zones for zoneinfo (delivery windows in the store's time zone); the slim
+# image and Windows dev boxes have no system database.
+tzdata==2026.4
 prometheus-fastapi-instrumentator==8.1.0
 sentry-sdk[fastapi,celery]==2.69.2
 # Object storage (MinIO): official S3 SDK, far smaller than boto3, has presigned POST policies.

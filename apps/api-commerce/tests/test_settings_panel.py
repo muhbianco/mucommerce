@@ -138,8 +138,10 @@ async def test_only_tenant_keys_and_the_right_role(
     owner = await member_headers(client, session_factory, tenant)
     support = await member_headers(client, session_factory, tenant, TenantRole.SUPPORT)
 
-    for key in ("storefront", "checkout", "fulfillment", "inventado"):
+    for key in ("storefront", "inventado"):  # platform settings stay in the site admin
         assert (await put(client, tenant, owner, key, {})).status_code == 422, key
+    for key in ("checkout", "fulfillment"):  # day-to-day: the store edits them (stage E)
+        assert (await put(client, tenant, owner, key, {})).status_code == 200, key
     assert (await put(client, tenant, support, "branding", {})).status_code == 403
     invalid = await put(
         client, tenant, owner, "landing", {"blocks": [{"type": "html", "body": "<script>"}]}

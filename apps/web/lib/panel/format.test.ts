@@ -4,6 +4,8 @@ import {
   formatQuantity,
   localToUtcIso,
   moneyInput,
+  lines,
+  parseCepRanges,
   parseModifierLines,
   parseMoney,
   parseQuantity,
@@ -66,5 +68,16 @@ describe("modifier lines", () => {
     expect(parseModifierLines("Chocolate = três")).toBeNull();
     expect(parseModifierLines("= 3,00")).toBeNull();
     expect(parseModifierLines("a = 1 = 2")).toBeNull();
+  });
+});
+
+describe("delivery zones", () => {
+  it("reads CEP ranges one per line", () => {
+    expect(parseCepRanges("01000-000 a 01099-999\n\n02000000-02999999")).toEqual([
+      { start: "01000000", end: "01099999" },
+      { start: "02000000", end: "02999999" },
+    ]);
+    expect(parseCepRanges("01000-000")).toBeNull();
+    expect(lines("  Sé \n\nLiberdade")).toEqual(["Sé", "Liberdade"]);
   });
 });

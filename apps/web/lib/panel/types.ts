@@ -156,6 +156,50 @@ export const MODIFIER_GROUP_ROWS = 4;
 /** Rows of the panel's options form (the API allows up to 3 options). */
 export const PRODUCT_OPTION_ROWS = 3;
 
+export interface PickupLocation {
+  id: string;
+  name: string;
+  address: string;
+  instructions: string | null;
+  active: boolean;
+}
+
+export interface DeliveryZone {
+  id: string;
+  name: string;
+  kind: "cep_ranges" | "districts";
+  cep_ranges: { start: string; end: string }[];
+  city: string | null;
+  state: string | null;
+  districts: string[];
+  fee_cents: number;
+  min_order_cents: number | null;
+  eta_minutes: number | null;
+  active: boolean;
+}
+
+export interface DeliveryWindow {
+  weekday: number;
+  start: string;
+  end: string;
+  modes: ("pickup" | "delivery")[];
+}
+
+export interface FulfillmentSettings {
+  pickup: { enabled: boolean; locations: PickupLocation[] };
+  delivery: { enabled: boolean; zones: DeliveryZone[] };
+  min_order_cents: number;
+  scheduling: { enabled: boolean; windows: DeliveryWindow[]; min_lead_minutes: number; days_ahead: number };
+}
+
+export interface CheckoutSettings {
+  pix_ttl_minutes: number;
+  auto_accept: boolean;
+  customer_cancel_until: "payment_confirmed" | "accepted";
+  max_open_orders: number;
+  refund_four_eyes_threshold_cents: number;
+}
+
 export interface TagRef {
   slug: string;
   name: string;

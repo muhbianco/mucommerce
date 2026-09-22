@@ -64,7 +64,7 @@ def test_flags_without_code_start_off() -> None:
 def test_every_default_setting_matches_its_schema() -> None:
     assert set(DEFAULT_SETTINGS) == set(SETTINGS_SCHEMAS)
     for key, value in DEFAULT_SETTINGS.items():
-        assert validate_setting(key, value) == (1, value)
+        assert validate_setting(key, value) == (SETTINGS_SCHEMAS[key][0], value)
 
 
 @pytest.mark.parametrize(
@@ -75,7 +75,7 @@ def test_every_default_setting_matches_its_schema() -> None:
         ("branding", {"primary_color": "red"}),
         ("branding", {"logo_url": "http://inseguro.test/logo.png"}),
         ("seo", {"title": "x" * 71}),
-        ("fulfillment", {"modes": []}),
+        ("fulfillment", {"delivery": {"zones": [{"id": "z", "name": "Z", "kind": "districts"}]}}),
         ("checkout", {"pix_ttl_minutes": 1}),
     ],
 )

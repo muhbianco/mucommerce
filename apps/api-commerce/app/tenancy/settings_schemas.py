@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import ValidationError
@@ -117,11 +117,105 @@ class LandingV1(_Setting):
     blocks: Annotated[list[LandingBlock], Field(max_length=12)] = []
 
 
-class FulfillmentV1(_Setting):
-    modes: Annotated[list[Literal["pickup", "delivery"]], Field(min_length=1, max_length=2)] = [
-        "pickup"
-    ]
-    min_order_cents: Annotated[int, Field(ge=0, le=100_000_000)] = 0
+Cents = Annotated[int, Field(ge=0, le=100_000_000)]
+FulfillmentMode = Literal["pickup", "delivery"]
+SettingId = Annotated[str, Field(min_length=1, max_length=36)]
+Cep = Annotated[str, Field(pattern=r"^\d{8}$")]
+ClockTime = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
+PlaceName = Annotated[str, Field(min_length=1, max_length=80)]
+
+
+class PickupLocation(_Setting):
+    # Ids are assigned on write (settings_normalizers) and stay the same across edits.
+    id: SettingId
+    name: PlaceName
+    address: Annotated[str, Field(min_length=1, max_length=300)]
+    instructions: Annotated[str, Field(max_length=300)] | None = None
+    active: bool = True
+
+
+class CepRange(_Setting):
+    start: Cep
+    end: Cep
+
+    @model_validator(mode="after")
+    def _ordered(self) -> CepRange:
+        if self.end < self.start:
+            raise ValueError("fim da faixa de CEP antes do início")
+        return self
+
+
+class DeliveryZone(_Setting):
+    id: SettingId
+    name: PlaceName
+    kind: Literal["cep_ranges", "districts"]
+    cep_ranges: Annotated[list[CepRange], Field(max_length=20)] = []
+    # Districts are matched inside this city/state, ignoring accents and case.
+    city: PlaceName | None = None
+    state: Annotated[str, Field(pattern=r"^[A-Z]{2}$")] | None = None
+    districts: Annotated[list[PlaceName], Field(max_length=200)] = []
+    fee_cents: Annotated[int, Field(ge=0, le=10_000_000)] = 0
+    min_order_cents: Cents | None = None
+    eta_minutes: Annotated[int, Field(ge=0, le=10_080)] | None = None
+    active: bool = True
+
+    @model_validator(mode="after")
+    def _has_area(self) -> DeliveryZone:
+        if self.kind == "cep_ranges" and not self.cep_ranges:
+            raise ValueError("zona por CEP precisa de ao menos uma faixa")
+        if self.kind == "districts" and not (self.districts and self.city and self.state):
+            raise ValueError("zona por bairro precisa de bairros, cidade e UF")
+        return self
+
+
+class DeliveryWindow(_Setting):
+    weekday: Annotated[int, Field(ge=0, le=6)]  # 0 = Monday (date.weekday())
+    start: ClockTime
+    end: ClockTime
+    modes: Annotated[list[FulfillmentMode], Field(min_length=1, max_length=2)]
+
+    @model_validator(mode="after")
+    def _ordered(self) -> DeliveryWindow:
+        if self.end <= self.start:
+            raise ValueError("fim da janela deve ser depois do início")
+        return self
+
+
+class PickupSettings(_Setting):
+    enabled: bool = True
+    locations: Annotated[list[PickupLocation], Field(max_length=10)] = []
+
+
+class DeliverySettings(_Setting):
+    enabled: bool = False
+    zones: Annotated[list[DeliveryZone], Field(max_length=50)] = []
+
+
+class SchedulingSettings(_Setting):
+    enabled: bool = False
+    windows: Annotated[list[DeliveryWindow], Field(max_length=28)] = []
+    min_lead_minutes: Annotated[int, Field(ge=0, le=10_080)] = 60
+    days_ahead: Annotated[int, Field(ge=1, le=30)] = 7
+
+
+class FulfillmentV2(_Setting):
+    """Pickup locations, delivery zones (CEP ranges or districts) and time windows.
+
+    V1 (`{modes, min_order_cents}`) became this in migration 0017."""
+
+    pickup: PickupSettings = PickupSettings()
+    delivery: DeliverySettings = DeliverySettings()
+    min_order_cents: Cents = 0
+    scheduling: SchedulingSettings = SchedulingSettings()
+
+    @model_validator(mode="after")
+    def _unique(self) -> FulfillmentV2:
+        for label, items in (("local", self.pickup.locations), ("zona", self.delivery.zones)):
+            ids = [item.id for item in items]
+            names = [item.name.casefold() for item in items]
+            if len(set(ids)) != len(ids) or len(set(names)) != len(names):
+                raise ValueError(f"{label} repetido")
+        return self
 
 
 class CheckoutV1(_Setting):
@@ -144,7 +238,7 @@ SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
     "branding": (1, BrandingV1),
     "seo": (1, SeoV1),
     "landing": (1, LandingV1),
-    "fulfillment": (1, FulfillmentV1),
+    "fulfillment": (2, FulfillmentV2),
     "checkout": (1, CheckoutV1),
 }
 
@@ -174,3 +268,7 @@ def validate_setting(key: str, value: dict[str, Any]) -> tuple[int, dict[str, An
 def checkout_settings(settings: Mapping[str, Any]) -> CheckoutV1:
     """The store's checkout settings; missing keys (older rows) take the defaults."""
     return CheckoutV1.model_validate(settings.get("checkout") or {})
+
+
+def fulfillment_settings(settings: Mapping[str, Any]) -> FulfillmentV2:
+    return FulfillmentV2.model_validate(settings.get("fulfillment") or {})

@@ -35,6 +35,7 @@ from app.tenancy.models import (
 from app.tenancy.repository import TenantRepository
 from app.tenancy.resolver import invalidate_host_cache
 from app.tenancy.setting_refs import check_setting_references
+from app.tenancy.settings_normalizers import SETTING_NORMALIZERS
 from app.tenancy.settings_schemas import validate_setting
 
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$")
@@ -277,10 +278,13 @@ class TenantService:
     async def set_setting(
         self, tenant: Tenant, key: str, value: dict[str, Any], actor: Actor
     ) -> dict[str, Any]:
-        schema_version, value = validate_setting(key, value)
         bind_session_tenant(self.session, tenant.id)
-        await check_setting_references(self.session, key, value)
         current = await self.repo.settings(tenant.id)
+        normalizer = SETTING_NORMALIZERS.get(key)
+        if normalizer is not None:
+            value = normalizer(current.get(key), value)
+        schema_version, value = validate_setting(key, value)
+        await check_setting_references(self.session, key, value)
         row = (
             await self.session.execute(
                 select(TenantSetting)

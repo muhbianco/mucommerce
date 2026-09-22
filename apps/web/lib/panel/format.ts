@@ -41,6 +41,27 @@ export function parseModifierLines(raw: string): { name: string; price_cents: nu
   return items;
 }
 
+/** One CEP range per line, "01000-000 a 01099-999" (or "-", "até"); null on a line it cannot read. */
+export function parseCepRanges(raw: string): { start: string; end: string }[] | null {
+  const ranges: { start: string; end: string }[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const ceps = line.match(/\d{5}-?\d{3}/g);
+    if (!ceps || ceps.length !== 2) return null;
+    const [start, end] = ceps.map((cep) => cep.replace("-", "")) as [string, string];
+    ranges.push({ start, end });
+  }
+  return ranges;
+}
+
+/** Non-empty trimmed lines (districts, one per line). */
+export function lines(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 /** Offset (minutes east of UTC) of `timeZone` at `instant`. */
 function offsetMinutes(instant: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat("en-US", {

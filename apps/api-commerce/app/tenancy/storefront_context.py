@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.fulfillment.service import public_fulfillment
 from app.media.service import pick_rendition, ready_media_by_ids
 from app.schemas.internal import StorefrontContext, StorefrontTenant
 from app.tenancy.context import TenantContext
@@ -62,7 +63,7 @@ async def build_storefront_context(
         features=features,
         branding=branding,
         seo=seo,
-        fulfillment=tenant.settings.get("fulfillment", {}),
+        fulfillment=public_fulfillment(tenant),
         chatwoot_url=(
             settings.chatwoot_public_url if internal and tenant.feature("chatwoot") else None
         ),

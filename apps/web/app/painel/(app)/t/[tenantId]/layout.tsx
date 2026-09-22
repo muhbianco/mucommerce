@@ -31,6 +31,9 @@ export default async function TenantLayout({
           <Link href={`${base}/estoque`}>Estoque</Link>
         ) : null}
         {scopes.can("customers:read") ? <Link href={`${base}/clientes`}>Clientes</Link> : null}
+        {scopes.can("settings:write") && (context.features.checkout || context.features.pickup || context.features.delivery) ? (
+          <Link href={`${base}/entrega`}>Entrega e checkout</Link>
+        ) : null}
         {scopes.can("settings:write") ? <Link href={`${base}/configuracoes`}>Configurações</Link> : null}
       </nav>
       {children}

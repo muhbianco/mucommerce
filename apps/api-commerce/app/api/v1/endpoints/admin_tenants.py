@@ -53,7 +53,8 @@ async def panel_context(
 
 # Keys the tenant edits in the panel. Access mode, fulfillment and checkout stay with MuhBianco
 # ops for now (they change what customers can do, and phase 2 owns fulfillment/checkout).
-TenantEditableSetting = Literal["branding", "landing", "seo"]
+# Day-to-day settings the store edits in its panel (platform ones stay in the site admin).
+TenantEditableSetting = Literal["branding", "landing", "seo", "fulfillment", "checkout"]
 
 
 @router.get(
@@ -70,7 +71,7 @@ async def get_settings(
 @router.put(
     "/settings/{key}",
     response_model=dict[str, Any],
-    summary="Atualiza marca, landing ou SEO (validado por schema e referências)",
+    summary="Atualiza marca, landing, SEO, entrega ou checkout (validado por schema)",
 )
 async def put_setting(
     request: Request,
