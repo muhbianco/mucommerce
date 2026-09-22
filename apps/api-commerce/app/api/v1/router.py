@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     admin_media,
     admin_tenants,
     auth,
+    customer_addresses,
     customer_auth,
     internal,
     legal,
@@ -74,6 +75,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     storefront.router,
     storefront_catalog.router,
     customer_auth.router,
+    customer_addresses.router,
     legal.router,
     legal.storefront_router,
 )

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Header, Path, Request
@@ -10,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.exceptions import (
+    AccessBlockedError,
     AuthenticationError,
     CsrfOriginError,
     FeatureDisabledError,
@@ -23,7 +26,7 @@ from app.core.scopes import PlatformRole, Scope, platform_role_covers, scopes_fo
 from app.core.security import constant_time_equals, decode_access_token
 from app.customers.access import Viewer, check_catalog_access
 from app.customers.sessions import SESSION_COOKIE, resolve_viewer
-from app.identity.models import AdminUser
+from app.identity.models import AccessStatus, AdminUser
 from app.identity.repository import AdminUserRepository
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext, bind_session_tenant
@@ -58,6 +61,7 @@ CurrentAdmin = Annotated[AdminUser, Depends(get_current_admin)]
 PLATFORM_GUARD_ATTR = "__platform_guard__"
 TENANT_GUARD_ATTR = "__tenant_guard__"
 CATALOG_ACCESS_GUARD_ATTR = "__catalog_access_guard__"
+CHECKOUT_GUARD_ATTR = "__checkout_guard__"
 CUSTOMER_GUARD_ATTR = "__customer_guard__"
 
 
@@ -252,6 +256,44 @@ async def require_events_access(tenant: CatalogReader) -> TenantContext:
 
 
 EventsReader = Annotated[TenantContext, Depends(require_events_access)]
+
+
+# --------------------------------------------------------------------------- checkout
+@dataclass(frozen=True, slots=True)
+class Shopper:
+    tenant: TenantContext
+    viewer: Viewer
+
+
+async def require_checkout(tenant: StorefrontTenant, viewer: CurrentCustomer) -> Shopper:
+    """Gate for cart, checkout and the customer's addresses (ADR 0011).
+
+    - `storefront`, `catalog` or `checkout` off → 404, as if the store did not sell online;
+    - a session of this store is required in every access mode (401 `login_required`);
+    - the catalog access rules apply (whitelist needs approval), and a blocked customer never
+      buys, not even in a public store (403 `access_blocked`).
+    """
+    if not (tenant.feature("storefront") and tenant.feature("catalog")):
+        raise NotFoundError("Recurso não encontrado.")
+    if not tenant.feature("checkout"):
+        raise NotFoundError("Recurso não encontrado.")
+    check_catalog_access(storefront_access_mode(tenant), viewer)
+    if viewer.access_status == AccessStatus.BLOCKED:
+        raise AccessBlockedError()
+    return Shopper(tenant, viewer)
+
+
+setattr(require_checkout, CHECKOUT_GUARD_ATTR, True)
+CheckoutShopper = Annotated[Shopper, Depends(require_checkout)]
+
+
+def customer_rate_key(request: Request) -> str:
+    """Rate-limit key of the customer session (forwarded by the web, or the browser cookie);
+    hashed, so the token never reaches Redis. Falls back to the client IP."""
+    token = request.headers.get("x-customer-session") or request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return client_ip(request)
+    return hashlib.sha256(token.encode()).hexdigest()[:32]
 
 
 # --------------------------------------------------------------------------- actor

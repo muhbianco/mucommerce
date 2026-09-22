@@ -8,6 +8,7 @@ from app.audit.models import (
     ProcessedEvent,
 )
 from app.catalog.models import Category, Product, ProductCategory, ProductVariant
+from app.customers.address_models import CustomerAddress
 from app.customers.legal_models import Consent, LegalDocument
 from app.customers.models import CustomerAuthFlow, CustomerPhoneChallenge
 from app.identity.models import (
@@ -39,6 +40,7 @@ __all__ = [
     "Category",
     "Consent",
     "Customer",
+    "CustomerAddress",
     "CustomerAuthFlow",
     "CustomerIdentity",
     "CustomerPhoneChallenge",

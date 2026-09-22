@@ -42,6 +42,7 @@ COVERED_TENANT_SCOPED_TABLES = {
     "product_tags",
     "events",
     "event_lots",
+    "customer_addresses",
     "tenant_settings",
     "tenant_feature_flags",
     "tenant_sequences",

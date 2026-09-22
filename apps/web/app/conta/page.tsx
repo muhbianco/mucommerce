@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
@@ -36,6 +37,11 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         {session.customer.email_masked ? ` · ${session.customer.email_masked}` : null}
       </p>
       <PhoneConfirm context={context} back="/conta" error={tel} />
+      {context.features.checkout ? (
+        <p>
+          <Link href="/conta/enderecos">Meus endereços</Link>
+        </p>
+      ) : null}
       <form action="/auth/sair" method="post">
         <button type="submit" className="muted">
           Sair
