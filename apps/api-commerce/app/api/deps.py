@@ -19,8 +19,10 @@ from app.core.exceptions import (
     InactiveUserError,
     LoginRequiredError,
     NotFoundError,
+    PayloadTooLargeError,
     PermissionDeniedError,
 )
+from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.rate_limit import client_ip
 from app.core.scopes import PlatformRole, Scope, platform_role_covers, scopes_for_tenant_role
 from app.core.security import constant_time_equals, decode_access_token
@@ -63,6 +65,7 @@ TENANT_GUARD_ATTR = "__tenant_guard__"
 CATALOG_ACCESS_GUARD_ATTR = "__catalog_access_guard__"
 CHECKOUT_GUARD_ATTR = "__checkout_guard__"
 CUSTOMER_GUARD_ATTR = "__customer_guard__"
+WEBHOOK_GUARD_ATTR = "__webhook_guard__"
 
 
 def require_platform_role(required: PlatformRole) -> Callable[..., Awaitable[AdminUser]]:
@@ -298,6 +301,43 @@ def customer_rate_key(request: Request) -> str:
     if not token:
         return client_ip(request)
     return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+
+# --------------------------------------------------------------------------- webhooks
+async def require_webhook_store(
+    request: Request,
+    session: DbSession,
+    tenant_key: Annotated[str, Path(min_length=16, max_length=32, pattern=r"^[A-Za-z0-9_-]+$")],
+) -> TenantContext:
+    """Gate for payment webhooks: only on the public API host, and the store comes only from the
+    key in the URL (never from the body). Suspended stores still take webhooks — money may be
+    moving — and so do stores whose `checkout` flag was switched off meanwhile."""
+    try:
+        host = normalize_hostname(request.headers.get("host"))
+    except InvalidHostnameError as exc:
+        raise NotFoundError("Recurso não encontrado.") from exc
+    if host != settings.api_public_host:
+        raise NotFoundError("Recurso não encontrado.")
+    return await TenantResolver(session).resolve_by_public_key(tenant_key)
+
+
+setattr(require_webhook_store, WEBHOOK_GUARD_ATTR, True)
+WebhookStore = Annotated[TenantContext, Depends(require_webhook_store)]
+
+
+async def read_body_limited(request: Request, limit: int) -> bytes:
+    """The raw body, refusing more than `limit` bytes without buffering them (413)."""
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > limit:
+        raise PayloadTooLargeError(limit=limit)
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise PayloadTooLargeError(limit=limit)
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # --------------------------------------------------------------------------- actor

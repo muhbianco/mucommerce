@@ -50,6 +50,7 @@ from app.orders.state_machine import (
     check_transition,
     fulfillment_after,
 )
+from app.payments.closing import close_active_payment
 from app.pricing.quote import LineInput, PricedLine, Quote
 from app.pricing.service import PricingService
 from app.tenancy.context import TenantContext
@@ -266,6 +267,9 @@ class OrderService:
         reservations = ReservationService(self.session, self.tenant, self.actor)
         if was == OrderStatus.AWAITING_PAYMENT:
             await reservations.release(order.id, reason="cancelled")
+            await close_active_payment(
+                self.session, self.tenant.id, self.actor.id, order.id, reason="cancelled"
+            )
         elif restock:
             await reservations.return_stock(order.id, reason="cancelled")
         await self._emit(
@@ -284,6 +288,9 @@ class OrderService:
         )
         await ReservationService(self.session, self.tenant, self.actor).release(
             order.id, reason="expired", expired=True
+        )
+        await close_active_payment(
+            self.session, self.tenant.id, self.actor.id, order.id, reason="expired"
         )
         await self._emit(order, "order.failed", reason="expired")
         return True

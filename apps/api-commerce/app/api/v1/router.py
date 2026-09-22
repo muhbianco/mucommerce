@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     legal,
     ops_outbox,
     ops_tenants,
+    payment_webhooks,
     storefront,
     storefront_cart,
     storefront_catalog,
@@ -68,6 +69,10 @@ TAGS_METADATA: list[dict[str, object]] = [
         "name": "Clientes",
         "description": "Login Google dos clientes das lojas, sessão e pedido de acesso.",
     },
+    {
+        "name": "Webhooks de pagamento",
+        "description": "Avisos dos provedores: guardados e conferidos com o provedor (ADR 0011).",
+    },
     {"name": "Infraestrutura", "description": "Health checks."},
 ]
 
@@ -94,6 +99,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     customer_orders.router,
     legal.router,
     legal.storefront_router,
+    payment_webhooks.router,
 )
 
 router = APIRouter()

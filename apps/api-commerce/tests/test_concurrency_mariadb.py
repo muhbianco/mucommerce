@@ -266,3 +266,84 @@ async def test_carts_in_opposite_order_do_not_deadlock_on_place(
         bind_session_tenant(session, tenant.id)
         rows = (await session.execute(select(InventoryBalance))).scalars()
         assert {r.variant_id: r.reserved_milli for r in rows} == {a: 10000, b: 10000}
+
+
+# ----------------------------------------------------------------------------- payments (stage E)
+async def test_one_approval_seen_by_many_at_once_sells_the_stock_once(
+    session_factory: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Webhook, reconciliation and "I already paid" all see the same approval at the same
+    time: the order is confirmed once and the stock leaves once (order → payment locks)."""
+    from app.core.config import settings
+    from app.inventory.models import InventoryMovement
+    from app.orders.commands import CartSource, Contact, PlaceOrder
+    from app.orders.models import Order, OrderStatusHistory
+    from app.orders.service import OrderService
+    from app.payments.config_service import PaymentConfigIn, PaymentConfigService
+    from app.payments.providers import fake
+    from app.payments.service import PaymentCreate, PaymentService
+
+    monkeypatch.setattr(settings, "payments_allowed_providers", "fake")
+    tenant = await _selling_context(session_factory, "alpha")
+    variant = await _published(session_factory, tenant, "Brownie", 5)
+    customer_id, version, total, cart_id = await _cart(session_factory, tenant, [variant])
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        await PaymentConfigService(session, tenant, ACTOR).save(
+            "fake", PaymentConfigIn(enabled=True)
+        )
+        placed = await OrderService(session, tenant, ACTOR).place(
+            PlaceOrder(
+                origin="storefront",
+                customer_id=customer_id,
+                idempotency_key=cart_id,
+                source=CartSource(cart_id, version),
+                contact=Contact("Cliente"),
+                expected_total_cents=total,
+            )
+        )
+        await session.commit()
+        order_id = placed.order.id
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        payment = await PaymentService(session, tenant, ACTOR).create(
+            order_id, customer_id, PaymentCreate(provider="fake", method="pix"), "key-1"
+        )
+        await session.commit()
+        assert payment.provider_payment_id
+        fake.settle(payment.provider_payment_id, "approved")
+
+    async def sync(source: str) -> str:
+        async with session_factory() as session:
+            bind_session_tenant(session, tenant.id)
+            outcome = await PaymentService(session, tenant, ACTOR).sync(payment.id, source=source)
+            await session.commit()
+            return outcome
+
+    outcomes = await asyncio.gather(
+        *(sync(s) for s in ("webhook", "reconcile", "customer_check") * 3)
+    )
+    assert sorted(outcomes) == ["changed"] + ["unchanged"] * 8
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        order = (await session.execute(select(Order).where(Order.id == order_id))).scalar_one()
+        assert order.status == "payment_confirmed"
+        confirmations = (
+            await session.execute(
+                select(OrderStatusHistory.id)
+                .where(OrderStatusHistory.order_id == order_id)
+                .where(OrderStatusHistory.to_status == "payment_confirmed")
+            )
+        ).all()
+        sales = (
+            await session.execute(
+                select(InventoryMovement.id).where(InventoryMovement.movement_type == "sale_commit")
+            )
+        ).all()
+        balance = (
+            await session.execute(
+                select(InventoryBalance).where(InventoryBalance.variant_id == variant)
+            )
+        ).scalar_one()
+    assert len(confirmations) == 1 and len(sales) == 1
+    assert (balance.on_hand_milli, balance.reserved_milli) == (4000, 0)

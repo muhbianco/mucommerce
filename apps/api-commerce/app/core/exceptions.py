@@ -240,3 +240,30 @@ class ReservedStockError(ConflictError):
 class CancelWindowClosedError(ConflictError):
     error_code = "cancel_window_closed"
     message = "Este pedido não pode mais ser cancelado por aqui. Fale com a loja."
+
+
+# ----------------------------------------------------------------------------- payments
+class OrderNotPayableError(ConflictError):
+    error_code = "order_not_payable"
+    message = "Este pedido não está aguardando pagamento."
+
+
+class PaymentInProgressError(ConflictError):
+    error_code = "payment_in_progress"
+    message = "Já existe um pagamento em andamento para este pedido."
+
+
+class ProviderNotEnabledError(ValidationError):
+    error_code = "provider_not_enabled"
+    message = "Este meio de pagamento não está disponível nesta loja."
+
+
+class PaymentNotCancellableError(ConflictError):
+    error_code = "payment_not_cancellable"
+    message = "Este pagamento já foi concluído e não pode ser cancelado por aqui."
+
+
+class PayloadTooLargeError(DomainError):
+    status_code = 413
+    error_code = "payload_too_large"
+    message = "Corpo da requisição grande demais."

@@ -16,6 +16,26 @@ from typing import Any, Literal, Protocol
 PaymentMethod = Literal["pix", "card", "link"]
 
 
+class ProviderError(Exception):
+    """A provider call that failed. `definitive` means the provider refused the request (bad
+    card token, invalid document): nothing was created and retrying the same request will not
+    help. Anything else (network, timeout, 5xx) leaves the outcome unknown — the payment stays
+    pending and reconciliation finds out."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None = None,
+        code: str | None = None,
+        definitive: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.code = code
+        self.definitive = definitive
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderCredentials:
     secrets: Mapping[str, str]  # decrypted, never logged

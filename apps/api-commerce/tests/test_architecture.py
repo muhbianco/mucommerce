@@ -4,6 +4,9 @@
   `OrderService.place`: every order — storefront, panel, agents — goes through the same gate.
 - An `InventoryReservation` is built only in `ReservationService`, which keeps reserved_milli
   and the reservations in step under the balance lock.
+- Money-moving provider calls (`create_charge`, `fetch_status`, `cancel` on a provider) happen
+  only in `PaymentService`, whose round trips commit first and lock after: no transaction or
+  lock is ever held while a payment provider answers.
 """
 
 from __future__ import annotations
@@ -67,4 +70,22 @@ def test_only_the_reservation_service_builds_reservations() -> None:
         if path.relative_to(APP).as_posix() != "inventory/reservations.py"
         or scope[:1] != ["ReservationService"]
     ]
+    assert not offenders, offenders
+
+
+def test_only_the_payment_service_calls_payment_providers() -> None:
+    offenders = []
+    for path, tree, _ in _sources():
+        rel = path.relative_to(APP).as_posix()
+        if rel.startswith("payments/providers/"):
+            continue
+        for name in ("create_charge", "fetch_status"):
+            for _call, scope in _calls(tree, name):
+                if rel != "payments/service.py" or scope[:1] != ["PaymentService"]:
+                    offenders.append(f"{rel}: {name} in {'.'.join(scope)}")
+        for call, scope in _calls(tree, "cancel"):
+            receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+            outside = rel != "payments/service.py" or scope[:1] != ["PaymentService"]
+            if isinstance(receiver, ast.Name) and receiver.id == "provider" and outside:
+                offenders.append(f"{rel}: provider.cancel in {'.'.join(scope)}")
     assert not offenders, offenders

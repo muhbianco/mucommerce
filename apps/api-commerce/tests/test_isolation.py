@@ -20,6 +20,7 @@ from app.api.deps import (
     CUSTOMER_GUARD_ATTR,
     PLATFORM_GUARD_ATTR,
     TENANT_GUARD_ATTR,
+    WEBHOOK_GUARD_ATTR,
 )
 from app.api.v1.router import ENDPOINT_ROUTERS
 from app.core.exceptions import TenantContextMissingError, TenantMismatchError
@@ -254,6 +255,7 @@ def _guards(route: APIRoute) -> set[str]:
             CATALOG_ACCESS_GUARD_ATTR,
             CHECKOUT_GUARD_ATTR,
             CUSTOMER_GUARD_ATTR,
+            WEBHOOK_GUARD_ATTR,
         ):
             if getattr(dependency.call, attr, False):
                 found.add(attr)
@@ -295,6 +297,15 @@ def test_every_cart_and_checkout_route_requires_the_checkout_guard() -> None:
     assert routes
     unguarded = [
         f"{sorted(r.methods)} {r.path}" for r in routes if CHECKOUT_GUARD_ATTR not in _guards(r)
+    ]
+    assert not unguarded, unguarded
+
+
+def test_every_webhook_route_takes_the_store_from_its_url_key() -> None:
+    routes = [r for r in V1_ROUTES if r.path.startswith("/webhooks/")]
+    assert routes
+    unguarded = [
+        f"{sorted(r.methods)} {r.path}" for r in routes if WEBHOOK_GUARD_ATTR not in _guards(r)
     ]
     assert not unguarded, unguarded
 

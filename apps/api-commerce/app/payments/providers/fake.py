@@ -1,7 +1,7 @@
 """A payment provider that lives in memory, for tests and the E2E suite (never in production:
 the settings refuse `fake` there).
 
-Pix charges wait for `settle(provider_payment_id, status)`; a card with token "approve" is
+Pix charges wait for `settle(provider_payment_id, status)`; a card with token "approve-card" is
 approved at once, any other token is rejected. Webhooks are signed with HMAC-SHA256 of the raw
 body (`x-fake-signature`), keyed by PAYMENTS_FAKE_WEBHOOK_SECRET.
 """
@@ -31,7 +31,7 @@ from app.payments.provider import (
 )
 
 # A card "token" the fake approves (any other is rejected); not a secret.
-APPROVE_TOKEN = "approve"  # noqa: S105
+APPROVE_TOKEN = "approve-card"  # noqa: S105
 _LEDGER: dict[str, ChargeResult] = {}
 _BY_REFERENCE: dict[str, str] = {}
 # A 1x1 transparent PNG: enough for the page to show "the QR code".

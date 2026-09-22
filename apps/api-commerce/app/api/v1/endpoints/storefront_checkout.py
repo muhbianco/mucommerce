@@ -1,4 +1,4 @@
-"""Checkout (stage E): turn the reviewed cart into an order.
+"""Checkout (stage E): turn the reviewed cart into an order, then pay it.
 
 `POST /checkout/orders` needs an Idempotency-Key bound to the customer (a retry returns the same
 order; another customer replaying the key gets 422). Everything else — prices, stock, delivery,
@@ -19,6 +19,16 @@ from app.orders.commands import CartSource, Contact, PlaceOrder
 from app.orders.models import Order, OrderStatusHistory
 from app.orders.schemas import OrderRead, PlaceOrderIn, order_read
 from app.orders.service import OrderService
+from app.orders.state_machine import OrderStatus
+from app.payments.models import ACTIVE_PAYMENT_STATUSES
+from app.payments.schemas import (
+    OrderPaymentRead,
+    PaymentCreateIn,
+    PaymentRead,
+    order_payment_read,
+    payment_read,
+)
+from app.payments.service import PaymentService
 from app.tenancy.service import Actor
 
 router = APIRouter(tags=["Carrinho e checkout"])
@@ -105,3 +115,94 @@ async def get_order(
     service = OrderService(session, shopper.tenant, customer_actor(request, customer_id))
     order = await service.get_for_customer(customer_id, order_id)
     return await customer_order_read(session, service, order)
+
+
+# ------------------------------------------------------------------------------- payments
+PaymentId = Annotated[str, Path(min_length=36, max_length=36)]
+
+
+async def _order_payment(service: PaymentService, order: Order) -> OrderPaymentRead:
+    awaiting = order.status == OrderStatus.AWAITING_PAYMENT
+    payment = await service.latest_for_order(order.id)
+    options = await service.options() if awaiting else []
+    return order_payment_read(order, payment, options, awaiting=awaiting)
+
+
+@router.get(
+    "/checkout/orders/{order_id}/payment",
+    response_model=OrderPaymentRead,
+    summary="Como está o pagamento do pedido (a página consulta isto enquanto espera)",
+    dependencies=[Depends(rate_limit("checkout_status", 60, 60, key_fn=customer_rate_key))],
+)
+async def order_payment(
+    request: Request, session: DbSession, shopper: CheckoutShopper, order_id: OrderId
+) -> OrderPaymentRead:
+    customer_id = shopper.viewer.customer_id
+    actor = customer_actor(request, customer_id)
+    order = await OrderService(session, shopper.tenant, actor).get_for_customer(
+        customer_id, order_id
+    )
+    return await _order_payment(PaymentService(session, shopper.tenant, actor), order)
+
+
+@router.post(
+    "/checkout/orders/{order_id}/payments",
+    response_model=PaymentRead,
+    status_code=status.HTTP_201_CREATED,
+    summary="Paga o pedido (Pix, cartão ou link, conforme os meios da loja)",
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(rate_limit("checkout_pay", 10, 60, key_fn=customer_rate_key)),
+    ],
+)
+@idempotent("checkout.payment", status_code=201, principal=_customer)
+async def create_payment(
+    request: Request,
+    session: DbSession,
+    shopper: CheckoutShopper,
+    order_id: OrderId,
+    body: PaymentCreateIn,
+) -> PaymentRead:
+    customer_id = shopper.viewer.customer_id
+    service = PaymentService(session, shopper.tenant, customer_actor(request, customer_id))
+    payment = await service.create(
+        order_id, customer_id, body.command(), request.headers[IDEMPOTENCY_HEADER].strip()
+    )
+    return payment_read(payment)
+
+
+@router.post(
+    "/checkout/payments/{payment_id}/check",
+    response_model=PaymentRead,
+    summary='"Já paguei": pergunta ao provedor agora, sem esperar o aviso dele',
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(rate_limit("checkout_check", 6, 60, key_fn=customer_rate_key)),
+    ],
+)
+async def check_payment(
+    request: Request, session: DbSession, shopper: CheckoutShopper, payment_id: PaymentId
+) -> PaymentRead:
+    customer_id = shopper.viewer.customer_id
+    service = PaymentService(session, shopper.tenant, customer_actor(request, customer_id))
+    payment = await service.get_for_customer(customer_id, payment_id)
+    if payment.status in ACTIVE_PAYMENT_STATUSES:
+        await service.sync(payment.id, source="customer_check")
+    return payment_read(await service.get_for_customer(customer_id, payment_id))
+
+
+@router.post(
+    "/checkout/payments/{payment_id}/cancel",
+    response_model=PaymentRead,
+    summary="Desiste deste pagamento para pagar de outro jeito (o pedido continua aberto)",
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(rate_limit("checkout_pay", 10, 60, key_fn=customer_rate_key)),
+    ],
+)
+async def cancel_payment(
+    request: Request, session: DbSession, shopper: CheckoutShopper, payment_id: PaymentId
+) -> PaymentRead:
+    customer_id = shopper.viewer.customer_id
+    service = PaymentService(session, shopper.tenant, customer_actor(request, customer_id))
+    return payment_read(await service.cancel_for_customer(customer_id, payment_id))
