@@ -51,6 +51,15 @@ Várias decisões estavam em aberto em [01-lacunas-e-decisoes](../01-lacunas-e-d
     - Acima de um limite (`refund_four_eyes_threshold_cents`), precisa de uma segunda pessoa.
 13. **O E2E não roda Celery.** O servidor de E2E monta rotas `/__e2e/*` (avançar os jobs, liquidar pagamento falso) que não existem na imagem de produção.
 
+## Notas de implementação (22/09/2026)
+
+- **Mercado Pago em `/v1/payments` (Checkout Transparente).** A página de webhooks do MP chama esse caminho de "legado" diante da API de Orders (`/v1/orders`), mas ele segue documentado e é o que o guia de envio do Card Payment Brick usa. Escolhemos o caminho conhecido; só `app/payments/providers/mercadopago.py` conhece o formato do MP, então migrar para Orders é trocar um módulo. Contrato conferido na documentação oficial em 22/09/2026 (idempotência por `X-Idempotency-Key` = id do nosso pagamento; Pix de 30 min a 30 dias; assinatura `x-signature` com o manifesto `id:…;request-id:…;ts:…;`).
+- **Webhook sem assinatura é só um aviso.** Assinatura inválida → 401 (e o painel mostra "assinatura errada"); aviso sem assinatura (a documentação não garante que o `notification_url` de cada pagamento venha assinado, e a InfinitePay não assina) é processado como qualquer aviso: consulta ao provedor com o token da loja.
+- **Uma transação do provedor paga um pagamento só.** Um id do provedor que já pertence a outro pagamento (aviso repetido ou forjado) não muda nada e gera alerta; a chave única `(provider, provider_payment_id)` é a última barreira.
+- **Nenhuma chamada ao provedor com transação aberta.** Criar, consultar, cancelar e testar credenciais fazem commit antes da chamada e travam pedido → pagamento depois; um teste arquitetural garante que só o `PaymentService` chama o provedor.
+- **Prazo com pagamento aberto.** O pedido não expira às cegas: o job consulta o provedor e espera até 5 min além do prazo (nunca além de `checkout_max_order_age_minutes`). Pix pago depois disso fica marcado como pagamento tardio (recuperação ou reembolso na S13).
+- **A verificar no teste do dono (sandbox do MP):** a lista de hosts da CSP para o Brick (script, frames, conexões) — a documentação do MP não traz a lista oficial — e se os avisos por `notification_url` chegam assinados.
+
 ## Consequências
 
 - **Configuração da loja:** ligar o checkout exige também login de clientes, meio de pagamento configurado pelo dono e pelo menos uma modalidade de entrega. O runbook da etapa E tem a ordem.

@@ -6,7 +6,7 @@ import { notFound, redirect } from "next/navigation";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { type Order, orderStatusLabel } from "@/lib/orders";
-import { type OrderPayment, paymentError } from "@/lib/payments";
+import { isPaymentErrorCode, type OrderPayment, paymentError } from "@/lib/payments";
 import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice } from "@/lib/storefront";
 
@@ -18,14 +18,6 @@ import { PaymentSection } from "./payment-section";
 export const metadata: Metadata = { title: "Pedido", robots: { index: false, follow: false } };
 
 const ID = /^[0-9a-f-]{36}$/;
-const PAYMENT_ERROR_CODES = new Set([
-  "payment_in_progress",
-  "order_not_payable",
-  "provider_not_enabled",
-  "payment_not_cancellable",
-  "rate_limited",
-  "provider_refused",
-]);
 
 function money(cents: number, currency: string): string {
   return formatPrice({ amount_cents: cents, compare_at_cents: null, promo_active: false, promo_ends_at: null, currency });
@@ -74,7 +66,7 @@ export default async function OrderPage({
       {ok === "pedido" ? <p role="status">Pedido recebido!</p> : null}
       {ok === "cancelado" ? <p role="status">Pedido cancelado.</p> : null}
       {ok === "trocar" ? <p role="status">Pagamento cancelado. Escolha outro jeito de pagar.</p> : null}
-      {erro && PAYMENT_ERROR_CODES.has(erro) ? (
+      {erro && isPaymentErrorCode(erro) ? (
         <p role="alert">{paymentError(erro)}</p>
       ) : erro === "cancel_window_closed" ? (
         <p role="alert">Este pedido não pode mais ser cancelado por aqui. Fale com a loja.</p>

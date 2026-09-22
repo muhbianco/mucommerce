@@ -125,3 +125,66 @@ export async function cancelPayment(form: FormData): Promise<void> {
   if (!ID.test(orderId) || !ID.test(paymentId)) throw new Error("bad payment id");
   await payment(orderId, "trocar", () => customerApi(`/checkout/payments/${paymentId}/cancel`, { json: {} }));
 }
+
+const CARD_TOKEN = /^[A-Za-z0-9_-]{8,256}$/;
+const CARD_METHOD = /^[a-z0-9_]{2,40}$/;
+const ISSUER = /^[0-9]{1,40}$/;
+const DOCUMENT = /^(?:[0-9]{11}|[0-9]{14})$/;
+
+/**
+ * Pay with a card tokenized in the browser by the provider's SDK (Mercado Pago Card Brick):
+ * only the single-use token and its metadata come here. Called from the client component, so it
+ * returns the query string for the order page instead of redirecting.
+ */
+export async function payWithCard(input: {
+  orderId: string;
+  idempotencyKey: string;
+  token: string;
+  paymentMethodId: string;
+  issuerId: string | null;
+  installments: number;
+  identificationType: string | null;
+  identificationNumber: string | null;
+}): Promise<string> {
+  const document = (input.identificationNumber ?? "").replace(/\D/g, "");
+  const type = input.identificationType === "CNPJ" ? "CNPJ" : "CPF";
+  if (
+    !ID.test(input.orderId) ||
+    !KEY.test(input.idempotencyKey) ||
+    !CARD_TOKEN.test(input.token) ||
+    !CARD_METHOD.test(input.paymentMethodId) ||
+    (input.issuerId !== null && input.issuerId !== "" && !ISSUER.test(String(input.issuerId))) ||
+    !Number.isInteger(input.installments) ||
+    input.installments < 1 ||
+    input.installments > 12
+  ) {
+    return "erro=validation_error";
+  }
+  const back = `/conta/pedidos/${input.orderId}`;
+  try {
+    const created = await customerApi<{ status: string; failure_code: string | null }>(
+      `/checkout/orders/${input.orderId}/payments`,
+      {
+        json: {
+          provider: "mercadopago",
+          method: "card",
+          card: {
+            token: input.token,
+            payment_method_id: input.paymentMethodId,
+            issuer_id: input.issuerId ? String(input.issuerId) : null,
+            installments: input.installments,
+          },
+          payer_identification: DOCUMENT.test(document) ? { type, number: document } : null,
+        },
+        headers: { "Idempotency-Key": input.idempotencyKey },
+        timeoutMs: 30000,
+      },
+    );
+    if (created.status === "rejected") return `erro=${encodeURIComponent(created.failure_code ?? "provider_refused")}`;
+    return "ok=pagamento";
+  } catch (error) {
+    if (!(error instanceof CustomerApiError)) throw error;
+    if (error.status === 401) redirect(`/entrar?next=${encodeURIComponent(back)}`);
+    return `erro=${encodeURIComponent(error.code)}`;
+  }
+}

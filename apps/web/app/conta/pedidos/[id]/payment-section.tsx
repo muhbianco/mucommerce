@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  cardOption,
   METHOD_LABEL,
   type OrderPayment,
   PAYMENT_STATUS_LABEL,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/payments";
 
 import { cancelPayment, checkPayment, startPayment } from "../../actions";
+import { CardBrick } from "./card-brick";
 import { CopyButton } from "./copy-button";
 import { PaymentPoller } from "./payment-poller";
 
@@ -27,6 +29,7 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
           .map((method) => ({ provider: option.provider, method })),
       )
     : [];
+  const card = cardOption(state);
 
   return (
     <section aria-labelledby="pagamento">
@@ -99,7 +102,21 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
             </form>
           ))}
         </div>
-      ) : state.can_pay ? (
+      ) : null}
+      {card ? (
+        <details>
+          <summary>{METHOD_LABEL.card}</summary>
+          <CardBrick
+            orderId={state.order_id}
+            publicKey={card.publicKey}
+            amountCents={state.total_cents}
+            maxInstallments={card.maxInstallments}
+            payerEmail={state.payer_email}
+            idempotencyKey={randomUUID()}
+          />
+        </details>
+      ) : null}
+      {state.can_pay && !choices.length && !card ? (
         <p className="muted">Esta loja ainda não recebe pagamentos online. Fale com a loja para combinar.</p>
       ) : null}
     </section>

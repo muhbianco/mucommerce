@@ -16,9 +16,13 @@ from app.core.config import settings
 from app.payments.models import TenantPaymentConfig
 from app.payments.provider import PaymentMethod, PaymentProvider
 from app.payments.providers.fake import FakeProvider
+from app.payments.providers.mercadopago import MercadoPagoProvider
 from app.tenancy.context import TenantContext
 
-_PROVIDERS: dict[str, PaymentProvider] = {"fake": FakeProvider()}
+_PROVIDERS: dict[str, PaymentProvider] = {
+    "fake": FakeProvider(),
+    "mercadopago": MercadoPagoProvider(),
+}
 
 
 def register(provider: PaymentProvider) -> None:

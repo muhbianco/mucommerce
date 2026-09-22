@@ -135,6 +135,7 @@ async def test_pix_paid_by_webhook_confirms_the_order_and_sells_the_stock(
     tenant, me, order, variant = paying
     before = await state(client, me, order["id"])
     assert before["can_pay"] and before["payment"] is None
+    assert before["payer_email"].endswith("@cliente.test")  # the card form needs it
     assert [(o["provider"], o["methods"]) for o in before["options"]] == [("fake", ["pix", "card"])]
 
     key = str(uuid.uuid4())
@@ -149,7 +150,7 @@ async def test_pix_paid_by_webhook_confirms_the_order_and_sells_the_stock(
     second = await pay(client, me, order["id"])
     assert second.status_code == 409 and second.json()["error"]["code"] == "payment_in_progress"
     waiting = await state(client, me, order["id"])
-    assert not waiting["can_pay"] and waiting["options"] == []
+    assert not waiting["can_pay"] and waiting["options"] == [] and waiting["payer_email"] is None
     assert waiting["payment"]["id"] == payment["id"]
 
     ext_id = await provider_id(session_factory, payment["id"])

@@ -60,7 +60,7 @@ from app.payments.provider import (
     ProviderRef,
 )
 from app.payments.status import CLOSED, can_transition
-from app.tenancy.context import TenantContext
+from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
 from app.tenancy.service import Actor
 
 logger = get_logger(__name__)
@@ -250,6 +250,16 @@ class PaymentService:
         """Bring the payment to the provider's truth. Returns whether its status changed.
         The caller holds the order lock (order → payment, the global lock order)."""
         if result.provider_payment_id and not payment.provider_payment_id:
+            if await self._provider_id_taken(payment, result.provider_payment_id):
+                # One provider transaction pays one payment: a hint pointing at a transaction
+                # that already paid something else (replayed or forged) changes nothing.
+                logger.error(
+                    "Provider payment id already used by another payment",
+                    extra={"payment_id": payment.id, "provider": payment.provider},
+                )
+                self._event(payment, source, None, None, detail={"provider_id_conflict": True})
+                await self.session.flush()
+                return False
             payment.provider_payment_id = result.provider_payment_id
         if result.pix is not None:
             payment.pix_copy_paste = result.pix.copy_paste
@@ -562,6 +572,17 @@ class PaymentService:
                 ),
             },
         )
+
+    async def _provider_id_taken(self, payment: Payment, provider_payment_id: str) -> bool:
+        """Across stores on purpose (the unique key is global): answers only yes or no."""
+        other = await self.session.scalar(
+            select(Payment.id)
+            .where(Payment.provider == payment.provider)
+            .where(Payment.provider_payment_id == provider_payment_id)
+            .where(Payment.id != payment.id)
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+        return other is not None
 
     async def _lock_order(self, order_id: str) -> Order:
         order = await self.session.scalar(

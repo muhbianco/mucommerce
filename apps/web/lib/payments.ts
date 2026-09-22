@@ -37,6 +37,7 @@ export interface OrderPayment {
   can_pay: boolean;
   payment: Payment | null;
   options: PaymentOption[];
+  payer_email: string | null;
 }
 
 /** What the poller compares: a change in either means the page should re-render. */
@@ -45,7 +46,7 @@ export interface PaymentSnapshot {
   payment_status: string | null;
 }
 
-// Methods the web can start today; card needs the provider's browser SDK (stage E, S11).
+// Methods started with a plain button; card goes through the provider's browser SDK (Brick).
 export const WEB_METHODS = ["pix", "link"] as const;
 
 export const METHOD_LABEL: Record<string, string> = {
@@ -77,9 +78,37 @@ export const PAYMENT_ERRORS: Record<string, string> = {
   provider_refused: "O meio de pagamento recusou a cobrança. Tente de novo ou use outro meio.",
 };
 
+// Card refusals (Mercado Pago `status_detail`): what the customer can do about each.
+const CARD_REFUSALS: Record<string, string> = {
+  cc_rejected_insufficient_amount: "O cartão não tem limite suficiente. Tente outro cartão ou pague com Pix.",
+  cc_rejected_call_for_authorize: "O banco pediu autorização. Fale com o banco do cartão e tente de novo.",
+  cc_rejected_card_disabled: "O cartão está desativado. Fale com o banco ou use outro cartão.",
+  cc_rejected_invalid_installments: "O cartão não aceita esse número de parcelas.",
+  cc_rejected_duplicated_payment: "Um pagamento igual acabou de ser feito. Confira antes de tentar de novo.",
+  cc_rejected_max_attempts: "Muitas tentativas com este cartão. Use outro cartão ou pague com Pix.",
+};
+
 export function paymentError(code: string | null | undefined): string {
   if (!code) return "Não foi possível concluir o pagamento. Tente de novo.";
-  return PAYMENT_ERRORS[code] ?? "Não foi possível concluir o pagamento. Tente de novo.";
+  if (PAYMENT_ERRORS[code]) return PAYMENT_ERRORS[code];
+  if (CARD_REFUSALS[code]) return CARD_REFUSALS[code];
+  if (code.startsWith("cc_rejected_bad_filled")) return "Confira os dados do cartão e tente de novo.";
+  if (code.startsWith("cc_rejected") || code.startsWith("rejected_")) {
+    return "O pagamento foi recusado. Tente outro cartão ou pague com Pix.";
+  }
+  return "Não foi possível concluir o pagamento. Tente de novo.";
+}
+
+/** Error codes the order page explains with `paymentError` (the rest are order errors). */
+export function isPaymentErrorCode(code: string): boolean {
+  return (
+    code in PAYMENT_ERRORS ||
+    code in CARD_REFUSALS ||
+    code.startsWith("cc_rejected") ||
+    code.startsWith("rejected_") ||
+    code.startsWith("mp_") ||
+    code === "validation_error"
+  );
 }
 
 /** Payment statuses in which the page keeps checking by itself. */
@@ -119,4 +148,13 @@ export function safeCheckoutUrl(url: string | null): string | null {
     return null;
   }
   return null;
+}
+
+/** The Mercado Pago option that can take a card here (the Brick needs the store's public key). */
+export function cardOption(state: OrderPayment): { publicKey: string; maxInstallments: number } | null {
+  if (!state.can_pay) return null;
+  const option = state.options.find((o) => o.provider === "mercadopago" && o.methods.includes("card"));
+  const publicKey = option?.public_config.public_key;
+  if (!option || typeof publicKey !== "string" || !/^[A-Za-z0-9_-]{8,200}$/.test(publicKey)) return null;
+  return { publicKey, maxInstallments: Math.min(Math.max(option.installments_max, 1), 12) };
 }

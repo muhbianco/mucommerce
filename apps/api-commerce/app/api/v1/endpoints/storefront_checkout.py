@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.api.deps import CheckoutShopper, DbSession, customer_rate_key, require_same_origin
 from app.audit.idempotency import IDEMPOTENCY_HEADER, idempotent
 from app.core.rate_limit import client_ip, rate_limit
+from app.identity.models import Customer
 from app.orders.commands import CartSource, Contact, PlaceOrder
 from app.orders.models import Order, OrderStatusHistory
 from app.orders.schemas import OrderRead, PlaceOrderIn, order_read
@@ -125,7 +126,11 @@ async def _order_payment(service: PaymentService, order: Order) -> OrderPaymentR
     awaiting = order.status == OrderStatus.AWAITING_PAYMENT
     payment = await service.latest_for_order(order.id)
     options = await service.options() if awaiting else []
-    return order_payment_read(order, payment, options, awaiting=awaiting)
+    email = None
+    if any("card" in o.methods for o in options):
+        customer = await service.session.get(Customer, order.customer_id)
+        email = customer.email_normalized if customer else None
+    return order_payment_read(order, payment, options, awaiting=awaiting, payer_email=email)
 
 
 @router.get(

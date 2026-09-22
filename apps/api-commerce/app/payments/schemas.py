@@ -99,6 +99,8 @@ class OrderPaymentRead(BaseModel):
     can_pay: bool
     payment: PaymentRead | None
     options: list[PaymentOptionRead]
+    # The customer's own e-mail, only while a card can be offered (the card form needs it).
+    payer_email: str | None = None
 
 
 def payment_read(payment: Payment) -> PaymentRead:
@@ -129,7 +131,12 @@ def payment_read(payment: Payment) -> PaymentRead:
 
 
 def order_payment_read(
-    order: Order, payment: Payment | None, options: Sequence[PaymentOption], *, awaiting: bool
+    order: Order,
+    payment: Payment | None,
+    options: Sequence[PaymentOption],
+    *,
+    awaiting: bool,
+    payer_email: str | None = None,
 ) -> OrderPaymentRead:
     active = payment is not None and payment.active_order_id == order.id
     can_pay = awaiting and not active
@@ -155,4 +162,5 @@ def order_payment_read(
         ]
         if can_pay
         else [],
+        payer_email=payer_email if can_pay and any("card" in o.methods for o in options) else None,
     )
