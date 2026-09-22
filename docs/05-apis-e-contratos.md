@@ -38,7 +38,15 @@ Base: `https://<host>/api/v1` (também montado em `/api/latest`, como na `api-ag
 | GET | `/storefront/catalog/products/{slug}` | acesso** | — | produto completo, variantes, modificadores, `availability` por variante, SEO | — | — | 404 |
 | GET | `/storefront/policies/{kind}` | público | — | documento legal vigente | — | — | |
 
-`*` visível na landing mesmo em `whitelist` (flag `events.public_listing`). `**` depende de `access_mode`: `public` → livre; `login_required` → sessão; `whitelist` → sessão + `customer_tenant_access.approved`.
+> **Implementado na etapa D** (onde difere da tabela acima):
+> - **Eventos** ficam em `/storefront/catalog/events` e `/storefront/catalog/events/{slug}`, atrás do mesmo `require_catalog_access` do catálogo e da flag `events` (`404` quando desligada). Não existe `events.public_listing`: evento segue o `access_mode` da loja.
+>   - Lista: eventos ainda não terminados, por `(starts_at, id)` com cursor, ≤48. Cada card traz `availability ∈ on_sale|upcoming|sold_out|ended|unavailable|postponed|cancelled` e `price_from` (lote mais barato à venda, senão o mais barato).
+>   - Página: lotes com `state` e janela de vendas, **sem** quantidades. Um evento online sai só como `online: true`; o link vai apenas para quem compra.
+> - `GET /storefront/catalog/tags`: só tags com produto publicado. `?tag=` em `/products` (`404` se a tag não existe).
+> - Detalhe do produto: `kind`, `tags`, `options [{name, values}]`, `modifier_groups` (só adicionais ativos, `price_cents`), e `option_values` por variante. `availability` ganha `unavailable` (produto ou variante pausados).
+> - `/catalog/sitemap` ganha `events`; um ingresso sai só ali, não em `products`.
+
+`*` (desenho original) visível na landing mesmo em `whitelist` (flag `events.public_listing`); não implementado, ver acima. `**` depende de `access_mode`: `public` → livre; `login_required` → sessão; `whitelist` → sessão + `customer_tenant_access.approved`.
 
 ## 2. Autenticação Google (cliente) — implementado na etapa A
 
@@ -196,6 +204,34 @@ Prefixo `/admin/tenants/{t}`; auth `admin_jwt`; escopos entre parênteses.
 | GET | `/inventory/movements` | `inventory:read` | `?item_id&from&to&type` | — | |
 | POST | `/inventory/adjustments` | `inventory:adjust` | `{items:[{item_type,item_id,qty_delta|qty_counted,reason,note}]}` → movimentos `adjustment|count|loss` | **obrigatório** | `inventory.adjusted`, `inventory.low_stock` |
 | GET/POST/PATCH | `/events[/ {id}]`, `/events/{id}/publish|close|cancel`, `/events/{id}/products` | `events:*` | | — | `event.published…` |
+
+> **Catálogo completo (etapa D, migrations `0012`–`0016`)**:
+>
+> **Pausa** (`catalog:publish`):
+> - `POST /products/{id}/pause {reason?}` e `/resume`; o mesmo em `/products/{id}/variants/{vid}/pause|resume`.
+> - Pausar só a partir de `active` (`409 invalid_transition`, `details.code=not_published`). Repetir não faz nada: sem audit, sem evento.
+> - Outbox `product.paused|resumed|variant_paused|variant_resumed`, com `reason` e `actor`.
+>
+> **Tags**:
+> - `tags: [nomes]` em `POST/PATCH /products`. O PATCH substitui a lista inteira; tag nova é criada pelo nome.
+> - `GET /tags` lista as da loja (sugestões).
+>
+> **Opções** (`catalog:write`):
+> - `PUT /products/{id}/options {options:[{name, values}]}` regenera a matriz com lock na linha do produto. `[]` volta a ter uma variante só.
+> - Ingresso não tem opções (`409 ticket_uses_lots`).
+>
+> **Adicionais** (`catalog:write`):
+> - `PUT /products/{id}/modifiers {groups:[{id?, name, min_select, max_select, modifiers:[{id?, name, price_cents, active}]}]}`.
+> - Um id enviado que não existe → `422`. Sem id, vale o item de mesmo nome.
+>
+> **Eventos** (`catalog:read|write`, flags `catalog`+`events`, tag OpenAPI "Painel — Eventos"):
+> - `GET|PUT /products/{id}/event`: `PUT` substitui o evento inteiro. Só produto `kind=ticket` (`409 not_a_ticket`); a capacidade não pode ficar abaixo dos lotes (`409 capacity_below_lots`).
+> - `POST /products/{id}/event/lots` (201), `PATCH|DELETE /products/{id}/event/lots/{lot}`.
+>   - A quantidade vira estoque via `InventoryService.adjust`: `count` ao criar, `adjustment` pela diferença ao mudar.
+>   - `409 over_capacity`; `409 insufficient_stock` ao baixar abaixo do vendido; `409 sold` ao remover lote com venda.
+> - Audit `event.created|updated|lot_created|lot_updated|lot_removed`; outbox `product.updated`.
+>
+> **Publicar ingresso:** exige evento com lote (`missing: ["event"]`) no lugar de preço base > 0. Produto com evento não muda de tipo (`409 has_event`), e produto com opções não vira ingresso (`409 has_options`).
 
 ## 8. Matéria-prima, receitas e produção (fase 4)
 

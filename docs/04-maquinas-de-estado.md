@@ -111,3 +111,16 @@ Consumo real ≠ previsto é registrado por linha (`planned_qty`, `actual_qty`, 
 ## 8. Acesso do cliente (`customer_tenant_access.status`)
 
 `pending → approved` (operator no painel; Chatwoot `liberar_loja=true`; regra automática), `approved → revoked` (operator; Chatwoot `false`), `pending → blocked` (operator), `blocked/revoked → approved` (operator). Todo movimento gera `customer.access.*`, `audit_log` e sincroniza o atributo no Chatwoot com proteção de eco (não reenvia se o valor remoto já é igual; ignora webhook cujo valor é igual ao estado atual).
+
+## 9. Produto (`products.status`) e lote de evento — etapa D
+
+`draft → active` (publicar) · `active ⇄ paused` (pausar/retomar, com motivo) · `active|paused → inactive` (tirar da vitrine; limpa a pausa) · `inactive → active` (publicar de novo) · qualquer um → `archived`.
+
+- **Na vitrine** aparecem `active` e `paused`; só `active` vende. Um código que esqueça `paused` esconde o produto em vez de vendê-lo (falha fechada).
+- **Variante**: `active ⇄ paused`, `active|paused → inactive`. Um produto publicado precisa de ao menos uma variante `active` ou `paused`.
+- **Lote de evento** (`lot_state`, função pura usada pela vitrine e, na etapa E, pelo checkout):
+  - `unavailable`: evento não `scheduled`, produto não `active` ou variante não `active`;
+  - `ended`: agora ≥ o menor entre o fim das vendas do lote e o fim do evento (ou o início, sem fim);
+  - `upcoming`: antes do início das vendas do lote;
+  - `sold_out`: sem saldo;
+  - senão `on_sale`.

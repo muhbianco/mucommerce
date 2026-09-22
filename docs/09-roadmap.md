@@ -12,13 +12,18 @@ O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, u
 | A | Clientes da loja: Google OIDC próprio, sessões, whitelist, aprovação no painel, OTP via `api-agents`, LGPD, loja suspensa → 503, tema por tenant | F1 fatia 2 |
 | B | Chatwoot: provisionamento pelo admin do site, `liberar_loja` nos dois sentidos, reconciliação, logos | F1 fatia 3 |
 | C | Domínios próprios: `providers.http`, verificação e ativação, redirects, subdomínios de plataforma | F1 fatia 4 |
-| D | Catálogo completo: eventos, variantes/opções/modificadores, tags, estado `paused` | F1 fatia 5 |
+| D | Catálogo completo: eventos, variantes/opções/modificadores, tags, estado `paused` ([runbook](runbooks/etapa-d-catalogo.md)) | F1 fatia 5 |
 | E | Carrinho, `OrderService.place`, reservas, MP + InfinitePay, e-mails, pedidos, cupons | F2 |
 | F | Chatwoot operacional + Dashboard App | F3 |
 | G | Produção, insumos, custos | F4 |
 | H | Rede de inteligência: assinatura multi-instância, modos "agente" e "expor", WuzAPI isolado no número do cliente ([ADR 0010](adr/0010-rede-de-agentes.md)) | F5 (substituída) |
 | I | MP Connect, frete, fiscal, analytics, DNS-01/CDN, LGPD self-service, "Loja online" como serviço | F6 |
 | Z | Teste do dono → correções → onboarding da Lunares e dos tenants externos | — |
+
+**Estado da etapa D (22/09/2026)**: pronta na branch `feat/etapa-d-catalogo` (migrations `0012`–`0016`, CI verde em MariaDB), com o switch de eventos na branch `feat/etapa-d-eventos` do site. Aguarda o pedido de deploy. Ficaram fora de propósito:
+- dono de mídia `event` (o evento usa as imagens do produto);
+- `event_products` (o ingresso **é** o produto, e os lotes são as variantes);
+- a flag `events.public_listing` (evento segue o `access_mode`).
 
 ## Fase 0 — Fundação
 

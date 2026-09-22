@@ -101,6 +101,9 @@ case "$code" in
     else
       report ok "produto JSON-LD" "sem produto publicado; pulado"
     fi
+    # Events: 200 with the store's `events` module on, 404 with it off; never a 5xx.
+    expect_status "loja /eventos" "https://$STORE/eventos" "200 404"
+    expect_status "api eventos" "https://$STORE/api/v1/storefront/catalog/events?limit=1" "200 404"
     ;;
   401)
     report ok "catálogo whitelist" "401 (loja não pública)"
