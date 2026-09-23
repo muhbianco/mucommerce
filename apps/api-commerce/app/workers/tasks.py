@@ -12,6 +12,7 @@ from app.identity.repository import AdminUserRepository
 from app.inventory.service import audit_ledger, reserved_mismatches
 from app.notifications.jobs import purge_notification_bodies
 from app.payments.webhooks import purge_inbox
+from app.provisioning.service import StoreProvisioningService
 from app.tenancy.dns import DnsVerifier
 from app.tenancy.models import DomainStatus
 from app.tenancy.repository import TenantRepository
@@ -142,3 +143,16 @@ def audit_inventory_ledger() -> int:
     if held:
         logger.error("Reserved stock differs from active reservations", extra={"count": held})
     return mismatches + held
+
+
+@celery_app.task(name="app.workers.tasks.sweep_store_reservations")
+def sweep_store_reservations() -> int:
+    """Slugs held by a purchase the catalog never came back to activate."""
+
+    async def _run(session: AsyncSession) -> int:
+        released = await StoreProvisioningService(session).sweep_orphan_reservations()
+        if released:
+            logger.info("Store reservations released", extra={"count": len(released)})
+        return len(released)
+
+    return run_async(with_session(_run))

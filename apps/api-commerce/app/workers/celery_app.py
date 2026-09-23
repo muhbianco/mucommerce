@@ -67,6 +67,10 @@ celery_app.conf.update(
             "schedule": 30.0,
         },
         "verify-domains": {"task": "app.workers.tasks.verify_domains", "schedule": 300.0},
+        "sweep-store-reservations": {
+            "task": "app.workers.tasks.sweep_store_reservations",
+            "schedule": 3600.0,
+        },
         "recheck-active-domains": {
             "task": "app.workers.tasks.recheck_active_domains",
             "schedule": 1800.0,

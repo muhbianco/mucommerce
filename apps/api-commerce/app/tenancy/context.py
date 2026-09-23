@@ -26,6 +26,9 @@ class TenantContext:
     host: str | None = None
     features: dict[str, bool] = field(default_factory=dict)
     settings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # ISO-8601 (naive UTC) so the value survives the JSON host cache. While it is in the future,
+    # a suspended store keeps serving: the catalog gives the owner a few days to top up.
+    billing_grace_until: str | None = None
 
     def feature(self, key: str) -> bool:
         return bool(self.features.get(key, False))

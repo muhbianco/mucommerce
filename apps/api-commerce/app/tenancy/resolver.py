@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from app.core.cache import TtlCache
 from app.core.config import settings
 from app.core.exceptions import TenantNotFoundError, TenantSuspendedError
 from app.core.hosts import InvalidHostnameError, normalize_hostname
+from app.models.base import utcnow
 from app.tenancy.context import TenantContext, bind_session_tenant
 from app.tenancy.models import DomainPurpose, DomainStatus, Tenant, TenantStatus
 from app.tenancy.repository import TenantRepository
@@ -30,6 +32,9 @@ def _context_from_row(
         host=host,
         features=dict(features),
         settings=dict(tenant_settings),
+        billing_grace_until=(
+            tenant.billing_grace_until.isoformat() if tenant.billing_grace_until else None
+        ),
     )
 
 
@@ -45,11 +50,23 @@ def _context_to_cache(context: TenantContext) -> dict[str, Any]:
         "currency": context.currency,
         "features": context.features,
         "settings": context.settings,
+        "billing_grace_until": context.billing_grace_until,
     }
 
 
 def _context_from_cache(data: dict[str, Any], host: str) -> TenantContext:
     return TenantContext(host=host, **data)
+
+
+def in_billing_grace(context: TenantContext) -> bool:
+    """Suspended for billing, but still inside the deadline the catalog gave the owner."""
+    if not context.billing_grace_until:
+        return False
+    try:
+        deadline = datetime.fromisoformat(context.billing_grace_until)
+    except ValueError:  # a value we did not write; treat the store as suspended
+        return False
+    return utcnow() < deadline
 
 
 class TenantResolver:
@@ -84,7 +101,7 @@ class TenantResolver:
                 host, _context_to_cache(context), settings.tenant_cache_ttl_seconds
             )
 
-        if context.status == TenantStatus.SUSPENDED:
+        if context.status == TenantStatus.SUSPENDED and not in_billing_grace(context):
             raise TenantSuspendedError()
         bind_session_tenant(self.session, context.id)
         return context

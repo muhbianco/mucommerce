@@ -88,6 +88,11 @@ class Tenant(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="America/Sao_Paulo")
     locale: Mapped[str] = mapped_column(String(10), nullable=False, default="pt-BR")
     activated_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    # The api-agents subscription that pays for this store (`<service_code>:<user_id>`, stable
+    # across retries of one purchase). Unique: a retry adopts the store it already created.
+    subscription_ref: Mapped[str | None] = mapped_column(String(100), unique=True)
+    # While set and in the future, a suspended store still serves its storefront (grace period).
+    billing_grace_until: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
     domains: Mapped[list[TenantDomain]] = relationship(
         back_populates="tenant", lazy="selectin", cascade="all, delete-orphan"
