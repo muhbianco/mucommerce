@@ -172,6 +172,21 @@ async def test_suspension_serves_the_storefront_until_the_grace_deadline(
     assert down.status_code == 503
     assert down.json()["error"]["code"] == "tenant_suspended"
 
+    # O painel do lojista precisa saber o prazo para avisar antes de a vitrine cair.
+    async with session_factory() as session:
+        tenant = (
+            (
+                await session.execute(
+                    select(Tenant)
+                    .where(Tenant.subscription_ref == body["subscription_ref"])
+                    .execution_options(**{CROSS_TENANT_OPTION: True})
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert tenant.billing_grace_until is not None
+
     back = await client.post(
         f"{BASE}/{body['subscription_ref']}/billing", json={"state": "active"}, headers=AGENTS
     )

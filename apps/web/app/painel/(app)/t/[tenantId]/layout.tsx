@@ -7,6 +7,32 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import styles from "../../../panel.module.css";
 
+/** Assinatura em atraso: o lojista precisa saber antes de a vitrine sair do ar. */
+function BillingNotice({ status, graceUntil }: { status: string; graceUntil: string | null }) {
+  if (status !== "suspended") return null;
+  const deadline = graceUntil ? new Date(`${graceUntil}Z`) : null;
+  const inGrace = deadline !== null && deadline.getTime() > Date.now();
+  const when = deadline
+    ? new Intl.DateTimeFormat("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone: "America/Sao_Paulo",
+      }).format(deadline)
+    : null;
+  return (
+    <p className={styles.error}>
+      {inGrace
+        ? `Assinatura em atraso: a sua vitrine sai do ar em ${when}. `
+        : "A sua vitrine está fora do ar por falta de pagamento. "}
+      Adicione saldo na sua conta MuhBianco para manter a loja vendendo — o painel e os seus dados
+      continuam aqui.{" "}
+      <a href="https://muhbianco.com.br/conta.html#saldo" target="_blank" rel="noopener">
+        Adicionar saldo
+      </a>
+    </p>
+  );
+}
+
 // Menu entries follow the tenant's flags and the user's scopes; the API enforces both anyway.
 export default async function TenantLayout({
   children,
@@ -23,6 +49,7 @@ export default async function TenantLayout({
   return (
     <>
       <h1>{context.name}</h1>
+      <BillingNotice status={context.status} graceUntil={context.billing_grace_until} />
       <nav className={styles.subnav}>
         <Link href={base}>Visão geral</Link>
         {catalog ? <Link href={`${base}/produtos`}>Produtos</Link> : null}

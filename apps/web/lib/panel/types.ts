@@ -23,6 +23,8 @@ export interface TenantPanelContext {
   timezone: string;
   currency: string;
   primary_host: string | null;
+  /** Assinatura suspensa: até quando a vitrine continua no ar (ISO, UTC). */
+  billing_grace_until: string | null;
   features: Record<string, boolean>;
   settings: Record<string, Record<string, unknown>>;
 }

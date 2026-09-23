@@ -24,6 +24,8 @@ class TenantPanelContext(BaseModel):
     timezone: str
     currency: str
     primary_host: str | None
+    # Assinatura suspensa: até quando a vitrine continua no ar (ISO, UTC).
+    billing_grace_until: str | None
     features: dict[str, bool]
     settings: dict[str, dict[str, object]]
 
@@ -46,6 +48,7 @@ async def panel_context(
         timezone=tenant.timezone,
         currency=tenant.currency,
         primary_host=primary.hostname if primary else None,
+        billing_grace_until=tenant.billing_grace_until,
         features=tenant.features,
         settings=tenant.settings,
     )
