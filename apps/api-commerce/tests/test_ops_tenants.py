@@ -275,3 +275,28 @@ async def test_tenant_listing_is_keyset_paginated(
         "/api/v1/ops/tenants", params={"cursor": "bm90LWpzb24"}, headers=operator_headers
     )
     assert tampered.status_code == 422
+
+
+async def test_tenant_listing_filters_by_text_and_status(
+    client: AsyncClient, operator_headers: dict[str, str]
+) -> None:
+    for slug, name in (("padaria-sol", "Padaria do Sol"), ("bolo-da-ana", "Bolos da Ana")):
+        response = await client.post(
+            "/api/v1/ops/tenants",
+            json={"slug": slug, "name": name},
+            headers={**operator_headers, "Idempotency-Key": str(uuid.uuid4())},
+        )
+        assert response.status_code == 201, response.text
+
+    async def slugs(**params: str) -> list[str]:
+        page = await client.get("/api/v1/ops/tenants", params=params, headers=operator_headers)
+        assert page.status_code == 200, page.text
+        return [item["slug"] for item in page.json()["items"]]
+
+    assert await slugs(search="Padaria") == ["padaria-sol"]  # name
+    assert await slugs(search="bolo-da") == ["bolo-da-ana"]  # slug
+    assert await slugs(search="padaria-sol.loja") == ["padaria-sol"]  # hostname
+    assert await slugs(search="  ana  ") == ["bolo-da-ana"]  # trimmed
+    assert await slugs(search="%") == []  # wildcards are escaped, not matched
+    assert set(await slugs(status_filter="draft")) >= {"padaria-sol", "bolo-da-ana"}
+    assert await slugs(search="padaria", status_filter="archived") == []

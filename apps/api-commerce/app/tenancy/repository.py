@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import TenantContextMissingError
@@ -38,9 +38,16 @@ class TenantRepository:
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_page(
-        self, *, limit: int, before_id: str | None = None, status: str | None = None
+        self,
+        *,
+        limit: int,
+        before_id: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
     ) -> Sequence[Tenant]:
         """Newest first, keyset on the primary key (UUIDv7 sorts by creation time).
+
+        `search` matches the store name, the slug or any of its hostnames.
 
         Returns up to `limit + 1` rows; the extra one only signals a next page.
         """
@@ -49,6 +56,22 @@ class TenantRepository:
             stmt = stmt.where(Tenant.id < before_id)
         if status:
             stmt = stmt.where(Tenant.status == status)
+        term = (search or "").strip()
+        if term:
+            # The operator typed a name, not a pattern: escape the LIKE wildcards.
+            like = "%{}%".format(term.replace("!", "!!").replace("%", "!%").replace("_", "!_"))
+            stmt = stmt.where(
+                or_(
+                    Tenant.name.like(like, escape="!"),
+                    Tenant.slug.like(like, escape="!"),
+                    select(TenantDomain.id)
+                    .where(
+                        TenantDomain.tenant_id == Tenant.id,
+                        TenantDomain.hostname.like(like, escape="!"),
+                    )
+                    .exists(),
+                )
+            )
         return (await self.session.execute(stmt)).scalars().all()
 
     async def get_many(self, tenant_ids: Collection[str]) -> dict[str, Tenant]:

@@ -90,12 +90,13 @@ async def list_tenants(
     session: DbSession,
     _: PlatformOperator,
     status_filter: str | None = None,
+    search: Annotated[str | None, Query(max_length=120)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: Annotated[str | None, Query(max_length=256)] = None,
 ) -> Page[TenantListItem]:
     before_id = decode_cursor(cursor, "id")["id"] if cursor else None
     rows = await TenantService(session).repo.list_page(
-        limit=limit, before_id=before_id, status=status_filter
+        limit=limit, before_id=before_id, status=status_filter, search=search
     )
     page = rows[:limit]
     # Owners in one query for the whole page (no N+1); domains are eager-loaded with the tenant.
