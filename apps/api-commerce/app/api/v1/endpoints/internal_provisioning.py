@@ -38,6 +38,7 @@ async def reserve_store(session: DbSession, body: StoreReserve) -> StoreRead:
         full_name=body.full_name,
         slug=body.slug,
         name=body.name,
+        custom_domain=body.custom_domain,
     )
     return StoreRead.of(tenant)
 

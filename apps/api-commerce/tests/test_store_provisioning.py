@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import settings
 from app.core.scopes import TenantRole
 from app.identity.models import AdminUser, TenantMembership
 from app.models.base import utcnow
@@ -233,3 +234,94 @@ async def test_provisioning_needs_the_agents_token(client: AsyncClient) -> None:
         response = await client.post(f"{BASE}/reserve", json=body, headers=headers)
         assert response.status_code == 401, response.text
         assert response.json()["error"]["code"] == "authentication_failed"
+
+
+async def test_dominio_do_cliente_entra_na_reserva_com_as_instrucoes_de_dns(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    body = purchase(slug="padaria-loja", custom_domain="loja.padaria.com.br")
+    response = await client.post(f"{BASE}/reserve", json=body, headers=AGENTS)
+    assert response.status_code == 201, response.text
+    store = response.json()
+
+    # O endereço da plataforma continua existindo: é por ele que a loja responde enquanto o
+    # cliente não aponta o DNS.
+    assert store["platform_host"] == "padaria-loja.loja.test"
+    custom = store["custom_domain"]
+    assert custom["hostname"] == "loja.padaria.com.br"
+    assert custom["status"] == "pending_dns"
+    assert custom["role"] == "alias"  # só vira principal depois de ativo
+    assert custom["txt_name"] == "_muhbianco-verify.loja.padaria.com.br"
+    assert custom["txt_value"].startswith("mb-verify=")
+    assert custom["cname_target"]
+    assert custom["apex"] is False
+    assert {d["hostname"] for d in store["domains"]} == {
+        "padaria-loja.loja.test",
+        "loja.padaria.com.br",
+    }
+
+    # Reenviar a mesma compra não duplica o domínio.
+    again = await client.post(f"{BASE}/reserve", json=body, headers=AGENTS)
+    assert again.status_code == 201
+    assert len(again.json()["domains"]) == 2
+
+    # E o estado continua visível depois, para a fila de avisos acompanhar.
+    state = await client.get(f"{BASE}/{body['subscription_ref']}", headers=AGENTS)
+    assert state.json()["custom_domain"]["status"] == "pending_dns"
+
+
+async def test_dominio_raiz_pede_os_ips_da_edge(client: AsyncClient) -> None:
+    body = purchase(slug="padaria-apex", custom_domain="Padaria.com.BR")
+    response = await client.post(f"{BASE}/reserve", json=body, headers=AGENTS)
+    assert response.status_code == 201, response.text
+    custom = response.json()["custom_domain"]
+    assert custom["hostname"] == "padaria.com.br"  # normalizado
+    assert custom["apex"] is True
+    assert custom["a_records"] == settings.edge_public_ip_list
+
+
+async def test_dominio_de_outra_loja_recusa_antes_de_cobrar(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    first = purchase(slug="loja-um", custom_domain="loja.disputada.com.br")
+    assert (await client.post(f"{BASE}/reserve", json=first, headers=AGENTS)).status_code == 201
+
+    second = purchase(
+        slug="loja-dois",
+        custom_domain="loja.disputada.com.br",
+        email="outro@exemplo.test",
+    )
+    clash = await client.post(f"{BASE}/reserve", json=second, headers=AGENTS)
+    assert clash.status_code == 409, clash.text
+    # A loja do segundo comprador não fica meio criada.
+    assert (await client.get(f"{BASE}/{second['subscription_ref']}", headers=AGENTS)).json() is None
+
+    reserved_word = await client.post(
+        f"{BASE}/reserve",
+        json=purchase(slug="loja-tres", custom_domain="painel.muhbianco.com.br"),
+        headers=AGENTS,
+    )
+    assert reserved_word.status_code in (409, 422)
+
+
+async def test_liberar_a_reserva_devolve_o_dominio_do_cliente(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    body = purchase(slug="loja-efemera", custom_domain="loja.efemera.com.br")
+    await client.post(f"{BASE}/reserve", json=body, headers=AGENTS)
+    released = await client.request("DELETE", f"{BASE}/{body['subscription_ref']}", headers=AGENTS)
+    assert released.status_code == 200
+    assert released.json()["custom_domain"] is None
+
+    # O endereço volta para o pool: outra pessoa consegue usar.
+    retry = await client.post(
+        f"{BASE}/reserve",
+        json=purchase(
+            slug="loja-nova-dona",
+            custom_domain="loja.efemera.com.br",
+            email="nova.dona@exemplo.test",
+        ),
+        headers=AGENTS,
+    )
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["custom_domain"]["hostname"] == "loja.efemera.com.br"

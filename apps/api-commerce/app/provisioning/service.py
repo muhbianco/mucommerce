@@ -27,7 +27,7 @@ from app.core.scopes import TenantRole
 from app.identity.repository import AdminUserRepository
 from app.identity.service import AdminAuthService
 from app.models.base import utcnow
-from app.tenancy.models import DomainKind, Tenant, TenantStatus
+from app.tenancy.models import DomainKind, DomainPurpose, DomainRole, Tenant, TenantStatus
 from app.tenancy.resolver import invalidate_host_cache
 from app.tenancy.service import Actor, TenantService
 
@@ -57,17 +57,24 @@ class StoreProvisioningService:
         full_name: str,
         slug: str,
         name: str,
+        custom_domain: str | None = None,
     ) -> Tenant:
-        """Create the store as `draft` and make the buyer its owner. Idempotent."""
+        """Create the store as `draft` and make the buyer its owner. Idempotent.
+
+        The customer's own domain is taken here, before the catalog debits anything: a hostname
+        that belongs to someone else has to answer 409 while the purchase can still be abandoned.
+        """
         existing = await self.by_subscription(subscription_ref)
         if existing is not None:
             await self._ensure_owner(existing, account_id, email, full_name)
+            await self._ensure_custom_domain(existing, custom_domain)
             return existing
 
         tenant = await self.tenants.create(slug=slug, name=name, actor=ACTOR, plan="commerce")
         tenant.subscription_ref = subscription_ref
         await self.session.flush()
         await self._ensure_owner(tenant, account_id, email, full_name)
+        await self._ensure_custom_domain(tenant, custom_domain)
         await emit(
             self.session,
             aggregate_type="tenant",
@@ -76,6 +83,8 @@ class StoreProvisioningService:
             payload={"slug": tenant.slug, "subscription_ref": subscription_ref},
             tenant_id=tenant.id,
         )
+        # The caller serialises the hosts right away, and Pydantic cannot await a lazy load.
+        await self.session.refresh(tenant, ["domains"])
         return tenant
 
     async def activate(self, subscription_ref: str) -> Tenant:
@@ -168,18 +177,42 @@ class StoreProvisioningService:
             membership.status = "active"
         await self.session.flush()
 
+    async def _ensure_custom_domain(self, tenant: Tenant, hostname: str | None) -> None:
+        """Register the buyer's own domain as an alias. Idempotent; 409 if it is someone else's."""
+        if not hostname:
+            return
+        wanted = hostname.strip().lower().rstrip(".")
+        # Looked up by hostname instead of walking `tenant.domains`: a store just created has
+        # that collection unloaded, and an implicit lazy load inside async code blows up.
+        taken = await self.tenants.repo.get_domain_by_hostname(wanted)
+        if taken is not None and taken.tenant_id == tenant.id:
+            return  # same purchase, retried
+        await self.tenants.register_domain(
+            tenant,
+            hostname=wanted,
+            purpose=DomainPurpose.STOREFRONT,
+            role=DomainRole.ALIAS,
+            actor=ACTOR,
+        )
+        await self.session.refresh(tenant, ["domains"])
+
     async def _archive_reservation(self, tenant: Tenant) -> Tenant:
         """Archive and rename: the slug and the hostname go back to the pool."""
         hosts = [domain.hostname for domain in tenant.domains]
         freed_slug = tenant.slug
         parked = f"{tenant.slug[:40]}-x{tenant.id[-8:]}"
         subscription_ref = tenant.subscription_ref
-        for domain in tenant.domains:
+        for domain in list(tenant.domains):
             if domain.kind == DomainKind.PLATFORM_SUBDOMAIN:
                 domain.hostname = _parked_host(domain.hostname, freed_slug, parked)
+            else:
+                # The buyer's own domain never pointed here (the purchase died first): drop the
+                # row so the hostname is free for the retry, or for whoever else wants it.
+                await self.session.delete(domain)
         tenant.slug = parked
         tenant.subscription_ref = None
         await self.session.flush()
+        await self.session.refresh(tenant, ["domains"])
         await self.tenants.set_status(tenant, TenantStatus.ARCHIVED, ACTOR, reason="released")
         await audit(
             self.session,
