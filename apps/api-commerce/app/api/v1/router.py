@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     admin_catalog,
     admin_coupons,
     admin_customers,
+    admin_domains,
     admin_events,
     admin_inventory,
     admin_media,
@@ -68,6 +69,13 @@ TAGS_METADATA: list[dict[str, object]] = [
         "description": "Clientes que entraram na loja e a whitelist (aprovar, bloquear, revogar).",
     },
     {
+        "name": "Painel — Domínios",
+        "description": (
+            "Endereço da loja: o subdomínio da plataforma e os domínios do próprio lojista, "
+            "com as instruções de DNS e o estado da verificação."
+        ),
+    },
+    {
         "name": "Painel — Mídia",
         "description": "Upload direto para o storage (POST assinado) e variantes WebP.",
     },
@@ -105,6 +113,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_refunds.router,
     admin_inventory.router,
     admin_customers.router,
+    admin_domains.router,
     internal.router,
     internal_provisioning.router,
     storefront.router,

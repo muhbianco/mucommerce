@@ -42,6 +42,11 @@ const OK: Record<string, string> = {
   acesso_approved: "Acesso liberado.",
   acesso_blocked: "Cliente bloqueado nesta loja.",
   acesso_revoked: "Acesso revogado.",
+  dominio_criado: "Domínio cadastrado. Crie os registros de DNS mostrados abaixo.",
+  dominio_conferido: "Conferência feita.",
+  dominio_ativo: "DNS no ar: o domínio já responde pela sua loja.",
+  dominio_principal: "Endereço principal atualizado.",
+  dominio_desativado: "Domínio desativado.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -76,6 +81,9 @@ const ERRORS: Record<string, string> = {
   coupon_code_taken: "Já existe um cupom com esse código.",
   evidencia_obrigatoria: "Descreva como a devolução foi feita (mínimo 10 caracteres).",
   rate_limited: "Muitas tentativas seguidas. Espere um minuto e tente de novo.",
+  dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",
+  dns_sem_txt: "Ainda não encontrei o registro TXT. Depois de criar, o DNS pode levar alguns minutos.",
+  dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 
 export function Flash({ ok, erro }: { ok?: string; erro?: string }) {
