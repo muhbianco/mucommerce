@@ -1,0 +1,14 @@
+[Unit]
+Description=Backup diário das lojas (mucommerce)
+
+[Timer]
+# 03:25 UTC: madrugada no Brasil, longe da janela de deploy (o dump usa --single-transaction,
+# consistente para DML mas não contra DDL de migration) e 13 min depois do backup do mu-tower,
+# para os dois não disputarem CPU, disco e rede na mesma hora.
+OnCalendar=*-*-* 03:25:00 UTC
+# Servidor desligado na hora marcada não pode significar um dia sem backup.
+Persistent=true
+RandomizedDelaySec=4min
+
+[Install]
+WantedBy=timers.target
