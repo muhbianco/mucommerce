@@ -90,3 +90,4 @@ nele, os arquivos viram lixo cifrado.
 | Data | Arquivo | Tempo de restore | Resultado | Obs. |
 |---|---|---|---|---|
 | 2026-09-21 | `mucommerce-20260921T140552Z.sql.gz` (4,6 KB) | < 1 s | ok: sha256, 19 tabelas, `alembic` 0002_identity, contagens = produção | offsite ainda sem destino (script sai 3) |
+| 2026-09-24 | `daily/mariadb/mucommerce-20260924T152252Z.sql.zst.gpg` (29 KB) | ~10 s | ok: 50 tabelas, `alembic` 0025_store_subscription, contagens = produção | primeiro restore vindo do B2, decifrando |
