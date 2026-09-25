@@ -355,7 +355,31 @@ class TenantService:
 
         existing = await self.repo.get_domain_by_hostname(host)
         if existing is not None:
-            raise ConflictError("Hostname já registrado.", hostname=host)
+            # Loja arquivada não serve mais nada, e o domínio é do cliente, não nosso: segurá-lo
+            # para sempre impediria a própria pessoa de contratar de novo com o mesmo endereço.
+            # O subdomínio da plataforma não entra nisso — esse é nosso e fica parado.
+            dono = await self.repo.get(existing.tenant_id)
+            liberavel = (
+                dono is not None
+                and dono.status == TenantStatus.ARCHIVED
+                and existing.kind != DomainKind.PLATFORM_SUBDOMAIN
+            )
+            if not liberavel:
+                raise ConflictError("Hostname já registrado.", hostname=host)
+            await self.session.delete(existing)
+            await self.session.flush()
+            await audit(
+                self.session,
+                actor=actor.id,
+                action="domain.released_from_archived",
+                entity_type="tenant_domain",
+                entity_id=existing.id,
+                tenant_id=existing.tenant_id,
+                before={"hostname": host, "tenant_id": existing.tenant_id},
+                after={"tenant_id": tenant.id},
+                ip=actor.ip,
+                user_agent=actor.user_agent,
+            )
 
         kind = classify_kind(host)
         domain = TenantDomain(

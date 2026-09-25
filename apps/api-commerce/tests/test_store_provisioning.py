@@ -16,6 +16,7 @@ from app.models.base import utcnow
 from app.provisioning.service import ORPHAN_RESERVATION_AGE, StoreProvisioningService
 from app.tenancy.context import CROSS_TENANT_OPTION
 from app.tenancy.models import Tenant, TenantStatus
+from app.tenancy.service import Actor, TenantService
 
 AGENTS = {"X-Internal-Token": "agents-token-test"}
 BASE = "/api/v1/internal/provisioning/stores"
@@ -325,3 +326,35 @@ async def test_liberar_a_reserva_devolve_o_dominio_do_cliente(
     )
     assert retry.status_code == 201, retry.text
     assert retry.json()["custom_domain"]["hostname"] == "loja.efemera.com.br"
+
+
+async def test_dominio_de_loja_arquivada_volta_para_o_pool(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Loja arquivada não pode segurar o domínio do cliente e impedi-lo de contratar de novo."""
+    antiga = purchase(slug="loja-antiga", custom_domain="loja.recomprada.com.br")
+    assert (await client.post(f"{BASE}/reserve", json=antiga, headers=AGENTS)).status_code == 201
+    await client.post(f"{BASE}/{antiga['subscription_ref']}/activate", headers=AGENTS)
+
+    tenant = await tenant_by_ref(session_factory, antiga["subscription_ref"])
+    async with session_factory() as session:
+        service = TenantService(session)
+        linha = await service.get_or_404(tenant.id)
+        await service.set_status(linha, TenantStatus.SUSPENDED, Actor.system("t"))
+        await service.set_status(linha, TenantStatus.ARCHIVED, Actor.system("t"))
+        await session.commit()
+
+    # Com a loja arquivada, o mesmo endereço pode ser contratado outra vez.
+    nova = purchase(
+        slug="loja-nova-mesma-marca",
+        custom_domain="loja.recomprada.com.br",
+        email="outra.pessoa@exemplo.test",
+    )
+    resposta = await client.post(f"{BASE}/reserve", json=nova, headers=AGENTS)
+    assert resposta.status_code == 201, resposta.text
+    assert resposta.json()["custom_domain"]["hostname"] == "loja.recomprada.com.br"
+
+    # Já o endereço da plataforma continua parado com a loja arquivada: esse é nosso.
+    async with session_factory() as session:
+        arquivada = await session.get(Tenant, tenant.id)
+        assert arquivada is not None and arquivada.status == TenantStatus.ARCHIVED
