@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { requireMe } from "@/lib/panel/api";
@@ -6,6 +5,7 @@ import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import styles from "../../../panel.module.css";
+import { type NavItem, PanelNav } from "./panel-nav";
 
 /** Assinatura em atraso: o lojista precisa saber antes de a vitrine sair do ar. */
 function BillingNotice({ status, graceUntil }: { status: string; graceUntil: string | null }) {
@@ -46,27 +46,43 @@ export default async function TenantLayout({
   const scopes = tenantScopes(me, context.tenant_id);
   const base = `/t/${encodeURIComponent(context.tenant_id)}`;
   const catalog = context.features.catalog && scopes.can("catalog:read");
+  const f = context.features;
+  const entries: (NavItem | false | undefined)[] = [
+    { href: base, label: "Visão geral" },
+    catalog && { href: `${base}/produtos`, label: "Produtos" },
+    catalog && { href: `${base}/categorias`, label: "Categorias" },
+    catalog && f.inventory && scopes.can("inventory:read") && { href: `${base}/estoque`, label: "Estoque" },
+    scopes.can("customers:read") && { href: `${base}/clientes`, label: "Clientes" },
+    scopes.can("settings:write") &&
+      (f.checkout || f.pickup || f.delivery) && { href: `${base}/entrega`, label: "Entrega e checkout" },
+    scopes.can("orders:read") && f.checkout && { href: `${base}/pedidos`, label: "Pedidos" },
+    scopes.can("settings:write") && f.coupons && { href: `${base}/cupons`, label: "Cupons" },
+    scopes.can("payments:read") && f.checkout && { href: `${base}/pagamentos`, label: "Pagamentos" },
+    scopes.can("domains:write") && { href: `${base}/dominios`, label: "Endereços" },
+    scopes.can("settings:write") && { href: `${base}/configuracoes`, label: "Configurações" },
+  ];
+  const items = entries.filter((item): item is NavItem => Boolean(item));
+  const live = context.status === "active";
   return (
     <>
-      <h1>{context.name}</h1>
+      <header className={styles.storeHead}>
+        <h1>{context.name}</h1>
+        <span className={styles.pill} data-state={live ? "live" : context.status === "suspended" ? "warn" : "off"}>
+          {live ? "Loja no ar" : context.status === "suspended" ? "Assinatura em atraso" : context.status}
+        </span>
+        {context.primary_host ? (
+          <a
+            className={`${styles.buttonGhost} ${styles.buttonSmall} ${styles.storeHeadLink}`}
+            href={`https://${context.primary_host}`}
+            target="_blank"
+            rel="noopener"
+          >
+            Ver a loja ↗
+          </a>
+        ) : null}
+      </header>
       <BillingNotice status={context.status} graceUntil={context.billing_grace_until} />
-      <nav className={styles.subnav}>
-        <Link href={base}>Visão geral</Link>
-        {catalog ? <Link href={`${base}/produtos`}>Produtos</Link> : null}
-        {catalog ? <Link href={`${base}/categorias`}>Categorias</Link> : null}
-        {catalog && context.features.inventory && scopes.can("inventory:read") ? (
-          <Link href={`${base}/estoque`}>Estoque</Link>
-        ) : null}
-        {scopes.can("customers:read") ? <Link href={`${base}/clientes`}>Clientes</Link> : null}
-        {scopes.can("settings:write") && (context.features.checkout || context.features.pickup || context.features.delivery) ? (
-          <Link href={`${base}/entrega`}>Entrega e checkout</Link>
-        ) : null}
-        {scopes.can("orders:read") && context.features.checkout ? <Link href={`${base}/pedidos`}>Pedidos</Link> : null}
-        {scopes.can("settings:write") && context.features.coupons ? <Link href={`${base}/cupons`}>Cupons</Link> : null}
-        {scopes.can("payments:read") && context.features.checkout ? <Link href={`${base}/pagamentos`}>Pagamentos</Link> : null}
-        {scopes.can("domains:write") ? <Link href={`${base}/dominios`}>Endereço</Link> : null}
-        {scopes.can("settings:write") ? <Link href={`${base}/configuracoes`}>Configurações</Link> : null}
-      </nav>
+      <PanelNav items={items} base={base} />
       {children}
     </>
   );

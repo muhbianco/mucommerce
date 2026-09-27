@@ -1,60 +1,365 @@
+/*
+ * Painel das lojas com a cara da conta MuhBianco (muhbianco.com.br): tinta azul-escura, papel
+ * claro, coral para a ação principal, teal para "no ar". As páginas antigas usam as classes
+ * daqui e herdam o estilo; botões e campos sem classe dentro de `.shell` também herdam.
+ */
+
 .shell {
+  --ink: #0c1a22;
+  --ink-soft: #243540;
+  --muted: #5b6b74;
+  --paper: #f4f7f9;
+  --mist: #e8eef2;
+  --line: rgba(12, 26, 34, 0.12);
+  --teal: #1a6b6b;
+  --teal-deep: #0f4a4a;
+  --coral: #e24e3b;
+  --coral-deep: #c43b2a;
+  --amber: #8a5a00;
+  --radius: 6px;
+  --shadow: 0 1px 2px rgba(12, 26, 34, 0.06), 0 8px 24px -12px rgba(12, 26, 34, 0.18);
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --font-body: var(--panel-font-body, "Manrope"), system-ui, sans-serif;
+  --font-display: var(--panel-font-display, "Syne"), var(--font-body);
+
   min-height: 100vh;
-  background: #f6f7f9;
+  font-family: var(--font-body);
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--ink);
+  background:
+    radial-gradient(1100px 620px at 88% -12%, rgba(26, 107, 107, 0.16), transparent 55%),
+    radial-gradient(820px 520px at -12% 28%, rgba(226, 78, 59, 0.07), transparent 50%),
+    linear-gradient(165deg, #dfe8ed 0%, var(--paper) 42%, #e4ecea 100%);
+  background-attachment: fixed;
 }
 
+/* ------------------------------------------------------------------ elementos soltos */
+
+.shell h1,
+.shell h2,
+.shell h3 {
+  font-family: var(--font-display);
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.shell h1 {
+  font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+  margin: 0 0 0.35rem;
+}
+
+.shell h2 {
+  font-size: 1.2rem;
+  margin: 0 0 0.5rem;
+}
+
+.shell h3 {
+  font-size: 1.02rem;
+  margin: 0 0 0.35rem;
+}
+
+.shell a {
+  color: var(--teal-deep);
+  text-underline-offset: 3px;
+}
+
+.shell a:hover {
+  color: var(--coral-deep);
+}
+
+.shell code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 4px;
+  background: var(--mist);
+  color: var(--ink-soft);
+  word-break: break-all;
+}
+
+.shell :global(.muted) {
+  color: var(--muted);
+}
+
+/* Botão sem classe = secundário. Especificidade zero (:where) para as classes abaixo vencerem. */
+.shell :where(button, .button, .buttonGhost) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.2s var(--ease),
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+
+.shell :where(button):hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.shell :where(button):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.shell :where(input, select, textarea) {
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--ink);
+  padding: 0.6rem 0.75rem;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.shell :where(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(26, 107, 107, 0.18);
+}
+
+.shell :where(button, a, summary):focus-visible {
+  outline: 3px solid rgba(26, 107, 107, 0.45);
+  outline-offset: 2px;
+}
+
+.shell :where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--teal);
+  width: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+}
+
+.shell :where(details) > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------------------ estrutura */
+
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 0.75rem 1.5rem;
-  background: #111827;
-  color: #f9fafb;
+  gap: 1.25rem;
+  padding: 0.8rem clamp(1rem, 3vw, 2rem);
+  background: rgba(244, 247, 249, 0.82);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar a {
-  color: inherit;
+  color: var(--ink-soft);
+  font-weight: 600;
   text-decoration: none;
 }
 
+.topbar a:hover {
+  color: var(--coral-deep);
+}
+
 .brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+}
+
+.shell .brand {
+  color: var(--ink);
+}
+
+.brandTag {
+  font-family: var(--font-body);
   font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
 }
 
 .spacer {
   flex: 1;
 }
 
+.who {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .content {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 2rem 1.5rem;
+  padding: clamp(1.25rem, 3vw, 2.25rem) clamp(1rem, 3vw, 2rem) 4rem;
 }
 
 .card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow);
+  padding: 1.35rem 1.5rem;
   margin-bottom: 1.25rem;
 }
 
-.card h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.05rem;
+.card > h2:first-child,
+.card > h3:first-child {
+  margin-top: 0;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
+/* Cabeçalho da loja: nome, situação, atalho para a vitrine. */
+.storeHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1rem;
 }
 
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.5rem 0.25rem;
-  border-bottom: 1px solid #f0f1f3;
-  font-size: 0.95rem;
+.storeHead h1 {
+  margin: 0;
+}
+
+.storeHeadLink {
+  margin-left: auto;
+}
+
+/* Menu da loja: abas com a página atual marcada. */
+.subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 1.75rem;
+  padding: 0.3rem;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.shell .subnav a {
+  flex: none;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.shell .subnav a:hover {
+  background: var(--mist);
+  color: var(--ink);
+}
+
+.shell .subnav a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* Título de página: rótulo pequeno, título, parágrafo que explica. */
+.pageHead {
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.lead {
+  max-width: 62ch;
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.sectionHead p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+/* ------------------------------------------------------------------ componentes */
+
+.shell .button {
+  background: var(--coral);
+  border-color: var(--coral);
+  color: #fff;
+}
+
+.shell .button:hover {
+  background: var(--coral-deep);
+  border-color: var(--coral-deep);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.shell .buttonGhost {
+  background: transparent;
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.shell .buttonGhost:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.shell .buttonSmall {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+/* Ação que desfaz algo: discreta até o hover. */
+.shell .buttonDanger {
+  border-color: transparent;
+  color: var(--coral-deep);
+}
+
+.shell .buttonDanger:hover {
+  background: rgba(226, 78, 59, 0.1);
+  border-color: rgba(226, 78, 59, 0.35);
+  color: var(--coral-deep);
 }
 
 .form {
@@ -67,34 +372,46 @@
 .form label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #374151;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
 }
 
-.form input,
-.form select {
-  padding: 0.5rem 0.6rem;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 0.95rem;
+.formGrow {
+  flex: 1 1 18rem;
 }
 
-.button {
-  padding: 0.55rem 1rem;
-  border: 0;
-  border-radius: 6px;
-  background: #111827;
-  color: #fff;
-  font-size: 0.95rem;
-  cursor: pointer;
+.formGrow input {
+  width: 100%;
 }
 
-.buttonGhost {
-  composes: button;
-  background: transparent;
-  color: inherit;
-  border: 1px solid currentColor;
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+}
+
+.table th {
+  text-align: left;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 0.5rem 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.table td {
+  text-align: left;
+  padding: 0.75rem 0.5rem 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+.table tr:last-child td {
+  border-bottom: 0;
 }
 
 .flags {
@@ -111,42 +428,308 @@
 }
 
 .badge {
-  display: inline-block;
-  padding: 0.1rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  background: #eef2ff;
-  color: #3730a3;
-  font-size: 0.8rem;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Selo de situação: data-state = live | pending | warn | off. */
+.pill {
+  composes: badge;
+  gap: 0.35rem;
+}
+
+.pill::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill[data-state="live"] {
+  border-color: rgba(26, 107, 107, 0.4);
+  background: rgba(26, 107, 107, 0.12);
+  color: var(--teal-deep);
+}
+
+.pill[data-state="pending"] {
+  border-color: rgba(180, 120, 20, 0.45);
+  background: rgba(234, 179, 8, 0.16);
+  color: var(--amber);
+}
+
+.pill[data-state="warn"] {
+  border-color: rgba(226, 78, 59, 0.4);
+  background: rgba(226, 78, 59, 0.1);
+  color: var(--coral-deep);
+}
+
+.pill[data-state="off"] {
+  color: var(--muted);
+}
+
+.tag {
+  composes: badge;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
 }
 
 .error {
   padding: 0.75rem 1rem;
-  border-radius: 8px;
-  background: #fef2f2;
-  color: #991b1b;
-  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: rgba(226, 78, 59, 0.1);
+  border: 1px solid rgba(226, 78, 59, 0.35);
+  color: var(--coral-deep);
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
 }
 
 .ok {
   padding: 0.75rem 1rem;
-  border-radius: 8px;
-  background: #f0fdf4;
-  color: #166534;
-  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: rgba(26, 107, 107, 0.1);
+  border: 1px solid rgba(26, 107, 107, 0.3);
+  color: var(--teal-deep);
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
 }
 
-.subnav {
+/* ------------------------------------------------------------------ listas de endereço */
+
+.rows {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
 }
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  padding: 1rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.rowMain {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.host {
+  font-weight: 700;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.shell .host a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.shell .host a:hover {
+  color: var(--coral-deep);
+  text-decoration: underline;
+}
+
+.rowSub {
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.rowBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.rowDetail {
+  flex-basis: 100%;
+}
+
+/* Passo a passo (DNS): números grandes, o que fazer em cada um. */
+.steps {
+  counter-reset: step;
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 1rem 1.1rem;
+  background: var(--paper);
+  border: 1px dashed rgba(12, 26, 34, 0.2);
+  border-radius: var(--radius);
+}
+
+.steps > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.4rem;
+}
+
+.steps > li + li {
+  margin-top: 1rem;
+}
+
+.steps > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: -0.1rem;
+  width: 1.7rem;
+  height: 1.7rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.steps p {
+  margin: 0 0 0.5rem;
+}
+
+/* Registro de DNS em cartão: cabe no celular (tabela com valor longo estourava a tela). */
+.records {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.record {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.record > .badge {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.recordLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.copyValue {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.copyValue {
+  min-width: 0;
+}
+
+.copyValue code {
+  flex: 1;
+  min-width: 0;
+}
+
+.note {
+  margin: 0 0 0.6rem;
+  padding: 0.45rem 0.7rem;
+  border-left: 3px solid rgba(180, 120, 20, 0.55);
+  background: rgba(234, 179, 8, 0.1);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: 0.86rem;
+  color: var(--amber);
+}
+
+.hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.stack > * + * {
+  margin-top: 0.75rem;
+}
+
+/* ------------------------------------------------------------------ login */
 
 .login {
-  max-width: 360px;
-  margin: 12vh auto;
+  max-width: 400px;
+  margin: 14vh auto 0;
 }
 
 .login .form {
   flex-direction: column;
   align-items: stretch;
+}
+
+.loginCta {
+  width: 100%;
+  margin: 1rem 0 0.25rem;
+}
+
+/* ------------------------------------------------------------------ celular */
+
+@media (max-width: 640px) {
+  .topbar {
+    gap: 0.75rem;
+  }
+
+  .who {
+    display: none;
+  }
+
+  .card {
+    padding: 1.1rem 1rem;
+  }
+
+  .row {
+    padding: 0.9rem;
+  }
+
+  .steps {
+    padding: 0.85rem;
+  }
+
+  .steps > li {
+    padding-left: 2.1rem;
+  }
+
+  .record {
+    grid-template-columns: 1fr;
+  }
+
+  .storeHeadLink {
+    margin-left: 0;
+  }
 }

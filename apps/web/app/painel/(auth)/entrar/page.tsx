@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { login } from "../../actions";
+import { panelFonts } from "../../fonts";
 import styles from "../../panel.module.css";
 
 export const metadata: Metadata = { title: "Entrar · Painel MuhBianco" };
@@ -20,12 +21,13 @@ export default async function PanelLogin({
   const { erro, next } = await searchParams;
   const start = `/sso/start?next=${encodeURIComponent(next ?? "/")}`;
   return (
-    <div className={styles.shell}>
+    <div className={`${styles.shell} ${panelFonts}`}>
       <div className={`${styles.card} ${styles.login}`}>
-        <h1>Painel MuhBianco</h1>
+        <span className={styles.eyebrow}>Painel MuhBianco</span>
+        <h1>Entrar no painel</h1>
         {erro ? <p className={styles.error}>{ERRORS[erro] ?? "Não foi possível entrar."}</p> : null}
-        <p>Entre com a mesma conta que você usa no site MuhBianco.</p>
-        <a href={start} className={styles.button} style={{ textAlign: "center", textDecoration: "none" }}>
+        <p className={styles.lead}>Use a mesma conta Google da sua conta MuhBianco.</p>
+        <a href={start} className={`${styles.button} ${styles.loginCta}`}>
           Entrar com Google
         </a>
         <details style={{ marginTop: "1.5rem" }}>

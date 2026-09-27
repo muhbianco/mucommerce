@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { requireMe } from "@/lib/panel/api";
 
 import { logout } from "../actions";
+import { panelFonts } from "../fonts";
 import styles from "../panel.module.css";
 
 const PANEL_HOST = process.env.PANEL_HOST ?? "painel.muhbianco.com.br";
@@ -27,8 +28,9 @@ export default async function PanelShell({ children }: { children: ReactNode }) 
     const [only] = me.memberships;
     if (me.memberships.length === 1 && only) redirect(storePanelUrl(only.tenant_slug));
     return (
-      <div className={styles.shell}>
-        <main className={styles.content}>
+      <div className={`${styles.shell} ${panelFonts}`}>
+        <main className={`${styles.content} ${styles.login}`}>
+          <span className={styles.eyebrow}>Painel MuhBianco</span>
           <h1>Painel da sua loja</h1>
           {me.memberships.length === 0 ? (
             <p className="muted">Nenhuma loja vinculada à sua conta ainda.</p>
@@ -47,17 +49,17 @@ export default async function PanelShell({ children }: { children: ReactNode }) 
   }
 
   return (
-    <div className={styles.shell}>
+    <div className={`${styles.shell} ${panelFonts}`}>
       <header className={styles.topbar}>
         <Link href="/" className={styles.brand}>
-          Painel MuhBianco
+          MuhBianco <span className={styles.brandTag}>{platformHost ? "Equipe" : "Painel"}</span>
         </Link>
         {platformHost ? <Link href="/">Lojas</Link> : null}
-        {me.platform_role && platformHost ? <a href="https://muhbianco.com.br/admin.html#lojas">Lojas (admin)</a> : null}
+        {me.platform_role && platformHost ? <a href="https://muhbianco.com.br/admin.html#lojas">Admin do site</a> : null}
         <span className={styles.spacer} />
-        <span>{me.email}</span>
+        <span className={styles.who}>{me.email}</span>
         <form action={logout}>
-          <button type="submit" className={styles.buttonGhost}>
+          <button type="submit" className={styles.buttonSmall}>
             Sair
           </button>
         </form>
