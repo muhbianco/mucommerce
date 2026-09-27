@@ -698,6 +698,266 @@
   margin: 1rem 0 0.25rem;
 }
 
+/* ------------------------------------------------------------------ kit das páginas (ui.tsx) */
+
+.pageHeadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.pageHeadRow h2 {
+  margin: 0;
+  font-size: 1.45rem;
+}
+
+.pageActions,
+.sectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sectionActions {
+  margin-left: auto;
+}
+
+.pill[data-state="info"] {
+  border-color: rgba(36, 53, 64, 0.3);
+  background: rgba(36, 53, 64, 0.07);
+  color: var(--ink-soft);
+}
+
+.empty {
+  padding: 2rem 1.25rem;
+  text-align: center;
+  border: 1.5px dashed rgba(12, 26, 34, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.emptyText {
+  max-width: 48ch;
+  margin: 0.35rem auto 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.emptyAction {
+  margin-top: 1rem;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 1rem 1.1rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.shell .statLink {
+  color: inherit;
+  text-decoration: none;
+  transition:
+    transform 0.2s var(--ease),
+    border-color 0.2s;
+}
+
+.shell .statLink:hover {
+  color: inherit;
+  border-color: rgba(26, 107, 107, 0.45);
+  transform: translateY(-2px);
+}
+
+.statLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.statValue {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.statHint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.kv {
+  margin: 0;
+}
+
+.kvRow {
+  display: grid;
+  grid-template-columns: minmax(8rem, 32%) 1fr;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.kvRow:last-child {
+  border-bottom: 0;
+}
+
+.kv dt {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  margin: 0 -0.25rem;
+  padding: 0 0.25rem;
+}
+
+.table tbody tr {
+  transition: background 0.15s;
+}
+
+.table tbody tr:hover {
+  background: rgba(232, 238, 242, 0.55);
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  background: var(--mist);
+  display: block;
+}
+
+/* Formulário em grade: rótulo em cima, dica embaixo, ações no fim. */
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.fieldWide {
+  grid-column: 1 / -1;
+}
+
+.field :where(input, select, textarea) {
+  width: 100%;
+  font-weight: 500;
+}
+
+.fieldHint {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.check input {
+  margin-top: 0.2rem;
+}
+
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* Filtros acima de uma lista. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* Página de detalhe: conteúdo e coluna lateral. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ------------------------------------------------------------------ celular */
 
 @media (max-width: 640px) {
@@ -730,6 +990,15 @@
   }
 
   .storeHeadLink {
+    margin-left: 0;
+  }
+
+  .kvRow {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+
+  .sectionActions {
     margin-left: 0;
   }
 }
