@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { lookupStorefrontContext } from "@/lib/context-cache";
+import { lookupPanelHost, lookupStorefrontContext, type PanelHost } from "@/lib/context-cache";
 import { CUSTOMER_SESSION_COOKIE as SESSION_COOKIE } from "@/lib/customer-cookies";
 import { callRefresh, refreshOnce } from "@/lib/panel/refresh";
 import {
@@ -13,9 +13,24 @@ import {
   type TokenPair,
   withCookies,
 } from "@/lib/panel/token";
-import { classifyHost, isPanelPath, panelRewritePath, requiresSession, resolveRequestHost } from "@/lib/tenant";
+import {
+  classifyHost,
+  isPanelPath,
+  panelRewritePath,
+  requiresSession,
+  resolveRequestHost,
+  tenantPanelGate,
+} from "@/lib/tenant";
 
-const TENANT_HEADERS = ["x-tenant-id", "x-tenant-slug", "x-tenant-host", "x-tenant-context", "x-host-kind"];
+const TENANT_HEADERS = [
+  "x-tenant-id",
+  "x-tenant-slug",
+  "x-tenant-host",
+  "x-tenant-context",
+  "x-host-kind",
+  "x-panel-tenant-id",
+  "x-panel-tenant-slug",
+];
 
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|healthz|robots.txt).*)"],
@@ -46,8 +61,21 @@ function isPrefetch(request: NextRequest): boolean {
  * access token expires (single-flight, see lib/panel/refresh.ts) and ends it only when the API
  * rejects the refresh token; an API outage keeps the cookies.
  */
-async function panel(request: NextRequest, headers: Headers): Promise<NextResponse> {
+async function panel(request: NextRequest, headers: Headers, store: PanelHost | null = null): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
+  if (store) {
+    // Painel de uma loja: só aquela loja existe neste endereço.
+    headers.set("x-host-kind", "tenant_panel");
+    headers.set("x-panel-tenant-id", store.tenant_id);
+    headers.set("x-panel-tenant-slug", store.slug);
+    const gate = tenantPanelGate(pathname, store.tenant_id);
+    if (gate === "home") {
+      const response = NextResponse.redirect(new URL(`/t/${store.tenant_id}`, request.url));
+      response.headers.set("X-Robots-Tag", "noindex, nofollow");
+      return response;
+    }
+    if (gate === "not_found") return notFound(request);
+  }
   const target = panelRewritePath(pathname);
   const access = request.cookies.get(ACCESS_COOKIE)?.value;
   const refresh = request.cookies.get(REFRESH_COOKIE)?.value;
@@ -109,12 +137,24 @@ export async function middleware(request: NextRequest) {
 
   if (kind === "panel") return panel(request, headers);
 
-  // The panel only exists on the panel host.
+  if (kind === "tenant_panel") {
+    const found = host ? await lookupPanelHost(host) : ({ kind: "not_found" } as const);
+    if (found.kind === "not_found") return notFound(request);
+    if (found.kind !== "found") return unavailable(request);
+    return panel(request, headers, found.panel);
+  }
+
+  // The panel only exists on the panel hosts.
   if (isPanelPath(pathname)) return notFound(request);
 
   // Storefront: resolve the tenant by Host through the API (cached).
   const lookup = host ? await lookupStorefrontContext(host) : ({ kind: "not_found" } as const);
-  if (lookup.kind === "not_found") return notFound(request);
+  if (lookup.kind === "not_found") {
+    // Não é vitrine: pode ser o painel da loja no domínio dela (painel.<domínio>).
+    const found = host ? await lookupPanelHost(host) : ({ kind: "not_found" } as const);
+    if (found.kind === "found") return panel(request, headers, found.panel);
+    return notFound(request);
+  }
   if (lookup.kind !== "found") return unavailable(request);
   const { context } = lookup;
 

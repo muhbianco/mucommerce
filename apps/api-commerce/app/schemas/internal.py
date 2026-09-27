@@ -15,6 +15,15 @@ class StorefrontTenant(BaseModel):
     currency: str
 
 
+class PanelHostRead(BaseModel):
+    """Loja dona de um host de painel (<slug>.painel.* ou painel.<domínio da loja>)."""
+
+    tenant_id: str
+    slug: str
+    name: str
+    host: str
+
+
 class StorefrontContext(BaseModel):
     """What the Next.js middleware/server needs to render a tenant. No secrets."""
 

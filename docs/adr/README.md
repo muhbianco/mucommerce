@@ -15,5 +15,6 @@
 | [0011](0011-checkout-pedidos-pagamentos.md) | Checkout: carrinho com sessão, `OrderService.place` único, reserva no pedido e baixa na aprovação, webhook só avisa, credencial de pagamento só do dono |
 | [0012](0012-loja-como-servico.md) | A loja é um serviço do catálogo: reserve → débito → activate, idempotente pela assinatura, carência de 3 dias |
 | [0013](0013-chatwoot-por-cliente.md) | Chatwoot por cliente: uma account por loja no domínio do cliente, provisionada pela api-agents; host → account no fork |
+| [0014](0014-painel-por-loja.md) | Painel por loja no endereço dela (`<slug>.painel.*` ou `painel.<domínio>`); painel.muhbianco.com.br só da equipe; login volta ao host que pediu |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

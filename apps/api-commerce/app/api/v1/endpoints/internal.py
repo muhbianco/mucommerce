@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbSession, StorefrontTenant, require_internal
-from app.schemas.internal import StorefrontContext
+from app.core.exceptions import NotFoundError
+from app.core.hosts import InvalidHostnameError, normalize_hostname
+from app.schemas.internal import PanelHostRead, StorefrontContext
 from app.tenancy.edge import build_traefik_config
 from app.tenancy.repository import TenantRepository
 from app.tenancy.storefront_context import build_storefront_context
@@ -34,6 +37,29 @@ async def traefik_dynamic_config(request: Request, session: DbSession) -> Respon
         content=config,
         headers={"ETag": etag, "Cache-Control": "max-age=15"},
     )
+
+
+@router.get(
+    "/panel/context",
+    response_model=PanelHostRead,
+    summary="Loja do painel neste host (X-Tenant-Host + token interno do web)",
+    dependencies=[Depends(require_internal("web"))],
+)
+async def panel_context(
+    session: DbSession, x_tenant_host: Annotated[str | None, Header()] = None
+) -> PanelHostRead:
+    return await _panel_host(session, x_tenant_host)
+
+
+async def _panel_host(session: AsyncSession, raw_host: str | None) -> PanelHostRead:
+    try:
+        host = normalize_hostname(raw_host or "")
+    except InvalidHostnameError as exc:
+        raise NotFoundError("Painel não encontrado.") from exc
+    tenant = await TenantRepository(session).panel_tenant_by_host(host)
+    if tenant is None:
+        raise NotFoundError("Painel não encontrado.")
+    return PanelHostRead(tenant_id=tenant.id, slug=tenant.slug, name=tenant.name, host=host)
 
 
 @router.get(

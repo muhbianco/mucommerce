@@ -77,3 +77,56 @@ export function clearContextCache(): void {
 export function contextCacheSize(): number {
   return store.size;
 }
+
+// ---------------------------------------------------------------- painel da loja por host
+export interface PanelHost {
+  tenant_id: string;
+  slug: string;
+  name: string;
+  host: string;
+}
+
+export type PanelLookup = { kind: "found"; panel: PanelHost } | { kind: "not_found" } | { kind: "unavailable" };
+
+type CachedPanel = Exclude<PanelLookup, { kind: "unavailable" }>;
+
+// Mesmo cuidado do cache da vitrine: chave é o Host de quem pede, então limitado.
+const panelStore = new Map<string, { expiresAt: number; value: CachedPanel }>();
+
+function rememberPanel(host: string, value: CachedPanel): void {
+  panelStore.delete(host);
+  panelStore.set(host, {
+    expiresAt: Date.now() + (value.kind === "found" ? ttlMs : negativeTtlMs),
+    value,
+  });
+  while (panelStore.size > maxEntries) {
+    const oldest = panelStore.keys().next().value;
+    if (oldest === undefined) break;
+    panelStore.delete(oldest);
+  }
+}
+
+/** Loja dona deste host de painel (<slug>.painel.* ou painel.<domínio>), pela API. */
+export async function lookupPanelHost(host: string): Promise<PanelLookup> {
+  const cached = panelStore.get(host);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const base = process.env.COMMERCE_API_INTERNAL_URL ?? "http://127.0.0.1:8000";
+  const token = process.env.INTERNAL_TOKEN_WEB ?? "";
+  let response: Response;
+  try {
+    response = await fetch(`${base}/api/v1/internal/panel/context`, {
+      headers: { "X-Tenant-Host": host, "X-Internal-Token": token },
+      cache: "no-store",
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+  let value: CachedPanel;
+  if (response.ok) value = { kind: "found", panel: (await response.json()) as PanelHost };
+  else if (response.status === 404) value = { kind: "not_found" };
+  else return { kind: "unavailable" };
+  rememberPanel(host, value);
+  return value;
+}

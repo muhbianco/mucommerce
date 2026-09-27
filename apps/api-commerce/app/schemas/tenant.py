@@ -72,7 +72,7 @@ class SettingUpdate(StrictModel):
 
 class DomainCreate(StrictModel):
     hostname: str = Field(min_length=3, max_length=253)
-    purpose: str = Field(default="storefront", pattern=r"^(storefront|chat_redirect)$")
+    purpose: str = Field(default="storefront", pattern=r"^(storefront|chat_redirect|panel)$")
     role: str = Field(default="alias", pattern=r"^(primary|alias)$")
 
 

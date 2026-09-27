@@ -12,8 +12,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, status
 
 from app.api.deps import DbSession, require_internal
+from app.api.v1.endpoints.internal import _panel_host
 from app.core.exceptions import NotFoundError
 from app.provisioning.service import StoreProvisioningService
+from app.schemas.internal import PanelHostRead
 from app.schemas.provisioning import (
     ChatwootDomainsRead,
     ChatwootEnable,
@@ -29,6 +31,17 @@ router = APIRouter(
 )
 
 Ref = Annotated[str, Path(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_.:-]+$")]
+
+
+@router.get(
+    "/panel-hosts/{host}",
+    response_model=PanelHostRead,
+    summary="Este host é o painel de alguma loja? (volta do login MuhBianco)",
+)
+async def panel_host(
+    session: DbSession, host: Annotated[str, Path(min_length=3, max_length=253)]
+) -> PanelHostRead:
+    return await _panel_host(session, host)
 
 
 @router.post(

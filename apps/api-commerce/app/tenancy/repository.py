@@ -84,6 +84,18 @@ class TenantRepository:
         stmt = select(TenantDomain).where(TenantDomain.hostname == hostname)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def panel_tenant_by_host(self, hostname: str) -> Tenant | None:
+        """Loja cujo painel responde neste host (domínio `panel` ativo, loja não arquivada)."""
+        stmt = (
+            select(Tenant)
+            .join(TenantDomain, TenantDomain.tenant_id == Tenant.id)
+            .where(TenantDomain.hostname == hostname)
+            .where(TenantDomain.purpose == DomainPurpose.PANEL)
+            .where(TenantDomain.status == DomainStatus.ACTIVE)
+            .where(Tenant.status != "archived")
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def get_domain(self, tenant_id: str, domain_id: str) -> TenantDomain | None:
         stmt = (
             select(TenantDomain)

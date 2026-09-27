@@ -240,6 +240,10 @@ class Settings(BaseSettings):
     def edge_public_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.edge_public_ips.split(",") if ip.strip()]
 
+    def tenant_panel_host(self, slug: str) -> str:
+        """Painel da loja no endereço da plataforma (DNS curinga *.painel → edge)."""
+        return f"{slug}.{self.panel_host}"
+
     @property
     def static_edge_hosts(self) -> frozenset[str]:
         """Hosts routed by the stack's Swarm labels, not by the dynamic providers.http config.

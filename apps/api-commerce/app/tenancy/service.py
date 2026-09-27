@@ -161,6 +161,18 @@ class TenantService:
                 verified_at=utcnow(),
             )
         )
+        # O painel da loja nasce junto, no endereço dela (ADR 0014).
+        self.session.add(
+            TenantDomain(
+                tenant_id=tenant.id,
+                hostname=settings.tenant_panel_host(slug),
+                kind=DomainKind.PLATFORM_SUBDOMAIN,
+                purpose=DomainPurpose.PANEL,
+                role=DomainRole.PRIMARY,
+                status=DomainStatus.ACTIVE,
+                verified_at=utcnow(),
+            )
+        )
         await self.session.flush()
 
         await audit(
@@ -353,6 +365,8 @@ class TenantService:
             )
             # <slug>.chatwoot.* é criado pelo provisionamento do Chatwoot, nunca por aqui.
             or is_subdomain_of(host, settings.chatwoot_base_domain)
+            # <slug>.painel.* nasce com a loja; ninguém registra um à mão.
+            or is_subdomain_of(host, settings.panel_host)
         ):
             raise ValidationError("Hostname reservado pela plataforma.", hostname=host)
 
@@ -435,6 +449,8 @@ class TenantService:
     ) -> TenantDomain:
         if domain.role == DomainRole.PRIMARY and domain.purpose == DomainPurpose.STOREFRONT:
             raise ConflictError("Não é possível desativar o domínio primário. Promova outro antes.")
+        if domain.purpose == DomainPurpose.PANEL and domain.kind == DomainKind.PLATFORM_SUBDOMAIN:
+            raise ConflictError("O endereço do painel na MuhBianco não sai: é a porta de entrada.")
         before = domain.status
         domain.status = DomainStatus.DISABLED
         await audit(

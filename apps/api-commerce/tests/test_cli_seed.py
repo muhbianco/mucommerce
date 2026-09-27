@@ -46,7 +46,8 @@ async def test_seed_serves_the_platform_tenant_only_at_the_base_domain(
             assert await seed_platform_tenant(session) == 0
 
     by_host = await _domains(session_factory)
-    assert set(by_host) == {"loja.test", "muhbianco.loja.test"}
+    # A loja da plataforma também ganha o painel dela (ADR 0014).
+    assert set(by_host) == {"loja.test", "muhbianco.loja.test", "muhbianco.painel.test"}
     assert by_host["loja.test"].role == DomainRole.PRIMARY
     assert by_host["loja.test"].status == DomainStatus.ACTIVE
     assert by_host["muhbianco.loja.test"].status == DomainStatus.DISABLED

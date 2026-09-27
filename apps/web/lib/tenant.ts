@@ -5,7 +5,11 @@
  * header (as forwarded by Traefik) decides which store renders.
  */
 
-export type HostKind = "panel" | "storefront" | "unknown";
+/**
+ * `panel`: painel da plataforma (painel.muhbianco.com.br), só da equipe MuhBianco.
+ * `tenant_panel`: painel de uma loja (<slug>.painel.muhbianco.com.br ou painel.<domínio>).
+ */
+export type HostKind = "panel" | "tenant_panel" | "storefront" | "unknown";
 
 export interface HostRules {
   panelHost: string;
@@ -73,7 +77,27 @@ export function resolveRequestHost(
 export function classifyHost(host: string | null, rules: HostRules): HostKind {
   if (!host) return "unknown";
   if (host === rules.panelHost) return "panel";
+  // O painel com domínio próprio da loja (painel.<domínio>) só se descobre pela API; aqui
+  // entra como storefront e o middleware confere quando a vitrine não existe.
+  if (host.endsWith(`.${rules.panelHost}`)) return "tenant_panel";
   return "storefront";
+}
+
+/** Caminhos que o painel de uma loja atende, já sem o prefixo `/painel`. */
+const TENANT_PANEL_OPEN = ["/entrar", "/sso/start", "/sso/callback"];
+
+/**
+ * No painel de uma loja só existe aquela loja: `/` vai para ela, `/t/<outra>` e as páginas da
+ * plataforma (lista de lojas, ops) não existem. A API continua autorizando por vínculo; isto
+ * separa os endereços, para ninguém trabalhar numa loja pelo painel de outra.
+ */
+export function tenantPanelGate(pathname: string, tenantId: string): "ok" | "home" | "not_found" {
+  const path = isPanelPath(pathname) ? pathname.slice(PANEL_PREFIX.length) || "/" : pathname;
+  if (path === "/") return "home";
+  if (TENANT_PANEL_OPEN.includes(path)) return "ok";
+  const own = `/t/${tenantId}`;
+  if (path === own || path.startsWith(own + "/")) return "ok";
+  return "not_found";
 }
 
 /** Paths that render without login even when the store is `whitelist`/`login_required`. */

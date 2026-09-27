@@ -23,6 +23,7 @@ interface Domain {
   id: string;
   hostname: string;
   kind: string;
+  purpose: string;
   role: string;
   status: string;
   verified_at: string | null;
@@ -59,8 +60,11 @@ export default async function Domains({
   if (!tenantScopes(me, context.tenant_id).can("domains:write")) notFound();
   const domains = await api<Domain[]>(`/admin/tenants/${tenantId}/domains`);
   const tenantField = <input type="hidden" name="tenant_id" value={context.tenant_id} />;
-  const platform = domains.find((domain) => domain.kind === "platform_subdomain");
-  const customs = domains.filter((domain) => domain.kind !== "platform_subdomain");
+  // Só os endereços da vitrine: painel e Chatwoot têm os deles na mesma lista da API.
+  const storefront = domains.filter((domain) => domain.purpose === "storefront");
+  const platform = storefront.find((domain) => domain.kind === "platform_subdomain");
+  const customs = storefront.filter((domain) => domain.kind !== "platform_subdomain");
+  const panelHost = domains.find((d) => d.purpose === "panel" && d.kind === "platform_subdomain");
 
   return (
     <>
@@ -82,6 +86,16 @@ export default async function Domains({
             {platform.role === "primary" ? " · principal" : ""}
           </p>
           <p className="muted">Este endereço é seu enquanto a loja existir e não pode ser removido.</p>
+        </section>
+      ) : null}
+
+      {panelHost ? (
+        <section className={styles.card}>
+          <h2>Endereço deste painel</h2>
+          <p>
+            <a href={`https://${panelHost.hostname}`}>{panelHost.hostname}</a>
+          </p>
+          <p className="muted">É por aqui que você e sua equipe entram para cuidar da loja.</p>
         </section>
       ) : null}
 

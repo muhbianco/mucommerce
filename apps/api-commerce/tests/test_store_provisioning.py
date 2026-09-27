@@ -55,7 +55,8 @@ async def test_reserve_then_activate_puts_the_store_in_the_air(
     assert store["status"] == "draft"  # nothing is served before the debit
     assert store["slug"] == "padaria-do-sol"
     assert store["storefront_url"].startswith("https://padaria-do-sol.")
-    assert store["panel_url"].endswith(f"/t/{store['tenant_id']}")
+    # O painel é o da loja, no endereço dela; o da plataforma é só da equipe (ADR 0014).
+    assert store["panel_url"] == "https://padaria-do-sol.painel.test"
 
     # The buyer is the owner, even though they never signed into the panel.
     async with session_factory() as session:

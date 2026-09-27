@@ -56,6 +56,7 @@ def build_traefik_config(
         (priority 20); internal paths fall to the web router and 404, as on the static hosts
       - alias hosts get a `redirectregex` middleware (308) to the primary host.
     Per chat_redirect host: 302 to the tenant's Chatwoot account.
+    Per panel host: `<key>-panel` → commerce-web only (the panel calls the API server-side).
     Per chatwoot host: `<key>-chatwoot` → the Chatwoot instance, minus its admin paths
     (the fork binds the host to the tenant's account, ADR 0013).
     Hosts in `settings.static_edge_hosts` are skipped: the stack labels already route them.
@@ -89,6 +90,17 @@ def build_traefik_config(
                 continue
             base = _host_key(domain.hostname)
             host_rule = f"Host(`{domain.hostname}`)"
+
+            if domain.purpose == DomainPurpose.PANEL:
+                # Só o app web: as chamadas do painel à API são do servidor, pela rede interna.
+                routers[f"{base}-panel"] = {
+                    "rule": host_rule,
+                    "entryPoints": ["websecure"],
+                    "service": "commerce-web",
+                    "tls": tls,
+                    "priority": 10,
+                }
+                continue
 
             if domain.purpose == DomainPurpose.CHATWOOT:
                 services["chatwoot"] = {

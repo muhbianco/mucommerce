@@ -49,6 +49,9 @@ class DomainPurpose(StrEnum):
     CHAT_REDIRECT = "chat_redirect"
     # Painel do Chatwoot do cliente, servido pela instância única (ADR 0013).
     CHATWOOT = "chatwoot"
+    # Painel da loja no endereço dela (<slug>.painel.muhbianco.com.br ou painel.<domínio>);
+    # painel.muhbianco.com.br fica só para a equipe MuhBianco (ADR 0014).
+    PANEL = "panel"
 
 
 class DomainRole(StrEnum):

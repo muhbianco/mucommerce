@@ -132,7 +132,7 @@ class StoreRead(BaseModel):
             subscription_ref=tenant.subscription_ref,
             billing_grace_until=tenant.billing_grace_until,
             storefront_url=f"https://{platform_host}",
-            panel_url=f"https://{settings.panel_host}/t/{tenant.id}",
+            panel_url=f"https://{settings.tenant_panel_host(tenant.slug)}",
             platform_host=platform_host,
             custom_domain=DomainState.of(custom) if custom else None,
             domains=[DomainState.of(d) for d in storefront],

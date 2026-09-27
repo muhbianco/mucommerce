@@ -23,7 +23,7 @@ async def test_o_lojista_registra_o_dominio_dele_e_ve_o_que_apontar(
 
     listing = await client.get(f"{base(tenant)}/domains", headers=headers)
     assert listing.status_code == 200, listing.text
-    platform = listing.json()[0]
+    platform = next(d for d in listing.json() if d["purpose"] == "storefront")
     assert platform["hostname"] == f"{tenant.slug}.loja.test"
     assert platform["instructions"] is None  # endereço da plataforma não pede DNS de ninguém
 

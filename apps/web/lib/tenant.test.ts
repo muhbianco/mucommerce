@@ -8,6 +8,7 @@ import {
   panelRewritePath,
   requiresSession,
   resolveRequestHost,
+  tenantPanelGate,
 } from "./tenant";
 
 const rules = { panelHost: "painel.muhbianco.com.br", platformBaseDomain: "loja.muhbianco.com.br" };
@@ -48,6 +49,29 @@ describe("classifyHost", () => {
     expect(classifyHost("lunares.com.br", rules)).toBe("storefront");
     expect(classifyHost("lunares.loja.muhbianco.com.br", rules)).toBe("storefront");
     expect(classifyHost(null, rules)).toBe("unknown");
+  });
+  it("sends <slug>.painel.* to the store's own panel", () => {
+    expect(classifyHost("lunares.painel.muhbianco.com.br", rules)).toBe("tenant_panel");
+    // Custom panel domains are found through the API, not by name.
+    expect(classifyHost("painel.lunares.com.br", rules)).toBe("storefront");
+  });
+});
+
+describe("tenantPanelGate", () => {
+  const id = "0192a1b2-0000-7000-8000-000000000001";
+  it("sends the root to the store and serves only that store", () => {
+    expect(tenantPanelGate("/", id)).toBe("home");
+    expect(tenantPanelGate("/painel", id)).toBe("home");
+    expect(tenantPanelGate(`/t/${id}`, id)).toBe("ok");
+    expect(tenantPanelGate(`/t/${id}/pedidos/abc`, id)).toBe("ok");
+    expect(tenantPanelGate(`/painel/t/${id}/produtos`, id)).toBe("ok");
+  });
+  it("keeps login open and hides other stores and platform pages", () => {
+    expect(tenantPanelGate("/entrar", id)).toBe("ok");
+    expect(tenantPanelGate("/sso/callback", id)).toBe("ok");
+    expect(tenantPanelGate("/t/0192a1b2-0000-7000-8000-000000000002", id)).toBe("not_found");
+    expect(tenantPanelGate(`/t/${id}x`, id)).toBe("not_found");
+    expect(tenantPanelGate("/ops", id)).toBe("not_found");
   });
 });
 

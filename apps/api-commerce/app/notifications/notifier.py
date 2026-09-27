@@ -158,7 +158,9 @@ async def _context(
         order=order,
         items=items,
         url=url,
-        panel_url=f"https://{settings.panel_host}/t/{tenant.id}/pedidos/{order.id}",
+        panel_url=(
+            f"https://{settings.tenant_panel_host(tenant.slug)}/t/{tenant.id}/pedidos/{order.id}"
+        ),
         payment=payment,
         refund=refund,
         online_url=await _online_url(session, items) if order.paid_at else None,
