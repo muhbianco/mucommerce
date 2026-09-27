@@ -811,6 +811,7 @@
 
 .kv {
   margin: 0;
+  container-type: inline-size;
 }
 
 .kvRow {
@@ -834,6 +835,15 @@
 .kv dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* Coluna estreita (lateral do pedido, cartão pequeno): rótulo em cima e valor embaixo, para
+   e-mail e endereço não quebrarem no meio da palavra. */
+@container (max-width: 22rem) {
+  .kvRow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.15rem;
+  }
 }
 
 .tableWrap {

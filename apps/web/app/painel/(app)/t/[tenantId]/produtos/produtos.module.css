@@ -1,0 +1,79 @@
+/*
+ * Lista de produtos: busca que ocupa o espaço livre, nome em destaque, marca de promoção no preço.
+ * Só o que o kit (panel.module.css) não tem; cores e medidas vêm das variáveis do painel.
+ */
+
+.search {
+  flex: 1 1 16rem;
+}
+
+.search input {
+  width: 100%;
+}
+
+.clear {
+  align-self: center;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.actionsHint {
+  margin-right: auto;
+  align-self: center;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.thumbCell {
+  width: 56px;
+}
+
+.nameLink {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.nameLink:hover {
+  text-decoration: underline;
+}
+
+.sub {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sku {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.promo {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--coral-deep);
+}
+
+.promo s {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .hideSm {
+    display: none;
+  }
+}

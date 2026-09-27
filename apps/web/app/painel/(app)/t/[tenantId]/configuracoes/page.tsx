@@ -10,6 +10,8 @@ import styles from "../../../../panel.module.css";
 import { deleteMedia, publishLegalDocument, saveBranding, saveLanding, saveSeo } from "../actions";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
+import { PageHeader, Pill, Section } from "../ui";
+import local from "./configuracoes.module.css";
 
 export const metadata: Metadata = { title: "Configurações" };
 
@@ -30,8 +32,27 @@ const BLOCK_LABEL: Record<string, string> = {
   gallery: "Galeria",
 };
 
+/** Imagem ainda sem miniatura: a situação em palavras de lojista. */
+const MEDIA_STATUS: Record<Media["status"], string> = {
+  pending: "Enviando…",
+  processing: "Processando…",
+  ready: "Pronta",
+  failed: "Recusada",
+};
+
 function thumb(media: Media): string | undefined {
   return media.renditions[media.renditions.length - 1]?.url;
+}
+
+/** Miniatura de uma imagem enviada (ou a situação dela, enquanto processa). */
+function Thumb({ media }: { media: Media }) {
+  const url = thumb(media);
+  return url ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt="" className={local.tileImage} />
+  ) : (
+    <div className={local.tileImage}>{MEDIA_STATUS[media.status] ?? media.status}</div>
+  );
 }
 
 export default async function Settings({
@@ -55,7 +76,8 @@ export default async function Settings({
     api<LegalOverview>(`${path}/legal-documents`),
   ]);
   const branding = context.settings.branding ?? {};
-  const accessMode = String(context.settings.storefront?.access_mode ?? "public");
+  // Mesmo padrão da API (storefront_context): sem configuração, só clientes aprovados.
+  const accessMode = String(context.settings.storefront?.access_mode ?? "whitelist");
   const seo = context.settings.seo ?? {};
   const blocks = ((context.settings.landing?.blocks as Block[] | undefined) ?? []).filter(
     // The editor handles these types; others (made elsewhere) are kept out of the form.
@@ -64,6 +86,8 @@ export default async function Settings({
   const readyBrand = brandMedia.filter((m) => m.status === "ready");
   const readyLanding = landingMedia.filter((m) => m.status === "ready");
   const tenantField = <input type="hidden" name="tenant_id" value={context.tenant_id} />;
+  const published = (iso: string) =>
+    new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: context.timezone }).format(new Date(iso));
 
   const mediaSelect = (name: string, options: Media[], current: unknown) => (
     <select name={name} defaultValue={typeof current === "string" ? current : ""}>
@@ -79,147 +103,154 @@ export default async function Settings({
 
   return (
     <>
+      <PageHeader
+        eyebrow="Configurações"
+        title="Como a sua loja aparece"
+        lead="Marca, página inicial, Google e os termos que o cliente aceita ao entrar. Cada parte tem o próprio botão de salvar."
+      />
       <Flash ok={ok} erro={erro} />
+      <nav className={local.jump} aria-label="Partes desta página">
+        <a className={local.jumpLink} href="#marca">
+          Marca
+        </a>
+        <a className={local.jumpLink} href="#pagina-inicial">
+          Página inicial
+        </a>
+        <a className={local.jumpLink} href="#google">
+          Google e compartilhamento
+        </a>
+        <a className={local.jumpLink} href="#termos">
+          Termos e privacidade
+        </a>
+      </nav>
 
-      <section className={styles.card}>
-        <h2>Imagens da marca</h2>
-        <div className={styles.flags}>
-          {brandMedia.map((media, index) => (
-            <div key={media.id}>
-              {thumb(media) ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={thumb(media)} alt="" width={120} style={{ height: "auto" }} />
-              ) : (
-                <p>{media.status}</p>
-              )}
-              <p>Imagem {index + 1}</p>
-              <form action={deleteMedia}>
-                {tenantField}
-                <input type="hidden" name="back" value="config" />
-                <input type="hidden" name="media_id" value={media.id} />
-                <button type="submit" className={styles.buttonGhost}>
-                  Remover
-                </button>
-              </form>
-            </div>
-          ))}
+      <Section id="marca" title="Marca" description="Logo, cores e fonte da vitrine">
+        <p className={local.subhead}>Imagens da marca</p>
+        {brandMedia.length ? (
+          <div className={local.gallery}>
+            {brandMedia.map((media, index) => (
+              <div key={media.id} className={local.tile}>
+                <Thumb media={media} />
+                <span>Imagem {index + 1}</span>
+                <form action={deleteMedia}>
+                  {tenantField}
+                  <input type="hidden" name="back" value="config" />
+                  <input type="hidden" name="media_id" value={media.id} />
+                  <button type="submit" className={`${styles.buttonDanger} ${styles.buttonSmall}`}>
+                    Remover
+                  </button>
+                </form>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className={local.uploader}>
+          <ImageUploader
+            tenantId={context.tenant_id}
+            ownerType="tenant_brand"
+            label="Enviar logo ou imagem de compartilhamento"
+          />
         </div>
-        <ImageUploader tenantId={context.tenant_id} ownerType="tenant_brand" label="Enviar logo ou imagem de compartilhamento" />
-      </section>
 
-      <section className={styles.card}>
-        <h2>Marca</h2>
-        <form action={saveBranding} className={styles.form}>
+        <form action={saveBranding} className={local.part}>
           {tenantField}
-          <label>
-            Cor principal
-            <input type="color" name="primary_color" defaultValue={String(branding.primary_color ?? "#111111")} />
-          </label>
-          <label>
-            Cor de destaque (links)
-            <input
-              type="color"
-              name="secondary_color"
-              defaultValue={String(branding.secondary_color ?? branding.primary_color ?? "#111111")}
-            />
-          </label>
-          <label>
-            Fonte da loja
-            <select name="font" defaultValue={String(branding.font ?? "system")}>
-              <option value="system">Padrão do aparelho</option>
-              <option value="serif">Serifada (clássica)</option>
-              <option value="rounded">Arredondada</option>
-            </select>
-          </label>
-          <label>
-            Logo
-            {mediaSelect("logo_media_id", readyBrand, branding.logo_media_id)}
-          </label>
-          <button type="submit" className={styles.button}>
-            Salvar marca
-          </button>
+          <div className={styles.fields}>
+            <label className={styles.field}>
+              Logo
+              {mediaSelect("logo_media_id", readyBrand, branding.logo_media_id)}
+              <span className={styles.fieldHint}>Envie a imagem acima e escolha aqui qual é o logo.</span>
+            </label>
+            <label className={styles.field}>
+              Fonte da loja
+              <select name="font" defaultValue={String(branding.font ?? "system")}>
+                <option value="system">Padrão do aparelho</option>
+                <option value="serif">Serifada (clássica)</option>
+                <option value="rounded">Arredondada</option>
+              </select>
+            </label>
+            <label className={styles.field}>
+              Cor principal
+              <input
+                type="color"
+                name="primary_color"
+                className={local.color}
+                defaultValue={String(branding.primary_color ?? "#111111")}
+              />
+            </label>
+            <label className={styles.field}>
+              Cor de destaque (links)
+              <input
+                type="color"
+                name="secondary_color"
+                className={local.color}
+                defaultValue={String(branding.secondary_color ?? branding.primary_color ?? "#111111")}
+              />
+            </label>
+          </div>
+          <div className={styles.formActions}>
+            <button type="submit" className={styles.button}>
+              Salvar marca
+            </button>
+          </div>
         </form>
-      </section>
+      </Section>
 
-      <section className={styles.card}>
-        <h2>Buscadores e compartilhamento</h2>
-        <form action={saveSeo} className={styles.form}>
-          {tenantField}
-          <label>
-            Título
-            <input name="title" maxLength={70} defaultValue={String(seo.title ?? "")} />
-          </label>
-          <label style={{ flexBasis: "100%" }}>
-            Descrição
-            <input name="description" maxLength={160} defaultValue={String(seo.description ?? "")} />
-          </label>
-          <label>
-            Imagem de compartilhamento
-            {mediaSelect("og_image_media_id", readyBrand, seo.og_image_media_id)}
-          </label>
-          <label>
-            <span>
-              <input type="checkbox" name="indexable" defaultChecked={seo.indexable === true} /> aparecer no Google
-              (só vale com a loja aberta ao público)
-            </span>
-          </label>
-          <button type="submit" className={styles.button}>
-            Salvar SEO
-          </button>
-        </form>
-      </section>
-
-      <section className={styles.card}>
-        <h2>Página inicial</h2>
+      <Section id="pagina-inicial" title="Página inicial" description="O que o cliente vê ao abrir a loja, bloco por bloco">
         {accessMode !== "public" &&
         blocks.some((block) => block.type === "featured_products" || block.type === "categories") ? (
-          <p className="muted">
+          <p className={styles.note}>
             A vitrine está {ACCESS_LABEL[accessMode] ?? accessMode}: quem ainda não tem acesso vê os blocos de
             produtos como “entre para ver”, sem os produtos. Para abrir a loja, fale com o suporte.
           </p>
         ) : null}
-        <div className={styles.flags}>
-          {landingMedia.map((media, index) => (
-            <div key={media.id}>
-              {thumb(media) ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={thumb(media)} alt="" width={120} style={{ height: "auto" }} />
-              ) : (
-                <p>{media.status}</p>
-              )}
-              <p>Imagem {index + 1}</p>
-            </div>
-          ))}
-        </div>
-        <ImageUploader tenantId={context.tenant_id} ownerType="landing" label="Enviar imagens para a página inicial" />
 
-        <form action={saveLanding}>
+        <p className={local.subhead}>Imagens da página inicial</p>
+        {landingMedia.length ? (
+          <div className={local.gallery}>
+            {landingMedia.map((media, index) => (
+              <div key={media.id} className={local.tile}>
+                <Thumb media={media} />
+                <span>Imagem {index + 1}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className={local.uploader}>
+          <ImageUploader tenantId={context.tenant_id} ownerType="landing" label="Enviar imagens para a página inicial" />
+        </div>
+
+        <form action={saveLanding} className={local.part}>
           {tenantField}
           <input type="hidden" name="block_count" value={blocks.length} />
+          <p className={local.subhead}>Blocos, na ordem em que aparecem</p>
+          {blocks.length === 0 ? (
+            <p className={styles.hint}>A página inicial ainda não tem blocos. Adicione o primeiro abaixo.</p>
+          ) : null}
           {blocks.map((block, i) => (
-            <fieldset key={i} className={styles.card}>
+            <fieldset key={i} className={local.block}>
               <legend>
                 {i + 1}. {BLOCK_LABEL[block.type] ?? block.type}
               </legend>
               <input type="hidden" name={`b${i}.type`} value={block.type} />
-              <div className={styles.form}>
+              <div className={styles.fields}>
                 {block.type !== "contact" ? (
-                  <label>
+                  <label className={styles.field}>
                     Título
                     <input name={`b${i}.title`} maxLength={80} defaultValue={String(block.title ?? "")} />
                   </label>
                 ) : null}
                 {block.type === "hero" ? (
                   <>
-                    <label>
+                    <label className={styles.field}>
                       Subtítulo
                       <input name={`b${i}.subtitle`} maxLength={200} defaultValue={String(block.subtitle ?? "")} />
                     </label>
-                    <label>
+                    <label className={styles.field}>
                       Botão
                       <input name={`b${i}.cta_label`} maxLength={30} defaultValue={String(block.cta_label ?? "")} />
+                      <span className={styles.fieldHint}>O texto do botão, como “Ver produtos”.</span>
                     </label>
-                    <label>
+                    <label className={styles.field}>
                       Botão leva para
                       <select name={`b${i}.cta_target`} defaultValue={String(block.cta_target ?? "catalog")}>
                         <option value="catalog">catálogo</option>
@@ -229,35 +260,38 @@ export default async function Settings({
                   </>
                 ) : null}
                 {block.type === "hero" || block.type === "text" ? (
-                  <label>
+                  <label className={styles.field}>
                     Imagem
                     {mediaSelect(`b${i}.media_id`, readyLanding, block.media_id)}
                   </label>
                 ) : null}
                 {block.type === "text" ? (
-                  <label style={{ flexBasis: "100%" }}>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
                     Texto
                     <textarea name={`b${i}.body`} rows={4} maxLength={2000} defaultValue={String(block.body ?? "")} />
                   </label>
                 ) : null}
                 {block.type === "featured_products" ? (
-                  <div className={styles.flags} style={{ flexBasis: "100%" }}>
-                    {products.items.map((product) => (
-                      <label key={product.id}>
-                        <input
-                          type="checkbox"
-                          name={`b${i}.product_ids`}
-                          value={product.id}
-                          defaultChecked={((block.product_ids as string[] | undefined) ?? []).includes(product.id)}
-                        />
-                        {product.name}
-                      </label>
-                    ))}
-                  </div>
+                  <fieldset className={`${styles.fieldWide} ${local.group}`}>
+                    <legend>Produtos</legend>
+                    <div className={styles.flags}>
+                      {products.items.map((product) => (
+                        <label key={product.id} className={styles.check}>
+                          <input
+                            type="checkbox"
+                            name={`b${i}.product_ids`}
+                            value={product.id}
+                            defaultChecked={((block.product_ids as string[] | undefined) ?? []).includes(product.id)}
+                          />
+                          {product.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                 ) : null}
                 {block.type === "contact" ? (
                   <>
-                    <label>
+                    <label className={styles.field}>
                       WhatsApp
                       <input
                         name={`b${i}.whatsapp_e164`}
@@ -265,12 +299,14 @@ export default async function Settings({
                         defaultValue={String(block.whatsapp_e164 ?? "")}
                         placeholder="11 99999-9999"
                       />
+                      <span className={styles.fieldHint}>DDD + número.</span>
                     </label>
-                    <label>
+                    <label className={styles.field}>
                       Instagram
                       <input name={`b${i}.instagram`} defaultValue={String(block.instagram ?? "")} placeholder="nomedaloja" />
+                      <span className={styles.fieldHint}>Só o nome do perfil.</span>
                     </label>
-                    <label>
+                    <label className={styles.field}>
                       E-mail
                       <input
                         name={`b${i}.email`}
@@ -279,26 +315,27 @@ export default async function Settings({
                         placeholder="contato@sualoja.com.br"
                       />
                     </label>
-                    <label>
+                    <label className={`${styles.field} ${styles.fieldWide}`}>
                       Endereço
                       <input name={`b${i}.address`} maxLength={300} defaultValue={String(block.address ?? "")} />
                     </label>
-                    <label>
+                    <label className={`${styles.field} ${styles.fieldWide}`}>
                       Horário
                       <input name={`b${i}.hours`} maxLength={300} defaultValue={String(block.hours ?? "")} />
                     </label>
                   </>
                 ) : null}
-                <label>
-                  <span>
-                    <input type="checkbox" name={`b${i}.remove`} /> remover bloco
-                  </span>
+              </div>
+              <div className={local.blockFoot}>
+                <label className={styles.check}>
+                  <input type="checkbox" name={`b${i}.remove`} /> Remover este bloco ao salvar
                 </label>
               </div>
             </fieldset>
           ))}
-          <div className={styles.form}>
-            <label>
+
+          <div className={styles.fields}>
+            <label className={styles.field}>
               Adicionar bloco
               <select name="add_block" defaultValue="">
                 <option value="">(nenhum)</option>
@@ -307,51 +344,105 @@ export default async function Settings({
                 <option value="contact">{BLOCK_LABEL.contact}</option>
                 {products.items.length ? <option value="featured_products">{BLOCK_LABEL.featured_products}</option> : null}
               </select>
+              <span className={styles.fieldHint}>O bloco novo entra no fim da página quando você salvar.</span>
             </label>
-            {products.items.length ? (
-              <details>
-                <summary>Produtos para um novo bloco de destaques</summary>
-                <div className={styles.flags}>
-                  {products.items.map((product) => (
-                    <label key={product.id}>
-                      <input type="checkbox" name="add_product_ids" value={product.id} />
-                      {product.name}
-                    </label>
-                  ))}
-                </div>
-              </details>
-            ) : null}
+          </div>
+          {products.items.length ? (
+            <details className={local.part}>
+              <summary>Produtos para um novo bloco de destaques</summary>
+              <div className={`${styles.flags} ${local.detailsBody}`}>
+                {products.items.map((product) => (
+                  <label key={product.id} className={styles.check}>
+                    <input type="checkbox" name="add_product_ids" value={product.id} />
+                    {product.name}
+                  </label>
+                ))}
+              </div>
+            </details>
+          ) : null}
+          <div className={styles.formActions}>
             <button type="submit" className={styles.button}>
               Salvar página inicial
             </button>
           </div>
         </form>
-      </section>
+      </Section>
 
-      <section className={styles.card}>
-        <h2>Termos e privacidade</h2>
-        <p className="muted">
+      <Section id="google" title="Google e compartilhamento" description="Como a loja aparece nas buscas e nos links enviados">
+        <form action={saveSeo}>
+          {tenantField}
+          <div className={styles.fields}>
+            <label className={styles.field}>
+              Título
+              <input name="title" maxLength={70} defaultValue={String(seo.title ?? "")} />
+              <span className={styles.fieldHint}>Até 70 letras.</span>
+            </label>
+            <label className={styles.field}>
+              Imagem de compartilhamento
+              {mediaSelect("og_image_media_id", readyBrand, seo.og_image_media_id)}
+              <span className={styles.fieldHint}>Aparece quando alguém manda o link da loja. Vem das imagens da marca.</span>
+            </label>
+            <label className={`${styles.field} ${styles.fieldWide}`}>
+              Descrição
+              <input name="description" maxLength={160} defaultValue={String(seo.description ?? "")} />
+              <span className={styles.fieldHint}>Até 160 letras: o resumo que aparece embaixo do título.</span>
+            </label>
+            <label className={`${styles.check} ${styles.fieldWide}`}>
+              <input type="checkbox" name="indexable" defaultChecked={seo.indexable === true} />
+              <span>
+                Aparecer no Google
+                <span className={styles.fieldHint}> · só vale com a loja aberta ao público</span>
+              </span>
+            </label>
+          </div>
+          <div className={styles.formActions}>
+            <button type="submit" className={styles.button}>
+              Salvar Google e compartilhamento
+            </button>
+          </div>
+        </form>
+      </Section>
+
+      <Section id="termos" title="Termos e privacidade" description="O que o cliente aceita ao entrar na loja">
+        <p className={local.intro}>
           Cada publicação vira uma nova versão. Quem entra na loja aceita a versão mostrada na tela de login, e o
           aceite fica registrado com data.
         </p>
         {(["terms", "privacy"] as const).map((kind) => {
           const current = legal[kind];
           return (
-            <form key={kind} action={publishLegalDocument} className={styles.form}>
+            <form key={kind} action={publishLegalDocument} className={local.legal}>
               {tenantField}
               <input type="hidden" name="kind" value={kind} />
-              <label>
-                {LEGAL_LABEL[kind]}
-                {current ? ` (versão ${current.version})` : " (não publicado)"}
-                <textarea name="content" rows={8} minLength={20} maxLength={100000} required defaultValue={current?.content ?? ""} />
+              <label className={styles.field}>
+                <span className={local.legalHead}>
+                  {LEGAL_LABEL[kind]}
+                  {current ? (
+                    <Pill state="live">
+                      Versão {current.version} · {published(current.published_at)}
+                    </Pill>
+                  ) : (
+                    <Pill state="pending">Não publicado</Pill>
+                  )}
+                </span>
+                <textarea
+                  name="content"
+                  rows={8}
+                  minLength={20}
+                  maxLength={100000}
+                  required
+                  defaultValue={current?.content ?? ""}
+                />
               </label>
-              <button type="submit" className={styles.buttonGhost}>
-                Publicar {LEGAL_LABEL[kind].toLowerCase()}
-              </button>
+              <div className={styles.formActions}>
+                <button type="submit" className={styles.buttonGhost}>
+                  Publicar {LEGAL_LABEL[kind].toLowerCase()}
+                </button>
+              </div>
             </form>
           );
         })}
-      </section>
+      </Section>
     </>
   );
 }

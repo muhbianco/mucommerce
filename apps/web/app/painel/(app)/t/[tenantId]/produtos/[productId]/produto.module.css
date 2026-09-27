@@ -1,0 +1,519 @@
+/*
+ * Editor do produto. Só o que o kit (panel.module.css) não tem: coluna lateral com a situação na
+ * loja, barra "Salvar produto" que fica à vista enquanto os dados estão na tela, fotos em grade e
+ * formulários compactos para opções, variantes, adicionais e lotes.
+ */
+
+/* A coluna lateral vem primeiro no HTML (no celular, a situação aparece antes de tudo);
+   no computador ela vai para a direita. */
+@media (min-width: 901px) {
+  .aside {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: stretch;
+  }
+
+  .main {
+    grid-column: 1;
+    grid-row: 1;
+  }
+}
+
+/* A situação rola com a página; os atalhos (curtos) acompanham a rolagem até o fim do editor. */
+@media (min-width: 901px) and (min-height: 600px) {
+  .toc {
+    position: sticky;
+    top: 4.75rem;
+  }
+}
+
+.main {
+  min-width: 0;
+}
+
+.editor section[id] {
+  scroll-margin-top: 5rem;
+}
+
+/* Fieldset só para desativar tudo de uma vez (sem permissão ou produto arquivado). */
+.plain {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sectionIntro {
+  max-width: 70ch;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.subhead {
+  margin: 1.35rem 0 0.8rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ situação na loja */
+
+.statusNote {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.was {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.storeLink {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+.statusActions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.statusActions form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.statusActions button {
+  width: 100%;
+}
+
+/* ------------------------------------------------------------------ atalhos */
+
+.tocTitle {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc a {
+  display: block;
+  margin: 0 -0.5rem;
+  padding: 0.22rem 0.5rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.toc a:hover {
+  background: var(--mist);
+}
+
+@media (max-width: 900px) {
+  .toc {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------------ fotos */
+
+.photos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.9rem;
+}
+
+.photo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.photoImg {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: var(--mist);
+}
+
+.photoPending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  aspect-ratio: 1;
+  padding: 0.75rem;
+  text-align: center;
+  background: var(--mist);
+  font-size: 0.8rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.photoMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.7rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.photoMeta summary {
+  font-size: 0.85rem;
+}
+
+.photoForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.6rem;
+}
+
+.photoRemove {
+  margin-top: 0.4rem;
+}
+
+.upload {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1.5px dashed rgba(12, 26, 34, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.upload label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.upload input[type="file"] {
+  max-width: 100%;
+  font-size: 0.85rem;
+}
+
+.upload ul {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.uploadHint {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ dados do produto */
+
+.legend {
+  padding: 0;
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.5rem 1rem;
+}
+
+.afterChecks {
+  margin-top: 1.25rem;
+}
+
+.seo {
+  margin-top: 1rem;
+}
+
+.seo > summary {
+  font-size: 0.9rem;
+}
+
+.seoFields {
+  margin-top: 0.85rem;
+}
+
+/* Fica colada no pé da tela enquanto os blocos de dados estão à vista; depois, no fim deles. */
+.saveBar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.saveHint {
+  margin-right: auto;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ opções e variantes */
+
+.optionRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.optionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 0.75rem 1rem;
+}
+
+.variantHead {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.variantName {
+  font-weight: 700;
+}
+
+.stockLink {
+  margin-left: auto;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.variantReason {
+  flex-basis: 100%;
+  margin: -0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.inlineForm {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.inlineForm > label {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ adicionais */
+
+.groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0.85rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.group legend {
+  padding: 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.groupFields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.groupFields > :first-child,
+.groupFields > :last-child {
+  grid-column: 1 / -1;
+}
+
+.more {
+  margin-top: 1rem;
+}
+
+.more > summary {
+  font-size: 0.9rem;
+}
+
+.more[open] > summary {
+  margin-bottom: 1rem;
+}
+
+/* ------------------------------------------------------------------ evento e lotes */
+
+.allocation {
+  margin: 0;
+}
+
+.lots {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lot {
+  padding: 0.9rem 1rem 1rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.lotHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.lotSku {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.lotRemove {
+  margin-left: auto;
+}
+
+.lotDetail {
+  margin: -0.4rem 0 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.lotActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.newLot {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1.5px dashed rgba(12, 26, 34, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+/* Grade compacta: datas ocupam duas colunas, número e preço uma. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.span2 {
+  grid-column: span 2;
+}
+
+/* ------------------------------------------------------------------ arquivar */
+
+/* O primeiro clique só abre a confirmação; o botão vermelho é o segundo. */
+.archive > summary {
+  width: fit-content;
+  list-style: none;
+}
+
+.archive > summary::-webkit-details-marker {
+  display: none;
+}
+
+.archiveConfirm {
+  display: grid;
+  justify-items: start;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+}
+
+.archiveConfirm p {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ celular */
+
+@media (max-width: 640px) {
+  .optionRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* No celular a barra fica só com o botão, para cobrir pouco da tela. */
+  .saveHint {
+    display: none;
+  }
+}
+
+/* Abaixo disso duas colunas de 7,5rem não cabem num lote: tudo em uma coluna. */
+@media (max-width: 360px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .span2 {
+    grid-column: auto;
+  }
+}

@@ -1,0 +1,149 @@
+/* Detalhe do pedido: só o que o kit do painel não tem. Usa as variáveis de `.shell`. */
+
+/* Listas sem marcador (devoluções, pagamentos, e-mails) com o visual de `.rows`. */
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Botões de próximo passo empilhados na coluna lateral, largura cheia. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.actions button {
+  width: 100%;
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Cancelar fica separado dos passos normais, embaixo de uma linha. */
+.danger {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.stackForm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.stackForm > button {
+  align-self: flex-start;
+}
+
+/* Bloco que abre sob demanda (pedir uma devolução). */
+.more {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.more > summary + * {
+  margin-top: 1rem;
+}
+
+/* Totais embaixo dos itens (a tabela do kit põe borda em toda linha). */
+.totals td {
+  border-bottom: 0 !important;
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.totals tr:first-child td {
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem !important;
+}
+
+.grandTotal td {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.itemExtra {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Andamento: linha do tempo com um ponto por mudança; o último (situação atual) é cheio. */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.1rem;
+  border-left: 2px solid var(--mist);
+}
+
+.timeline li {
+  position: relative;
+  padding: 0 0 0.9rem 0.6rem;
+}
+
+.timeline li:last-child {
+  padding-bottom: 0;
+}
+
+.timeline li::before {
+  content: "";
+  position: absolute;
+  /* centro do ponto sobre a linha: recuo da lista + metade da borda + metade do ponto */
+  left: calc(-1.5rem - 1px);
+  top: 0.35rem;
+  box-sizing: border-box;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 2px solid var(--teal);
+}
+
+.timeline li:last-child::before {
+  background: var(--teal);
+}
+
+.timelineWhen {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.money {
+  align-self: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Uma coluna (celular, tablet): a situação, com os botões do próximo passo, vem antes dos itens;
+   cliente, entrega e pagamento continuam depois. No computador a lateral fica à direita. */
+@media (max-width: 900px) {
+  .layout {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .aside {
+    display: contents;
+  }
+
+  .aside > :first-child {
+    order: -1;
+  }
+}

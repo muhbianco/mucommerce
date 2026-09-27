@@ -1,0 +1,103 @@
+/*
+ * Estoque (lista e extrato): o que o kit do painel não tem. Só variáveis do `.shell`.
+ */
+
+/* Nome do produto em cima, variante e SKU embaixo. */
+.name {
+  font-weight: 700;
+}
+
+.sub {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Linha com problema (esgotado ou abaixo do mínimo): um fundo leve além do selo. */
+.alert {
+  background: rgba(226, 78, 59, 0.05);
+}
+
+/* Busca da lista: o campo de texto cresce, o resto fica no tamanho. */
+.search {
+  flex: 1 1 14rem;
+  max-width: 24rem;
+}
+
+.search input {
+  width: 100%;
+}
+
+/* Caixa "só estoque baixo" na barra de filtros, alinhada com a base dos campos. */
+.checkInline {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.65rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.clear {
+  align-self: center;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+/* Movimento rápido dentro da tabela: campos compactos numa linha. */
+.quick {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 25rem;
+}
+
+.quick input,
+.quick select {
+  padding: 0.4rem 0.55rem;
+  font-size: 0.86rem;
+}
+
+.qty {
+  width: 5rem;
+}
+
+.reason {
+  width: 9rem;
+}
+
+/* Extrato: link de volta acima do título. */
+.back {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.back a {
+  text-decoration: none;
+}
+
+.when {
+  white-space: nowrap;
+}
+
+.actor {
+  font-size: 0.82rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* No celular a coluna de ações vem antes do extrato (que pode ser longo). */
+.aside {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .aside {
+    order: -1;
+  }
+}

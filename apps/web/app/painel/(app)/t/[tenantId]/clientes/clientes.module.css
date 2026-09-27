@@ -1,0 +1,86 @@
+/* Clientes: filtro por situação em "chips" (não confundir com o menu da loja) e decisões na linha. */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.filters .chip {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    color 0.2s;
+}
+
+.filters .chip:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.filters .chip[aria-current="page"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+
+.person {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 12rem;
+}
+
+.sub {
+  font-size: 0.84rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.verified {
+  color: var(--teal-deep);
+  font-weight: 600;
+}
+
+.note {
+  margin: 0.35rem 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+.message {
+  margin: 0.25rem 0 0;
+  max-width: 28ch;
+  font-size: 0.88rem;
+  font-style: italic;
+  color: var(--ink-soft);
+}
+
+.decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 15rem;
+}
+
+.decision {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.decision input {
+  flex: 1;
+  min-width: 7rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.86rem;
+}

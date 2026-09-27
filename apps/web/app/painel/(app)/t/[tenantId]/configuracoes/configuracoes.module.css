@@ -1,0 +1,181 @@
+/* Configurações da loja: só o que o kit do painel não tem. Usa as variáveis de `.shell`. */
+
+/* Atalhos para as seções (a página é longa). */
+.jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: -0.5rem 0 1.25rem;
+}
+
+/* Duas classes: vence a cor padrão dos links do painel (`.shell a`). */
+.jump .jumpLink {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.jump .jumpLink:hover {
+  border-color: rgba(26, 107, 107, 0.45);
+  color: var(--teal-deep);
+}
+
+/* Pedaço de uma seção, separado do anterior por uma linha. */
+.part {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.subhead {
+  margin: 0 0 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Imagens enviadas em miniatura. */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tileImage {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  background: var(--mist);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Área de envio de imagens (o componente de envio vem sem estilo próprio). */
+.uploader {
+  padding: 0.9rem 1rem;
+  border: 1.5px dashed rgba(12, 26, 34, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.uploader label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.uploader input[type="file"] {
+  max-width: 100%;
+  font-weight: 500;
+}
+
+.uploader ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Campo de cor: caixa baixa em vez de barra alta. */
+.color {
+  height: 2.7rem;
+  padding: 0.25rem !important;
+  cursor: pointer;
+}
+
+/* Cada bloco da página inicial num cartão. */
+.block {
+  min-width: 0;
+  margin: 0 0 1rem;
+  padding: 0.9rem 1.1rem 1.1rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.block legend {
+  padding: 0 0.4rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+.blockFoot {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+}
+
+.blockFoot label {
+  font-size: 0.86rem;
+  color: var(--coral-deep);
+}
+
+/* Grupo de caixas de marcar com título (fieldset sem a moldura do navegador). */
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.group legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.legalHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legal + .legal {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.detailsBody {
+  margin-top: 0.75rem;
+}
+
+.intro {
+  max-width: 62ch;
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}

@@ -1,0 +1,183 @@
+/*
+ * Entrega e checkout: o que o kit do painel não tem. Só variáveis do `.shell`.
+ */
+
+/* "Oferecer retirada / entrega": a chave geral da seção, destacada do resto. */
+.toggle {
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 1rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.checkText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+/* Caixa de marcar no meio de uma grade de campos: alinhada com a base dos campos. */
+.checkCell {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  min-height: 2.65rem;
+}
+
+/* Locais e zonas: cada um num cartão que abre para editar. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.item {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.item > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  padding: 0.75rem 0.9rem;
+  list-style: none;
+}
+
+.item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.item > summary::before {
+  content: "▸";
+  color: var(--muted);
+  transition: transform 0.2s var(--ease);
+}
+
+.item[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.itemTitle {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.itemSub {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.itemBody {
+  padding: 1rem 0.9rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* "Adicionar…": o cartão vazio, com cara de ação. */
+.add {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.item.add > summary {
+  color: var(--teal-deep);
+}
+
+.newRow + .newRow {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed var(--line);
+}
+
+.groupLabel {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Zona: campos de CEP e de bairro em grupos; o grupo que não vale para o tipo escolhido fica apagado. */
+.group {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px dashed var(--line);
+  transition: opacity 0.2s;
+}
+
+.zone:has(select option[value="districts"]:checked) .onlyCep,
+.zone:has(select option[value="cep_ranges"]:checked) .onlyDistricts {
+  opacity: 0.5;
+}
+
+.zone:has(select option[value="districts"]:checked) .onlyCep .groupLabel::after,
+.zone:has(select option[value="cep_ranges"]:checked) .onlyDistricts .groupLabel::after {
+  content: " · não vale para o tipo escolhido";
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+/* Horários: tabela de campos, compacta. */
+.windows input,
+.windows select {
+  padding: 0.4rem 0.55rem;
+  font-size: 0.88rem;
+}
+
+.windows th,
+.windows td {
+  white-space: nowrap;
+}
+
+.center {
+  text-align: center !important;
+}
+
+.intro {
+  margin: 0 0 1rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.subhead {
+  margin: 1.5rem 0 0.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
+/* Salvar entrega: um formulário só para três seções, então o botão acompanha a rolagem. */
+.saveBar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1.25rem;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+
+.saveBar p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}

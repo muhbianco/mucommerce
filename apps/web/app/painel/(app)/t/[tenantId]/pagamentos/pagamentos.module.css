@@ -1,0 +1,52 @@
+/* Meios de pagamento: só o que o kit do painel não tem. Usa as variáveis de `.shell`. */
+
+/* Grupo de caixas de marcar com título (fieldset sem a moldura do navegador). */
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.group legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.status {
+  margin-top: 1rem;
+}
+
+.testForm {
+  margin-top: 0.75rem;
+}
+
+/* Configuração de um meio que já está no ar: fechada até a pessoa pedir. */
+.more {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.more > summary + * {
+  margin-top: 1rem;
+}
+
+.config {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}

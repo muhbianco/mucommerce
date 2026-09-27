@@ -26,7 +26,7 @@ test("painel: a loja acompanha o pedido pago e marca como pronto", async ({ page
 
   await expect(page.getByRole("heading", { name: /Pedido #\d+ — Pago/ })).toBeVisible();
   await expect(page.getByText(/retirada em Loja MuhBianco/i)).toBeVisible();
-  await expect(page.getByText(/fake · pix/)).toBeVisible();
+  await expect(page.getByText(/Teste \(fake\) · Pix/)).toBeVisible();
   await expect(page.getByText(/Aprovado/)).toBeVisible();
   // The e-mails the store sent for this order are listed with their status.
   await expect(page.getByText(/Pagamento confirmado/).first()).toBeVisible();
@@ -88,6 +88,7 @@ test("painel: cancelar um pedido pago devolve o dinheiro e o estoque", async ({ 
   await page.getByRole("button", { name: /Cancelar pedido e devolver o dinheiro/ }).click();
 
   await expect(page.getByRole("heading", { name: /— Cancelado/ })).toBeVisible();
-  await expect(page.getByText(/Concluída · decisão da loja/)).toBeVisible();
+  const refund = page.getByRole("listitem").filter({ hasText: "decisão da loja" });
+  await expect(refund).toContainText("Concluída");
   await expect(page.getByText("com devolução")).toBeVisible();
 });

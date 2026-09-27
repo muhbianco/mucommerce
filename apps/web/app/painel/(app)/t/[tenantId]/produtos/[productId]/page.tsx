@@ -5,13 +5,17 @@ import { notFound } from "next/navigation";
 import { api, ApiError, requireMe } from "@/lib/panel/api";
 import { formatMoney, moneyInput, utcToLocalInput } from "@/lib/panel/format";
 import { tenantScopes } from "@/lib/panel/scopes";
+import { type PillState, PRODUCT_STATE, stateOf } from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   type Category,
-  type Product,
+  type EventLot,
   EVENT_STATUS_LABEL,
   LOT_STATE_LABEL,
+  type Media,
   MODIFIER_GROUP_ROWS,
+  type ModifierGroup,
+  type Product,
   PRODUCT_KINDS,
   PRODUCT_OPTION_ROWS,
   PRODUCT_STATUS_LABEL,
@@ -36,8 +40,113 @@ import {
 } from "../../actions";
 import { Flash } from "../../flash";
 import { ImageUploader } from "../../image-uploader";
+import { EmptyState, KeyValues, PageHeader, Pill, Section } from "../../ui";
+import local from "./produto.module.css";
 
 export const metadata: Metadata = { title: "Produto" };
+
+/** Frase sobre a situação do produto na loja (a de pausado leva o motivo e é montada à parte). */
+const STATUS_NOTE: Record<string, string> = {
+  draft: "Rascunho: só aparece aqui no painel.",
+  active: "Publicado: aparece na loja.",
+  inactive: "Fora da vitrine: o cliente não vê.",
+  archived: "Arquivado: fica só para consulta.",
+};
+
+/** Foto ainda sem versão pronta: a situação em palavras de lojista. */
+const MEDIA_STATE: Record<Media["status"], { label: string; state: PillState }> = {
+  pending: { label: "Aguardando envio", state: "pending" },
+  processing: { label: "Processando", state: "pending" },
+  ready: { label: "Pronta", state: "live" },
+  failed: { label: "Recusada", state: "warn" },
+};
+
+const LOT_STATE: Record<EventLot["state"], PillState> = {
+  on_sale: "live",
+  upcoming: "pending",
+  sold_out: "off",
+  ended: "off",
+  unavailable: "warn",
+};
+
+/** "fora de venda (produto não publicado…)" → selo curto e a explicação embaixo dele. */
+function lotState(state: EventLot["state"]): { label: string; detail: string | null } {
+  const text = LOT_STATE_LABEL[state] ?? state;
+  const match = /^(.*?)\s*\((.*)\)$/.exec(text);
+  return match ? { label: match[1] || text, detail: match[2] || null } : { label: text, detail: null };
+}
+
+/** Categorias na ordem da árvore: a principal e, logo depois, as de dentro dela. Nenhuma fica de fora. */
+function categoryTree(categories: Category[]): { category: Category; parent: Category | null }[] {
+  const byId = new Map(categories.map((category) => [category.id, category]));
+  const rows: { category: Category; parent: Category | null }[] = [];
+  for (const root of categories.filter((category) => !category.parent_id)) {
+    rows.push({ category: root, parent: null });
+    for (const child of categories.filter((category) => category.parent_id === root.id)) {
+      rows.push({ category: child, parent: root });
+    }
+  }
+  // Sem a principal na lista: vai para o fim, para a marcação do produto não se perder ao salvar.
+  const placed = new Set(rows.map((row) => row.category.id));
+  for (const category of categories) {
+    if (!placed.has(category.id)) {
+      rows.push({ category, parent: category.parent_id ? (byId.get(category.parent_id) ?? null) : null });
+    }
+  }
+  return rows;
+}
+
+/** Um grupo de adicionais do formulário (os nomes dos campos seguem o índice do grupo). */
+function ModifierGroupFields({
+  index,
+  group,
+  disabled,
+}: {
+  index: number;
+  group: ModifierGroup | undefined;
+  disabled: boolean;
+}) {
+  return (
+    <fieldset className={local.group} disabled={disabled}>
+      <legend>Grupo {index + 1}</legend>
+      <div className={local.groupFields}>
+        <label className={styles.field}>
+          Nome do grupo
+          <input
+            name={`group_name_${index}`}
+            maxLength={60}
+            defaultValue={group?.name ?? ""}
+            placeholder={index === 0 ? "ex.: Cobertura" : undefined}
+          />
+        </label>
+        <label className={styles.field}>
+          Mínimo
+          <input name={`group_min_${index}`} type="number" min={0} max={30} defaultValue={group?.min_select ?? 0} />
+          <span className={styles.fieldHint}>0 = opcional</span>
+        </label>
+        <label className={styles.field}>
+          Máximo
+          <input name={`group_max_${index}`} type="number" min={1} max={30} defaultValue={group?.max_select ?? 1} />
+          <span className={styles.fieldHint}>Quantos dá para escolher</span>
+        </label>
+        <label className={styles.field}>
+          Adicionais
+          <textarea
+            name={`group_items_${index}`}
+            rows={3}
+            maxLength={3000}
+            placeholder={index === 0 ? "Chocolate = 3,50\nGranulado" : undefined}
+            defaultValue={(group?.modifiers ?? [])
+              .filter((m) => m.active)
+              .map((m) => (m.price_cents ? `${m.name} = ${moneyInput(m.price_cents)}` : m.name))
+              .join("\n")}
+          />
+          <span className={styles.fieldHint}>Um por linha: Nome = 3,50</span>
+        </label>
+      </div>
+    </fieldset>
+  );
+}
 
 export default async function ProductPage({
   params,
@@ -86,553 +195,850 @@ export default async function ProductPage({
   const ready = product.media.filter((m) => m.status === "ready").length;
   const published = product.status === "active" || product.status === "paused";
   const canPublish = scopes.can("catalog:publish") && product.status !== "archived";
+  const canArchive = canPublish && scopes.can("catalog:write");
+  const hasEvent = isTicket && context.features.events;
+  const lotPrices = (event?.lots ?? []).map((lot) => lot.price_cents);
+  const tree = categoryTree(categories);
+  const storeUrl =
+    published && context.primary_host ? `https://${context.primary_host}/loja/produto/${product.slug}` : null;
+  const statusNote =
+    product.status === "paused"
+      ? `Venda pausada${product.paused_reason ? `: ${product.paused_reason}` : ""}. Na vitrine, o produto aparece como indisponível.`
+      : (STATUS_NOTE[product.status] ?? null);
+  // Grupos de adicionais: os preenchidos e um vazio à vista; os outros vazios ficam em "Mais grupos".
+  const usedGroups = Math.min(MODIFIER_GROUP_ROWS, product.modifier_groups.length);
+  const shownGroups = canWrite ? Math.min(MODIFIER_GROUP_ROWS, usedGroups + 1) : usedGroups;
+  const smallButton = `${styles.buttonGhost} ${styles.buttonSmall}`;
+  const dangerButton = `${styles.buttonDanger} ${styles.buttonSmall}`;
+  const toc: [string, string][] = [
+    ["fotos", "Fotos"],
+    ["basico", "Informações básicas"],
+    ["preco", "Preço"],
+    ["venda", "Como você vende"],
+    ["organizacao", "Organização na loja"],
+    ["link", "Link e Google"],
+    ...(isTicket ? [] : ([["opcoes", "Opções"]] as [string, string][])),
+    ...(hasEvent ? ([["evento", "Evento e lotes"]] as [string, string][]) : []),
+    ["variantes", product.has_variants ? "Variantes e estoque" : "Variante e estoque"],
+    ["adicionais", "Adicionais"],
+  ];
 
   return (
     <>
-      <p>
-        <Link href={`${base}/produtos`}>← Produtos</Link>
-      </p>
-      <h2>
-        {product.name} <span className={styles.badge}>{PRODUCT_STATUS_LABEL[product.status]}</span>
-      </h2>
+      <PageHeader
+        eyebrow="Produtos"
+        title={product.name}
+        lead="Complete as fotos e os dados e publique quando estiver pronto."
+        actions={
+          <Link href={`${base}/produtos`} className={smallButton}>
+            ← Todos os produtos
+          </Link>
+        }
+      />
       <Flash ok={ok} erro={erro} />
 
-      {canPublish ? (
-        <section className={styles.card}>
-          <h2>Vitrine</h2>
-          <p>
-            Preço atual: {formatMoney(product.price.amount_cents)}
-            {product.price.compare_at_cents ? ` (de ${formatMoney(product.price.compare_at_cents)})` : ""} ·
-            Imagens prontas: {ready}
-            {published && context.primary_host ? (
-              <>
-                {" · "}
-                <a
-                  href={`https://${context.primary_host}/loja/produto/${product.slug}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  ver na loja
+      <div className={`${styles.split} ${local.editor}`}>
+        <aside className={local.aside}>
+          <Section
+            title="Na loja"
+            actions={
+              <Pill state={stateOf(PRODUCT_STATE, product.status)}>
+                {PRODUCT_STATUS_LABEL[product.status] ?? product.status}
+              </Pill>
+            }
+          >
+            {statusNote ? <p className={local.statusNote}>{statusNote}</p> : null}
+            <KeyValues
+              items={[
+                isTicket
+                  ? {
+                      // Ingresso vende pelo preço do lote; o preço do produto não chega ao cliente.
+                      label: "Ingressos",
+                      value: lotPrices.length ? (
+                        `a partir de ${formatMoney(Math.min(...lotPrices))}`
+                      ) : (
+                        <a href="#evento">Nenhum lote</a>
+                      ),
+                    }
+                  : {
+                      label: "Preço agora",
+                      value: (
+                        <>
+                          {formatMoney(product.price.amount_cents)}
+                          {product.price.compare_at_cents ? (
+                            <span className={local.was}>
+                              {" "}
+                              de <s>{formatMoney(product.price.compare_at_cents)}</s>
+                            </span>
+                          ) : null}
+                        </>
+                      ),
+                    },
+                { label: "Fotos prontas", value: ready ? String(ready) : <a href="#fotos">Nenhuma</a> },
+              ]}
+            />
+            {storeUrl ? (
+              <p className={local.storeLink}>
+                <a href={storeUrl} target="_blank" rel="noreferrer">
+                  Ver na loja ↗
                 </a>
-              </>
-            ) : null}
-          </p>
-          <div className={styles.form}>
-            <form action={setProductStatus}>
-              {hidden}
-              <input type="hidden" name="action" value={published ? "unpublish" : "publish"} />
-              <button type="submit" className={published ? styles.buttonGhost : styles.button}>
-                {published ? "Tirar da vitrine" : "Publicar"}
-              </button>
-            </form>
-            {product.status === "active" ? (
-              <form action={setProductStatus}>
-                {hidden}
-                <input type="hidden" name="action" value="pause" />
-                <label>
-                  Motivo (só você vê)
-                  <input name="reason" maxLength={200} placeholder="ex.: forno em manutenção" />
-                </label>
-                <button type="submit" className={styles.button}>
-                  Pausar venda
-                </button>
-              </form>
-            ) : null}
-            {product.status === "paused" ? (
-              <form action={setProductStatus}>
-                {hidden}
-                <input type="hidden" name="action" value="resume" />
-                <button type="submit" className={styles.button}>
-                  Retomar venda
-                </button>
-              </form>
-            ) : null}
-            {scopes.can("catalog:write") ? (
-              <form action={setProductStatus}>
-                {hidden}
-                <input type="hidden" name="action" value="archive" />
-                <button type="submit" className={styles.buttonGhost}>
-                  Arquivar
-                </button>
-              </form>
-            ) : null}
-          </div>
-          {product.status === "paused" ? (
-            <p>
-              Venda pausada{product.paused_reason ? `: ${product.paused_reason}` : ""}. Na vitrine, o produto
-              aparece como indisponível.
-            </p>
-          ) : (
-            <p className="muted">Para publicar: preço maior que zero e ao menos uma imagem pronta.</p>
-          )}
-        </section>
-      ) : null}
-
-      <section className={styles.card}>
-        <h2>Imagens</h2>
-        <div className={styles.flags}>
-          {product.media.map((media) => (
-            <div key={media.id}>
-              {media.renditions.length ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={media.renditions[media.renditions.length - 1]?.url}
-                  alt={media.alt ?? ""}
-                  width={160}
-                  style={{ maxWidth: "100%", height: "auto" }}
-                />
-              ) : (
-                <p>{media.status === "failed" ? `recusada: ${media.failure_reason ?? ""}` : media.status}</p>
-              )}
-              {canWrite ? (
-                <>
-                  <form action={updateMediaAlt} className={styles.form}>
-                    {hidden}
-                    <input type="hidden" name="media_id" value={media.id} />
-                    <label>
-                      Texto alternativo
-                      <input name="alt" defaultValue={media.alt ?? ""} maxLength={300} />
-                    </label>
-                    <label>
-                      Ordem
-                      <input name="position" type="number" defaultValue={media.position} style={{ width: "5rem" }} />
-                    </label>
-                    <button type="submit" className={styles.buttonGhost}>
-                      Salvar imagem
-                    </button>
-                  </form>
-                  <form action={deleteMedia}>
-                    {hidden}
-                    <input type="hidden" name="media_id" value={media.id} />
-                    <button type="submit" className={styles.buttonGhost}>
-                      Remover
-                    </button>
-                  </form>
-                </>
-              ) : null}
-            </div>
-          ))}
-        </div>
-        {canWrite && scopes.can("media:write") ? (
-          <ImageUploader tenantId={context.tenant_id} ownerType="product" ownerId={product.id} />
-        ) : null}
-      </section>
-
-      <section className={styles.card}>
-        <h2>Dados</h2>
-        <form action={updateProduct} className={styles.form}>
-          {hidden}
-          <input type="hidden" name="time_zone" value={zone} />
-          <fieldset disabled={!canWrite} style={{ display: "contents" }}>
-            <label>
-              Nome
-              <input name="name" required maxLength={200} defaultValue={product.name} />
-            </label>
-            <label>
-              Endereço (slug)
-              <input name="slug" required maxLength={160} pattern="[a-z0-9]+(-[a-z0-9]+)*" defaultValue={product.slug} />
-            </label>
-            <label>
-              Preço (R$)
-              <input name="price" required inputMode="decimal" defaultValue={moneyInput(product.base_price_cents)} />
-            </label>
-            <label>
-              Preço promocional
-              <input name="promo_price" inputMode="decimal" defaultValue={moneyInput(product.promo_price_cents)} />
-            </label>
-            <label>
-              Promoção de ({zone})
-              <input name="promo_starts_at" type="datetime-local" defaultValue={utcToLocalInput(product.promo_starts_at, zone)} />
-            </label>
-            <label>
-              até
-              <input name="promo_ends_at" type="datetime-local" defaultValue={utcToLocalInput(product.promo_ends_at, zone)} />
-            </label>
-            <label>
-              Custo estimado
-              <input name="cost" inputMode="decimal" defaultValue={moneyInput(product.cost_cents_estimate)} />
-            </label>
-            <label>
-              Tipo
-              <select name="kind" defaultValue={product.kind}>
-                {Object.entries(PRODUCT_KINDS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Estoque
-              <select name="stock_policy" defaultValue={product.stock_policy}>
-                {Object.entries(STOCK_POLICIES).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Vendido por
-              <select name="sold_by" defaultValue={product.sold_by}>
-                <option value="unit">unidade</option>
-                <option value="weight">peso</option>
-              </select>
-            </label>
-            <label>
-              Unidade
-              <input name="unit_label" maxLength={16} defaultValue={product.unit_label} style={{ width: "5rem" }} />
-            </label>
-            <label>
-              Ordem na vitrine
-              <input name="position" type="number" defaultValue={product.position} style={{ width: "6rem" }} />
-            </label>
-            <label style={{ flexBasis: "100%" }}>
-              Resumo
-              <input name="short_description" maxLength={500} defaultValue={product.short_description ?? ""} />
-            </label>
-            <label style={{ flexBasis: "100%" }}>
-              Descrição
-              <textarea name="description_md" rows={6} maxLength={20000} defaultValue={product.description_md ?? ""} />
-            </label>
-            <fieldset style={{ flexBasis: "100%" }}>
-              <legend>Categorias</legend>
-              <div className={styles.flags}>
-                {categories.map((category) => (
-                  <label key={category.id}>
-                    <input
-                      type="checkbox"
-                      name="category_ids"
-                      value={category.id}
-                      defaultChecked={product.category_ids.includes(category.id)}
-                    />
-                    {category.parent_id ? "— " : ""}
-                    {category.name}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <label style={{ flexBasis: "100%" }}>
-              Tags (separadas por vírgula; filtram a vitrine)
-              <input
-                name="tags"
-                maxLength={1300}
-                defaultValue={product.tags.map((tag) => tag.name).join(", ")}
-                placeholder="ex.: vegano, sem glúten"
-              />
-            </label>
-            {otherTags.length ? (
-              <p className="muted" style={{ flexBasis: "100%" }}>
-                Já usadas na loja: {otherTags.slice(0, 30).map((tag) => tag.name).join(", ")}
               </p>
             ) : null}
-            <label>
-              Título para buscadores
-              <input name="seo_title" maxLength={70} defaultValue={product.seo?.title ?? ""} />
-            </label>
-            <label style={{ flexBasis: "100%" }}>
-              Descrição para buscadores
-              <input name="seo_description" maxLength={160} defaultValue={product.seo?.description ?? ""} />
-            </label>
-            {canWrite ? (
-              <button type="submit" className={styles.button}>
-                Salvar dados
-              </button>
+            {!published && product.status !== "archived" ? (
+              <p className={styles.hint}>
+                {isTicket
+                  ? "Para publicar: ao menos um lote no evento e uma foto pronta."
+                  : "Para publicar: preço maior que zero e ao menos uma foto pronta."}
+              </p>
             ) : null}
-          </fieldset>
-        </form>
-      </section>
+            {canPublish ? (
+              <div className={local.statusActions}>
+                {product.status === "paused" ? (
+                  <form action={setProductStatus}>
+                    {hidden}
+                    <input type="hidden" name="action" value="resume" />
+                    <button type="submit" className={styles.button}>
+                      Retomar venda
+                    </button>
+                  </form>
+                ) : null}
+                {published ? null : (
+                  <form action={setProductStatus}>
+                    {hidden}
+                    <input type="hidden" name="action" value="publish" />
+                    <button type="submit" className={styles.button}>
+                      Publicar
+                    </button>
+                  </form>
+                )}
+                {product.status === "active" ? (
+                  <form action={setProductStatus}>
+                    {hidden}
+                    <input type="hidden" name="action" value="pause" />
+                    <label className={styles.field}>
+                      Motivo (só você vê)
+                      <input name="reason" maxLength={200} placeholder="ex.: forno em manutenção" />
+                    </label>
+                    <button type="submit" className={styles.buttonGhost}>
+                      Pausar venda
+                    </button>
+                    <span className={styles.fieldHint}>O produto continua na vitrine, mas indisponível.</span>
+                  </form>
+                ) : null}
+                {published ? (
+                  <form action={setProductStatus}>
+                    {hidden}
+                    <input type="hidden" name="action" value="unpublish" />
+                    <button type="submit" className={styles.buttonGhost}>
+                      Tirar da vitrine
+                    </button>
+                    <span className={styles.fieldHint}>Some da loja até você publicar de novo.</span>
+                  </form>
+                ) : null}
+              </div>
+            ) : null}
+          </Section>
 
-      {isTicket && context.features.events ? (
-        <section className={styles.card}>
-          <h2>Evento e lotes</h2>
-          <p className="muted">
-            Cada lote tem preço, quantidade de ingressos e janela de vendas próprios. A quantidade vira o estoque do
-            lote; diminuir nunca apaga ingressos já vendidos.
-          </p>
-          <form action={saveEvent} className={styles.form}>
+          <nav className={`${styles.card} ${local.toc}`} aria-label="Partes desta página">
+            <p className={local.tocTitle}>Nesta página</p>
+            <ol>
+              {toc.map(([id, label]) => (
+                <li key={id}>
+                  <a href={`#${id}`}>{label}</a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        </aside>
+
+        <div className={local.main}>
+          <Section
+            id="fotos"
+            title="Fotos"
+            description={product.media.length ? (ready === 1 ? "1 foto pronta" : `${ready} fotos prontas`) : undefined}
+          >
+            {product.media.length ? (
+              <ul className={local.photos}>
+                {product.media.map((media) => {
+                  const view = media.renditions[media.renditions.length - 1];
+                  const state: { label: string; state: PillState } = MEDIA_STATE[media.status] ?? {
+                    label: media.status,
+                    state: "off",
+                  };
+                  return (
+                    <li key={media.id} className={local.photo}>
+                      {view ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img className={local.photoImg} src={view.url} alt={media.alt ?? ""} />
+                      ) : (
+                        <div className={local.photoPending}>
+                          <Pill state={state.state}>{state.label}</Pill>
+                          {media.status === "failed" && media.failure_reason ? (
+                            <span>{media.failure_reason}</span>
+                          ) : null}
+                        </div>
+                      )}
+                      <div className={local.photoMeta}>
+                        <span>Ordem {media.position}</span>
+                        {canWrite ? (
+                          <details>
+                            <summary>Editar</summary>
+                            <form action={updateMediaAlt} className={local.photoForm}>
+                              {hidden}
+                              <input type="hidden" name="media_id" value={media.id} />
+                              <label className={styles.field}>
+                                Descrição
+                                <input name="alt" defaultValue={media.alt ?? ""} maxLength={300} />
+                                <span className={styles.fieldHint}>Para leitor de tela e Google.</span>
+                              </label>
+                              <label className={styles.field}>
+                                Ordem
+                                <input name="position" type="number" defaultValue={media.position} />
+                              </label>
+                              <button type="submit" className={smallButton}>
+                                Salvar foto
+                              </button>
+                            </form>
+                            <form action={deleteMedia} className={local.photoRemove}>
+                              {hidden}
+                              <input type="hidden" name="media_id" value={media.id} />
+                              <button type="submit" className={dangerButton}>
+                                Remover foto
+                              </button>
+                            </form>
+                          </details>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <EmptyState title="Nenhuma foto ainda">
+                Para publicar, o produto precisa de ao menos uma foto pronta.
+              </EmptyState>
+            )}
+            {canWrite && scopes.can("media:write") ? (
+              <div className={local.upload}>
+                <ImageUploader
+                  tenantId={context.tenant_id}
+                  ownerType="product"
+                  ownerId={product.id}
+                  label="Adicionar fotos"
+                />
+                <p className={local.uploadHint}>JPEG, PNG ou WebP, até 10 MB cada. Dá para escolher várias de uma vez.</p>
+              </div>
+            ) : null}
+          </Section>
+
+          {/* Um formulário só: a API recebe todos estes campos juntos (PATCH do produto inteiro). */}
+          <form action={updateProduct}>
             {hidden}
             <input type="hidden" name="time_zone" value={zone} />
-            <fieldset disabled={!canWrite} style={{ display: "contents" }}>
-              <label>
-                Início ({zone})
-                <input name="starts_at" type="datetime-local" required defaultValue={utcToLocalInput(event?.starts_at, zone)} />
-              </label>
-              <label>
-                Fim
-                <input name="ends_at" type="datetime-local" defaultValue={utcToLocalInput(event?.ends_at, zone)} />
-              </label>
-              <label>
-                Local
-                <input name="venue_name" maxLength={160} defaultValue={event?.venue_name ?? ""} />
-              </label>
-              <label>
-                Endereço
-                <input name="venue_address" maxLength={300} defaultValue={event?.venue_address ?? ""} />
-              </label>
-              <label>
-                Cidade
-                <input name="city" maxLength={120} defaultValue={event?.city ?? ""} />
-              </label>
-              <label>
-                Link (evento online; só para quem comprar)
-                <input name="online_url" type="url" maxLength={500} placeholder="https://" defaultValue={event?.online_url ?? ""} />
-              </label>
-              <label>
-                Capacidade (vazio = sem limite)
-                <input name="capacity" type="number" min={1} defaultValue={event?.capacity ?? ""} style={{ width: "8rem" }} />
-              </label>
-              <label>
-                Situação
-                <select name="status" defaultValue={event?.status ?? "scheduled"}>
-                  {Object.entries(EVENT_STATUS_LABEL).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ flexBasis: "100%" }}>
-                Aviso aos clientes (adiado, cancelado…)
-                <input name="status_note" maxLength={300} defaultValue={event?.status_note ?? ""} />
-              </label>
-              {canWrite ? (
-                <button type="submit" className={styles.button}>
-                  Salvar evento
-                </button>
-              ) : null}
+            <fieldset disabled={!canWrite} className={local.plain}>
+              <Section id="basico" title="Informações básicas">
+                <div className={styles.fields}>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Nome
+                    <input name="name" required maxLength={200} defaultValue={product.name} />
+                  </label>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Resumo
+                    <input name="short_description" maxLength={500} defaultValue={product.short_description ?? ""} />
+                    <span className={styles.fieldHint}>Uma frase que aparece logo abaixo do preço.</span>
+                  </label>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Descrição
+                    <textarea
+                      name="description_md"
+                      rows={6}
+                      maxLength={20000}
+                      defaultValue={product.description_md ?? ""}
+                    />
+                    <span className={styles.fieldHint}>O texto completo da página do produto.</span>
+                  </label>
+                </div>
+              </Section>
+
+              <Section id="preco" title="Preço">
+                <div className={styles.fields}>
+                  <label className={styles.field}>
+                    Preço (R$)
+                    <input
+                      name="price"
+                      required
+                      inputMode="decimal"
+                      defaultValue={moneyInput(product.base_price_cents)}
+                    />
+                    {isTicket ? (
+                      <span className={styles.fieldHint}>No ingresso, o cliente paga o preço de cada lote.</span>
+                    ) : null}
+                  </label>
+                  <label className={styles.field}>
+                    Custo estimado (R$)
+                    <input name="cost" inputMode="decimal" defaultValue={moneyInput(product.cost_cents_estimate)} />
+                    <span className={styles.fieldHint}>Quanto custa para você. Não aparece na loja.</span>
+                  </label>
+                </div>
+                <h4 className={local.subhead}>Promoção</h4>
+                <div className={styles.fields}>
+                  <label className={styles.field}>
+                    Preço promocional (R$)
+                    <input
+                      name="promo_price"
+                      inputMode="decimal"
+                      defaultValue={moneyInput(product.promo_price_cents)}
+                    />
+                    <span className={styles.fieldHint}>Menor que o preço. Vazio = sem promoção.</span>
+                  </label>
+                  <label className={styles.field}>
+                    Começa em
+                    <input
+                      name="promo_starts_at"
+                      type="datetime-local"
+                      defaultValue={utcToLocalInput(product.promo_starts_at, zone)}
+                    />
+                    <span className={styles.fieldHint}>Vazio = já vale.</span>
+                  </label>
+                  <label className={styles.field}>
+                    Termina em
+                    <input
+                      name="promo_ends_at"
+                      type="datetime-local"
+                      defaultValue={utcToLocalInput(product.promo_ends_at, zone)}
+                    />
+                    <span className={styles.fieldHint}>Vazio = sem data para acabar.</span>
+                  </label>
+                </div>
+                <p className={styles.hint}>Datas no horário da loja ({zone}).</p>
+              </Section>
+
+              <Section id="venda" title="Como você vende">
+                <div className={styles.fields}>
+                  <label className={styles.field}>
+                    Tipo
+                    <select name="kind" defaultValue={product.kind}>
+                      {Object.entries(PRODUCT_KINDS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    {context.features.events && !isTicket ? (
+                      <span className={styles.fieldHint}>
+                        Ingresso de evento libera data, local e lotes depois de salvar.
+                      </span>
+                    ) : null}
+                  </label>
+                  <label className={styles.field}>
+                    Estoque
+                    <select name="stock_policy" defaultValue={product.stock_policy}>
+                      {Object.entries(STOCK_POLICIES).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    Vendido por
+                    <select name="sold_by" defaultValue={product.sold_by}>
+                      <option value="unit">Unidade</option>
+                      <option value="weight">Peso</option>
+                    </select>
+                  </label>
+                  <label className={styles.field}>
+                    Unidade
+                    <input name="unit_label" maxLength={16} defaultValue={product.unit_label} />
+                    <span className={styles.fieldHint}>Ex.: un, kg, dúzia.</span>
+                  </label>
+                </div>
+              </Section>
+
+              <Section id="organizacao" title="Organização na loja">
+                <fieldset className={local.plain}>
+                  <legend className={local.legend}>Categorias</legend>
+                  {tree.length ? (
+                    <div className={local.checks}>
+                      {tree.map(({ category, parent }) => (
+                        <label key={category.id} className={styles.check}>
+                          <input
+                            type="checkbox"
+                            name="category_ids"
+                            value={category.id}
+                            defaultChecked={product.category_ids.includes(category.id)}
+                          />
+                          <span>
+                            {parent ? <span className="muted">{parent.name} › </span> : null}
+                            {category.name}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className={styles.hint}>
+                      A loja ainda não tem categorias. <Link href={`${base}/categorias`}>Criar categorias</Link>
+                    </p>
+                  )}
+                </fieldset>
+                <div className={`${styles.fields} ${local.afterChecks}`}>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Tags
+                    <input
+                      name="tags"
+                      maxLength={1300}
+                      defaultValue={product.tags.map((tag) => tag.name).join(", ")}
+                      placeholder="ex.: vegano, sem glúten"
+                    />
+                    <span className={styles.fieldHint}>
+                      Separe por vírgula; viram filtros na vitrine.
+                      {otherTags.length
+                        ? ` Já usadas na loja: ${otherTags
+                            .slice(0, 30)
+                            .map((tag) => tag.name)
+                            .join(", ")}.`
+                        : ""}
+                    </span>
+                  </label>
+                  <label className={styles.field}>
+                    Ordem na vitrine
+                    <input name="position" type="number" defaultValue={product.position} />
+                    <span className={styles.fieldHint}>Menor aparece primeiro.</span>
+                  </label>
+                </div>
+              </Section>
+
+              <Section id="link" title="Link e Google">
+                <div className={styles.fields}>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Endereço da página
+                    <input
+                      name="slug"
+                      required
+                      maxLength={160}
+                      pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                      defaultValue={product.slug}
+                    />
+                    <span className={styles.fieldHint}>
+                      Só letras minúsculas, números e hífen. Link atual:{" "}
+                      <code>
+                        {context.primary_host ?? ""}/loja/produto/{product.slug}
+                      </code>
+                    </span>
+                  </label>
+                </div>
+                <details className={local.seo} open={Boolean(product.seo?.title || product.seo?.description)}>
+                  <summary>Título e descrição no Google (opcional)</summary>
+                  <div className={`${styles.fields} ${local.seoFields}`}>
+                    <label className={`${styles.field} ${styles.fieldWide}`}>
+                      Título para buscadores
+                      <input name="seo_title" maxLength={70} defaultValue={product.seo?.title ?? ""} />
+                      <span className={styles.fieldHint}>Até 70 caracteres. Vazio = nome do produto e da loja.</span>
+                    </label>
+                    <label className={`${styles.field} ${styles.fieldWide}`}>
+                      Descrição para buscadores
+                      <input name="seo_description" maxLength={160} defaultValue={product.seo?.description ?? ""} />
+                      <span className={styles.fieldHint}>Até 160 caracteres. Vazio = usa o resumo.</span>
+                    </label>
+                  </div>
+                </details>
+              </Section>
             </fieldset>
+            {canWrite ? (
+              <div className={local.saveBar}>
+                <span className={local.saveHint}>Salva de uma vez: informações, preço, venda, organização e link.</span>
+                <button type="submit" className={styles.button}>
+                  Salvar produto
+                </button>
+              </div>
+            ) : null}
           </form>
 
-          {event ? (
-            <>
-              <p>
-                Ingressos nos lotes: {event.allocated}
-                {event.capacity ? ` de ${event.capacity}` : ""}
+          {isTicket ? null : (
+            <Section id="opcoes" title="Opções" description="Tamanho, sabor, cor… até 3">
+              <p className={local.sectionIntro}>
+                Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com código (SKU), preço e estoque próprios,
+                até 100 combinações. Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
               </p>
-              {event.lots.map((lot) => (
-                <div key={lot.id}>
-                  <form action={saveLot} className={styles.form}>
-                    {hidden}
-                    <input type="hidden" name="time_zone" value={zone} />
-                    <input type="hidden" name="lot_id" value={lot.id} />
-                    <fieldset disabled={!canWrite} style={{ display: "contents" }}>
-                      <label>
-                        Lote · {lot.sku}
-                        <input name="name" required maxLength={80} defaultValue={lot.name} />
-                      </label>
-                      <label>
-                        Preço
-                        <input name="price" required inputMode="decimal" defaultValue={moneyInput(lot.price_cents)} style={{ width: "7rem" }} />
-                      </label>
-                      <label>
-                        Ingressos ({lot.available} restantes)
-                        <input name="quantity" type="number" min={0} required defaultValue={lot.quantity} style={{ width: "7rem" }} />
-                      </label>
-                      <label>
-                        Vendas de
-                        <input name="sales_starts_at" type="datetime-local" defaultValue={utcToLocalInput(lot.sales_starts_at, zone)} />
-                      </label>
-                      <label>
-                        até
-                        <input name="sales_ends_at" type="datetime-local" defaultValue={utcToLocalInput(lot.sales_ends_at, zone)} />
-                      </label>
-                      <span className={styles.badge}>{LOT_STATE_LABEL[lot.state]}</span>
-                      {canWrite ? (
-                        <button type="submit" className={styles.buttonGhost}>
-                          Salvar lote
-                        </button>
-                      ) : null}
-                    </fieldset>
-                  </form>
+              <form action={setProductOptions}>
+                {hidden}
+                <fieldset disabled={!canWrite} className={local.plain}>
+                  <div className={local.optionRows}>
+                    {Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => (
+                      <div key={i} className={local.optionRow}>
+                        <label className={styles.field}>
+                          Opção {i + 1}
+                          <input
+                            name={`option_name_${i}`}
+                            maxLength={40}
+                            defaultValue={product.options[i]?.name ?? ""}
+                            placeholder={i === 0 ? "ex.: Tamanho" : undefined}
+                          />
+                        </label>
+                        <label className={styles.field}>
+                          Valores (separados por vírgula)
+                          <input
+                            name={`option_values_${i}`}
+                            maxLength={900}
+                            defaultValue={product.options[i]?.values.join(", ") ?? ""}
+                            placeholder={i === 0 ? "ex.: P, M, G" : undefined}
+                          />
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </fieldset>
+                {canWrite ? (
+                  <div className={styles.formActions}>
+                    <button type="submit" className={styles.button}>
+                      Salvar opções
+                    </button>
+                  </div>
+                ) : null}
+              </form>
+            </Section>
+          )}
+
+          {hasEvent ? (
+            <Section id="evento" title="Evento e lotes" description="Data, local e ingressos">
+              <p className={local.sectionIntro}>
+                Cada lote tem preço, quantidade de ingressos e período de vendas próprios.
+              </p>
+              <form action={saveEvent}>
+                {hidden}
+                <input type="hidden" name="time_zone" value={zone} />
+                <fieldset disabled={!canWrite} className={local.plain}>
+                  <div className={styles.fields}>
+                    <label className={styles.field}>
+                      Começa em
+                      <input
+                        name="starts_at"
+                        type="datetime-local"
+                        required
+                        defaultValue={utcToLocalInput(event?.starts_at, zone)}
+                      />
+                      <span className={styles.fieldHint}>Horário da loja ({zone}).</span>
+                    </label>
+                    <label className={styles.field}>
+                      Termina em
+                      <input name="ends_at" type="datetime-local" defaultValue={utcToLocalInput(event?.ends_at, zone)} />
+                    </label>
+                    <label className={styles.field}>
+                      Local
+                      <input name="venue_name" maxLength={160} defaultValue={event?.venue_name ?? ""} />
+                      <span className={styles.fieldHint}>Nome do lugar.</span>
+                    </label>
+                    <label className={styles.field}>
+                      Endereço
+                      <input name="venue_address" maxLength={300} defaultValue={event?.venue_address ?? ""} />
+                    </label>
+                    <label className={styles.field}>
+                      Cidade
+                      <input name="city" maxLength={120} defaultValue={event?.city ?? ""} />
+                    </label>
+                    <label className={styles.field}>
+                      Link do evento online
+                      <input
+                        name="online_url"
+                        type="url"
+                        maxLength={500}
+                        placeholder="https://"
+                        defaultValue={event?.online_url ?? ""}
+                      />
+                      <span className={styles.fieldHint}>Só quem comprar recebe.</span>
+                    </label>
+                    <label className={styles.field}>
+                      Capacidade
+                      <input name="capacity" type="number" min={1} defaultValue={event?.capacity ?? ""} />
+                      <span className={styles.fieldHint}>Vazio = sem limite.</span>
+                    </label>
+                    <label className={styles.field}>
+                      Situação
+                      <select name="status" defaultValue={event?.status ?? "scheduled"}>
+                        {Object.entries(EVENT_STATUS_LABEL).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className={`${styles.field} ${styles.fieldWide}`}>
+                      Aviso aos clientes
+                      <input name="status_note" maxLength={300} defaultValue={event?.status_note ?? ""} />
+                      <span className={styles.fieldHint}>Para quando o evento for adiado ou cancelado.</span>
+                    </label>
+                  </div>
+                </fieldset>
+                {canWrite ? (
+                  <div className={styles.formActions}>
+                    {/* Com o evento salvo, a ação principal do bloco passa a ser criar lote. */}
+                    <button type="submit" className={event ? styles.buttonGhost : styles.button}>
+                      Salvar evento
+                    </button>
+                  </div>
+                ) : null}
+              </form>
+
+              <h4 className={local.subhead}>Lotes de ingressos</h4>
+              {event ? (
+                <>
+                  <p className={local.allocation}>
+                    Ingressos nos lotes: <strong>{event.allocated}</strong>
+                    {event.capacity ? ` de ${event.capacity}` : ""}
+                  </p>
+                  <p className={styles.hint}>
+                    A quantidade vira o estoque do lote; diminuir nunca apaga ingressos já vendidos.
+                  </p>
+                  {event.lots.length ? (
+                    <ul className={local.lots}>
+                      {event.lots.map((lot) => {
+                        const lotView = lotState(lot.state);
+                        return (
+                          <li key={lot.id} className={local.lot}>
+                            <div className={local.lotHead}>
+                              <strong>{lot.name}</strong>
+                              <span className={local.lotSku}>{lot.sku}</span>
+                              <Pill state={LOT_STATE[lot.state] ?? "off"}>{lotView.label}</Pill>
+                              {canWrite ? (
+                                <form action={removeLot} className={local.lotRemove}>
+                                  {hidden}
+                                  <input type="hidden" name="lot_id" value={lot.id} />
+                                  <button type="submit" className={dangerButton}>
+                                    Remover lote
+                                  </button>
+                                </form>
+                              ) : null}
+                            </div>
+                            {lotView.detail ? <p className={local.lotDetail}>{lotView.detail}</p> : null}
+                            <form action={saveLot}>
+                              {hidden}
+                              <input type="hidden" name="time_zone" value={zone} />
+                              <input type="hidden" name="lot_id" value={lot.id} />
+                              <fieldset disabled={!canWrite} className={local.plain}>
+                                <div className={local.grid}>
+                                  <label className={`${styles.field} ${local.span2}`}>
+                                    Nome do lote
+                                    <input name="name" required maxLength={80} defaultValue={lot.name} />
+                                  </label>
+                                  <label className={styles.field}>
+                                    Preço (R$)
+                                    <input
+                                      name="price"
+                                      required
+                                      inputMode="decimal"
+                                      defaultValue={moneyInput(lot.price_cents)}
+                                    />
+                                  </label>
+                                  <label className={styles.field}>
+                                    Ingressos
+                                    <input name="quantity" type="number" min={0} required defaultValue={lot.quantity} />
+                                    <span className={styles.fieldHint}>{lot.available} restantes</span>
+                                  </label>
+                                  <label className={`${styles.field} ${local.span2}`}>
+                                    Vendas começam
+                                    <input
+                                      name="sales_starts_at"
+                                      type="datetime-local"
+                                      defaultValue={utcToLocalInput(lot.sales_starts_at, zone)}
+                                    />
+                                  </label>
+                                  <label className={`${styles.field} ${local.span2}`}>
+                                    Vendas terminam
+                                    <input
+                                      name="sales_ends_at"
+                                      type="datetime-local"
+                                      defaultValue={utcToLocalInput(lot.sales_ends_at, zone)}
+                                    />
+                                  </label>
+                                </div>
+                              </fieldset>
+                              {canWrite ? (
+                                <div className={local.lotActions}>
+                                  <button type="submit" className={smallButton}>
+                                    Salvar lote
+                                  </button>
+                                </div>
+                              ) : null}
+                            </form>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
                   {canWrite ? (
-                    <form action={removeLot}>
+                    <form action={saveLot} className={local.newLot}>
                       {hidden}
-                      <input type="hidden" name="lot_id" value={lot.id} />
-                      <button type="submit" className={styles.buttonGhost}>
-                        Remover lote
+                      <input type="hidden" name="time_zone" value={zone} />
+                      <div className={local.grid}>
+                        <label className={`${styles.field} ${local.span2}`}>
+                          Novo lote
+                          <input name="name" required maxLength={80} placeholder="ex.: 1º lote" />
+                        </label>
+                        <label className={styles.field}>
+                          Preço (R$)
+                          <input name="price" required inputMode="decimal" />
+                        </label>
+                        <label className={styles.field}>
+                          Ingressos
+                          <input name="quantity" type="number" min={0} required />
+                        </label>
+                        <label className={`${styles.field} ${local.span2}`}>
+                          Vendas começam
+                          <input name="sales_starts_at" type="datetime-local" />
+                        </label>
+                        <label className={`${styles.field} ${local.span2}`}>
+                          Vendas terminam
+                          <input name="sales_ends_at" type="datetime-local" />
+                        </label>
+                      </div>
+                      <div className={local.lotActions}>
+                        <button type="submit" className={styles.button}>
+                          Criar lote
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </>
+              ) : (
+                <p className="muted">Salve o evento para criar os lotes.</p>
+              )}
+            </Section>
+          ) : null}
+
+          <Section
+            id="variantes"
+            title={product.has_variants ? "Variantes e estoque" : "Variante e estoque"}
+            description="Preço próprio vazio = usa o do produto"
+          >
+            <ul className={`${styles.rows} ${local.list}`}>
+              {product.variants.map((variant) => (
+                <li key={variant.id} className={styles.row}>
+                  <div className={local.variantHead}>
+                    <span className={local.variantName}>
+                      {variant.name} · {variant.sku}
+                    </span>
+                    {variant.status === "paused" ? <Pill state="warn">Pausada</Pill> : null}
+                    {variant.status === "inactive" ? <Pill state="off">Inativa</Pill> : null}
+                    {context.features.inventory && product.stock_policy === "tracked" ? (
+                      <Link href={`${base}/estoque/${variant.id}`} className={local.stockLink}>
+                        Estoque e extrato →
+                      </Link>
+                    ) : null}
+                  </div>
+                  {variant.status === "paused" && variant.paused_reason ? (
+                    <p className={local.variantReason}>Motivo: {variant.paused_reason}</p>
+                  ) : null}
+                  <form action={updateVariant} className={local.inlineForm}>
+                    {hidden}
+                    <input type="hidden" name="variant_id" value={variant.id} />
+                    <label className={styles.field}>
+                      Preço próprio (R$)
+                      <input
+                        name="price"
+                        inputMode="decimal"
+                        defaultValue={moneyInput(variant.price_cents)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      Custo (R$)
+                      <input
+                        name="cost"
+                        inputMode="decimal"
+                        defaultValue={moneyInput(variant.cost_cents)}
+                        disabled={!canWrite}
+                      />
+                    </label>
+                    {canWrite ? (
+                      <button type="submit" className={smallButton}>
+                        Salvar variante
+                      </button>
+                    ) : null}
+                  </form>
+                  {canPublish && (variant.status === "active" || variant.status === "paused") ? (
+                    <form action={setVariantPause} className={local.inlineForm}>
+                      {hidden}
+                      <input type="hidden" name="variant_id" value={variant.id} />
+                      <input type="hidden" name="action" value={variant.status === "paused" ? "resume" : "pause"} />
+                      {variant.status === "active" ? (
+                        <label className={styles.field}>
+                          Motivo da pausa
+                          <input name="reason" maxLength={200} placeholder="Opcional" />
+                        </label>
+                      ) : null}
+                      <button type="submit" className={smallButton}>
+                        {variant.status === "paused" ? "Retomar variante" : "Pausar variante"}
                       </button>
                     </form>
                   ) : null}
-                </div>
+                </li>
               ))}
-              {canWrite ? (
-                <form action={saveLot} className={styles.form}>
+            </ul>
+          </Section>
+
+          <Section id="adicionais" title="Adicionais" description="Extras que somam ao preço">
+            {shownGroups === 0 ? (
+              <EmptyState title="Nenhum adicional neste produto" />
+            ) : (
+              <>
+                <p className={local.sectionIntro}>
+                  Ex.: cobertura, embalagem para presente. Um por linha, no formato <code>Nome = 3,50</code>; sem
+                  preço, sai de graça. Mínimo 1 torna a escolha obrigatória.
+                </p>
+                <form action={setProductModifiers}>
                   {hidden}
-                  <input type="hidden" name="time_zone" value={zone} />
-                  <label>
-                    Novo lote
-                    <input name="name" required maxLength={80} placeholder="ex.: 1º lote" />
-                  </label>
-                  <label>
-                    Preço
-                    <input name="price" required inputMode="decimal" style={{ width: "7rem" }} />
-                  </label>
-                  <label>
-                    Ingressos
-                    <input name="quantity" type="number" min={0} required style={{ width: "7rem" }} />
-                  </label>
-                  <label>
-                    Vendas de
-                    <input name="sales_starts_at" type="datetime-local" />
-                  </label>
-                  <label>
-                    até
-                    <input name="sales_ends_at" type="datetime-local" />
-                  </label>
-                  <button type="submit" className={styles.button}>
-                    Criar lote
+                  <div className={local.groups}>
+                    {Array.from({ length: shownGroups }, (_, i) => (
+                      <ModifierGroupFields key={i} index={i} group={product.modifier_groups[i]} disabled={!canWrite} />
+                    ))}
+                  </div>
+                  {canWrite && shownGroups < MODIFIER_GROUP_ROWS ? (
+                    <details className={local.more}>
+                      <summary>Mais grupos ({MODIFIER_GROUP_ROWS - shownGroups})</summary>
+                      <div className={local.groups}>
+                        {Array.from({ length: MODIFIER_GROUP_ROWS - shownGroups }, (_, j) => (
+                          <ModifierGroupFields
+                            key={shownGroups + j}
+                            index={shownGroups + j}
+                            group={product.modifier_groups[shownGroups + j]}
+                            disabled={!canWrite}
+                          />
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {canWrite ? (
+                    <div className={styles.formActions}>
+                      <button type="submit" className={styles.button}>
+                        Salvar adicionais
+                      </button>
+                    </div>
+                  ) : null}
+                </form>
+              </>
+            )}
+          </Section>
+
+          {canArchive ? (
+            <Section title="Arquivar produto" description="Sai da loja e fica só para consulta no painel">
+              {/* Dois cliques: arquivado não volta pelo painel (nem publicar, nem editar). */}
+              <details className={local.archive}>
+                <summary className={smallButton}>Arquivar produto…</summary>
+                <form action={setProductStatus} className={local.archiveConfirm}>
+                  {hidden}
+                  <input type="hidden" name="action" value="archive" />
+                  <p className={styles.hint}>
+                    O produto sai da loja e deixa de ser editável aqui. Pedidos antigos continuam com ele.
+                  </p>
+                  <button type="submit" className={dangerButton}>
+                    Sim, arquivar
                   </button>
                 </form>
-              ) : null}
-            </>
-          ) : (
-            <p className="muted">Salve o evento para criar os lotes.</p>
-          )}
-        </section>
-      ) : null}
-
-      {isTicket ? null : (
-        <section className={styles.card}>
-          <h2>Opções</h2>
-          <p className="muted">
-            Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com SKU, preço e estoque próprios (até 3 opções e
-            100 combinações). Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
-          </p>
-          <form action={setProductOptions} className={styles.form}>
-            {hidden}
-            {Array.from({ length: PRODUCT_OPTION_ROWS }, (_, i) => (
-              <div key={i} style={{ display: "contents" }}>
-                <label>
-                  Opção {i + 1}
-                  <input
-                    name={`option_name_${i}`}
-                    maxLength={40}
-                    defaultValue={product.options[i]?.name ?? ""}
-                    disabled={!canWrite}
-                  />
-                </label>
-                <label style={{ flexGrow: 2 }}>
-                  Valores (separados por vírgula)
-                  <input
-                    name={`option_values_${i}`}
-                    maxLength={900}
-                    defaultValue={product.options[i]?.values.join(", ") ?? ""}
-                    disabled={!canWrite}
-                  />
-                </label>
-              </div>
-            ))}
-            {canWrite ? (
-              <button type="submit" className={styles.buttonGhost}>
-                Salvar opções
-              </button>
-            ) : null}
-          </form>
-        </section>
-      )}
-
-      <section className={styles.card}>
-        <h2>Adicionais</h2>
-        <p className="muted">
-          Extras que o cliente escolhe e que somam ao preço (ex.: cobertura, embalagem para presente). Um por linha, no
-          formato <code>Nome = 3,50</code>; sem preço, sai de graça. Mínimo 1 torna a escolha obrigatória.
-        </p>
-        <form action={setProductModifiers} className={styles.form}>
-          {hidden}
-          {Array.from({ length: MODIFIER_GROUP_ROWS }, (_, i) => {
-            const group = product.modifier_groups[i];
-            return (
-              <fieldset key={i} style={{ flexBasis: "100%" }} disabled={!canWrite}>
-                <legend>Grupo {i + 1}</legend>
-                <label>
-                  Nome
-                  <input name={`group_name_${i}`} maxLength={60} defaultValue={group?.name ?? ""} />
-                </label>
-                <label>
-                  Mínimo
-                  <input name={`group_min_${i}`} type="number" min={0} max={30} defaultValue={group?.min_select ?? 0} />
-                </label>
-                <label>
-                  Máximo
-                  <input name={`group_max_${i}`} type="number" min={1} max={30} defaultValue={group?.max_select ?? 1} />
-                </label>
-                <label style={{ flexBasis: "100%" }}>
-                  Adicionais
-                  <textarea
-                    name={`group_items_${i}`}
-                    rows={3}
-                    maxLength={3000}
-                    defaultValue={(group?.modifiers ?? [])
-                      .filter((m) => m.active)
-                      .map((m) => (m.price_cents ? `${m.name} = ${moneyInput(m.price_cents)}` : m.name))
-                      .join("\n")}
-                  />
-                </label>
-              </fieldset>
-            );
-          })}
-          {canWrite ? (
-            <button type="submit" className={styles.buttonGhost}>
-              Salvar adicionais
-            </button>
+              </details>
+            </Section>
           ) : null}
-        </form>
-      </section>
-
-      <section className={styles.card}>
-        <h2>{product.has_variants ? "Variantes e estoque" : "Variante e estoque"}</h2>
-        {product.variants.map((variant) => (
-          <div key={variant.id}>
-            <form action={updateVariant} className={styles.form}>
-              {hidden}
-              <input type="hidden" name="variant_id" value={variant.id} />
-              <span>
-                {variant.name} · {variant.sku}
-                {variant.status === "paused" ? (
-                  <>
-                    {" "}
-                    <span className={styles.badge}>pausada</span>
-                    {variant.paused_reason ? ` ${variant.paused_reason}` : ""}
-                  </>
-                ) : null}
-              </span>
-              <label>
-                Preço próprio (vazio = do produto)
-                <input name="price" inputMode="decimal" defaultValue={moneyInput(variant.price_cents)} disabled={!canWrite} />
-              </label>
-              <label>
-                Custo
-                <input name="cost" inputMode="decimal" defaultValue={moneyInput(variant.cost_cents)} disabled={!canWrite} />
-              </label>
-              {canWrite ? (
-                <button type="submit" className={styles.buttonGhost}>
-                  Salvar variante
-                </button>
-              ) : null}
-              {context.features.inventory && product.stock_policy === "tracked" ? (
-                <Link href={`${base}/estoque/${variant.id}`}>Estoque e extrato →</Link>
-              ) : null}
-            </form>
-            {canPublish && (variant.status === "active" || variant.status === "paused") ? (
-              <form action={setVariantPause} className={styles.form}>
-                {hidden}
-                <input type="hidden" name="variant_id" value={variant.id} />
-                <input type="hidden" name="action" value={variant.status === "paused" ? "resume" : "pause"} />
-                {variant.status === "active" ? (
-                  <label>
-                    Motivo da pausa
-                    <input name="reason" maxLength={200} />
-                  </label>
-                ) : null}
-                <button type="submit" className={styles.buttonGhost}>
-                  {variant.status === "paused" ? "Retomar variante" : "Pausar variante"}
-                </button>
-              </form>
-            ) : null}
-          </div>
-        ))}
-      </section>
+        </div>
+      </div>
     </>
   );
 }
