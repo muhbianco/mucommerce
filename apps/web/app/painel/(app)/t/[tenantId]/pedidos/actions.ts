@@ -36,7 +36,8 @@ export async function moveOrder(form: FormData): Promise<void> {
         to,
         reason: optional(form, "reason"),
         expected_version: version(form),
-        restock: form.get("restock") !== "off",
+        // Checkbox desmarcado não vai no form; só "on" (marcado) devolve os itens ao estoque.
+        restock: to !== "cancelled" || form.get("restock") === "on",
       },
     });
   });
