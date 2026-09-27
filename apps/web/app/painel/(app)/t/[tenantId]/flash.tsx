@@ -81,6 +81,8 @@ const ERRORS: Record<string, string> = {
   coupon_code_taken: "Já existe um cupom com esse código.",
   evidencia_obrigatoria: "Descreva como a devolução foi feita (mínimo 10 caracteres).",
   rate_limited: "Muitas tentativas seguidas. Espere um minuto e tente de novo.",
+  credential_vault_unavailable: "O cofre de credenciais da plataforma está indisponível. Nada foi salvo — avise a MuhBianco.",
+  integration_unavailable: "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos.",
   dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",
   dns_sem_txt: "Ainda não encontrei o registro TXT. Depois de criar, o DNS pode levar alguns minutos.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",

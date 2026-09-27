@@ -7,12 +7,13 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit.models import AuditLog
 from app.core.config import settings
-from app.core.crypto import CredentialCipherError
+from app.core.crypto import CredentialCipherError, reset_cipher
 from app.core.scopes import PlatformRole, TenantRole
 from app.integrations.credentials import CredentialStore, mask
 from app.payments import registry
@@ -198,3 +199,47 @@ async def test_ops_sees_whether_it_is_configured_never_the_secret(
     assert rows["mercadopago"]["configured"] and rows["mercadopago"]["enabled"]
     assert rows["fake"]["configured"] is False
     assert "****" not in summary.text and TOKEN not in summary.text
+
+
+async def test_cofre_mal_configurado_nao_vira_erro_interno(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sem chave mestra válida, salvar credencial respondia 500 "internal_error".
+
+    O lojista não tem o que corrigir na tela dele: é configuração da plataforma. Vira
+    503 com código próprio, e o painel mostra o recado em vez de "erro interno".
+    """
+    tenant = await selling_store(session_factory, flags={"payments.mercadopago": True})
+    owner = await member_headers(client, session_factory, tenant)
+    reset_cipher()
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr("chave-torta"))
+    try:
+        resposta = await client.put(
+            url(tenant, "mercadopago"),
+            json={
+                "enabled": False,
+                "is_default": False,
+                "public_config": {"public_key": "APP_USR-pub"},
+                "credentials": {"access_token": TOKEN},
+            },
+            headers=owner,
+        )
+    finally:
+        reset_cipher()
+    assert resposta.status_code == 503, resposta.text
+    assert resposta.json()["error"]["code"] == "credential_vault_unavailable"
+    async with session_factory() as session:
+        guardadas = (
+            (
+                await session.execute(
+                    select(TenantIntegrationCredential).execution_options(
+                        **{CROSS_TENANT_OPTION: True}
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert guardadas == []

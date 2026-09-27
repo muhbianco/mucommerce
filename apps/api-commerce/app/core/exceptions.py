@@ -112,6 +112,31 @@ class AccessBlockedError(PermissionDeniedError):
     message = "Seu acesso a esta loja não está liberado."
 
 
+class IntegrationUnavailableError(DomainError):
+    """Uma dependência nossa está fora do ar ou mal configurada.
+
+    503 e não 500: o pedido de quem chamou estava certo, quem falhou foi a nossa ponta.
+    A mensagem diz o que importa do outro lado — que nada foi gravado.
+    """
+
+    status_code = 503
+    error_code = "integration_unavailable"
+    message = "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos."
+
+
+class CredentialVaultUnavailableError(IntegrationUnavailableError):
+    """A chave mestra das credenciais não está configurada (ou está inválida).
+
+    Erro de plataforma, não da loja: o lojista não tem o que corrigir na tela dele.
+    """
+
+    error_code = "credential_vault_unavailable"
+    message = (
+        "O cofre de credenciais da plataforma está indisponível. "
+        "Nada foi salvo — avise a MuhBianco."
+    )
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"

@@ -9,6 +9,10 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from app.core.config import settings
+from app.core.exceptions import CredentialVaultUnavailableError
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class CredentialCipherError(RuntimeError):
@@ -31,7 +35,10 @@ def _decode_key(raw: str) -> bytes:
             continue
         if len(key) == 32:
             return key
-    raise CredentialCipherError("CREDENTIALS_MASTER_KEY must be base64 of exactly 32 bytes")
+    raise CredentialCipherError(
+        "CREDENTIALS_MASTER_KEY must be base64 of exactly 32 bytes "
+        "(generate with: openssl rand -base64 32)"
+    )
 
 
 class CredentialCipher:
@@ -81,9 +88,42 @@ _cipher: CredentialCipher | None = None
 
 
 def get_cipher() -> CredentialCipher:
+    """O cofre do processo. Chave ausente ou inválida é erro de plataforma, não do lojista.
+
+    Sem isto, salvar credencial de pagamento estourava 500 com stack trace e a tela só
+    dizia "internal_error" — ninguém descobria que faltava configurar a chave.
+    """
     global _cipher
     if _cipher is None:
-        _cipher = CredentialCipher(
-            settings.credentials_master_key.get_secret_value(), settings.credentials_key_version
-        )
+        try:
+            _cipher = CredentialCipher(
+                settings.credentials_master_key.get_secret_value(),
+                settings.credentials_key_version,
+            )
+        except CredentialCipherError as exc:
+            logger.error("Cofre de credenciais indisponível", extra={"motivo": str(exc)})
+            raise CredentialVaultUnavailableError from exc
     return _cipher
+
+
+def vault_ready() -> bool:
+    """A chave mestra dá para usar? Chamada no boot só para avisar, nunca para derrubar.
+
+    Derrubar o serviço por causa disto trocaria "não salva credencial" por "loja fora do
+    ar". O aviso é alto o bastante para aparecer no log do deploy.
+    """
+    try:
+        _decode_key(settings.credentials_master_key.get_secret_value())
+    except CredentialCipherError as exc:
+        logger.error(
+            "CREDENTIALS_MASTER_KEY inválida: salvar credencial de pagamento vai falhar",
+            extra={"motivo": str(exc)},
+        )
+        return False
+    return True
+
+
+def reset_cipher() -> None:
+    """Descarta o cofre em memória (testes; e releitura após corrigir a configuração)."""
+    global _cipher
+    _cipher = None
