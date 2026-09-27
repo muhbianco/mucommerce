@@ -12,8 +12,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, status
 
 from app.api.deps import DbSession, require_internal
+from app.core.exceptions import NotFoundError
 from app.provisioning.service import StoreProvisioningService
-from app.schemas.provisioning import StoreBillingState, StoreRead, StoreReserve
+from app.schemas.provisioning import (
+    ChatwootDomainsRead,
+    ChatwootEnable,
+    StoreBillingState,
+    StoreRead,
+    StoreReserve,
+)
 
 router = APIRouter(
     prefix="/internal/provisioning/stores",
@@ -77,6 +84,43 @@ async def set_billing_state(
 async def release_store(session: DbSession, subscription_ref: Ref) -> StoreRead | None:
     tenant = await StoreProvisioningService(session).release(subscription_ref)
     return StoreRead.of(tenant) if tenant else None
+
+
+@router.post(
+    "/{subscription_ref}/chatwoot",
+    response_model=ChatwootDomainsRead,
+    summary="Liga os endereços do painel do Chatwoot da loja (idempotente)",
+)
+async def enable_chatwoot(
+    session: DbSession, subscription_ref: Ref, body: ChatwootEnable
+) -> ChatwootDomainsRead:
+    tenant = await StoreProvisioningService(session).enable_chatwoot(
+        subscription_ref, body.custom_domain
+    )
+    return ChatwootDomainsRead.of(tenant)
+
+
+@router.delete(
+    "/{subscription_ref}/chatwoot",
+    response_model=ChatwootDomainsRead,
+    summary="Add-on cancelado: tira os endereços do Chatwoot do ar",
+)
+async def disable_chatwoot(session: DbSession, subscription_ref: Ref) -> ChatwootDomainsRead:
+    tenant = await StoreProvisioningService(session).disable_chatwoot(subscription_ref)
+    return ChatwootDomainsRead.of(tenant)
+
+
+@router.get(
+    "/{subscription_ref}/chatwoot",
+    response_model=ChatwootDomainsRead,
+    summary="Endereços do Chatwoot da loja e o estado do DNS",
+)
+async def chatwoot_state(session: DbSession, subscription_ref: Ref) -> ChatwootDomainsRead:
+    tenant = await StoreProvisioningService(session).by_subscription(subscription_ref)
+    if tenant is None:
+        raise NotFoundError("Nenhuma loja para esta assinatura.")
+    await session.refresh(tenant, ["domains"])
+    return ChatwootDomainsRead.of(tenant)
 
 
 @router.get(

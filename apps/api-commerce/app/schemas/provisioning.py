@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.schemas.common import StrictModel
 from app.tenancy.dns import instructions_for
-from app.tenancy.models import DomainKind, DomainPurpose, Tenant, TenantDomain
+from app.tenancy.models import DomainKind, DomainPurpose, DomainStatus, Tenant, TenantDomain
 
 # The api-agents subscription key (`<service_code>:<user_id>`): theirs to shape, ours to store.
 SubscriptionRef = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9_.:-]+$")
@@ -65,6 +65,39 @@ class DomainState(BaseModel):
             cname_target=dns.cname_target if dns else None,
             a_records=dns.a_records if dns else [],
             apex=bool(dns and dns.apex),
+        )
+
+
+class ChatwootEnable(StrictModel):
+    # `chatwoot.empresa.com.br`; sem ele o cliente usa só <slug>.chatwoot.muhbianco.com.br.
+    custom_domain: str | None = Field(default=None, min_length=4, max_length=253)
+
+
+class ChatwootDomainsRead(BaseModel):
+    tenant_id: str
+    platform_host: str
+    dashboard_url: str
+    # O domínio do cliente, com os registros de DNS que faltam criar.
+    custom_domain: DomainState | None
+    # Todos os hosts ligados (ativos ou esperando DNS): a api-agents grava essa lista na
+    # account do Chatwoot (`dashboard_hosts`), para o fork amarrar host → account.
+    hosts: list[str]
+
+    @classmethod
+    def of(cls, tenant: Tenant) -> ChatwootDomainsRead:
+        chat = [
+            d
+            for d in tenant.domains
+            if d.purpose == DomainPurpose.CHATWOOT and d.status != DomainStatus.DISABLED
+        ]
+        platform_host = f"{tenant.slug}.{settings.chatwoot_base_domain}"
+        custom = next((d for d in chat if d.kind != DomainKind.PLATFORM_SUBDOMAIN), None)
+        return cls(
+            tenant_id=tenant.id,
+            platform_host=platform_host,
+            dashboard_url=f"https://{platform_host}",
+            custom_domain=DomainState.of(custom) if custom else None,
+            hosts=sorted(d.hostname for d in chat),
         )
 
 

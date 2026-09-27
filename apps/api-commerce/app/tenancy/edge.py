@@ -13,6 +13,20 @@ _SAFE = re.compile(r"[^a-z0-9-]")
 # Same exclusion as the static routers in infra/docker-stack.yml: internal routes are reachable
 # only from the internal network, never through a tenant host.
 INTERNAL_API_PATHS = "`^/api/(v1|latest)/internal`"
+# Administração do Chatwoot fica só no host principal (chatwoot.muhbianco.com.br).
+CHATWOOT_ADMIN_PATHS = "`^/(super_admin|platform|sidekiq|monitoring)`"
+# Mesmos cabeçalhos das labels do Chatwoot na stack, com Referrer-Policy que deixa o navegador
+# mandar Origin em POST de formulário (no-referrer manda "null" e o Rails recusa).
+CHATWOOT_HEADERS = {
+    "headers": {
+        "stsSeconds": 31536000,
+        "contentTypeNosniff": True,
+        "browserXssFilter": True,
+        "referrerPolicy": "strict-origin-when-cross-origin",
+        "customFrameOptionsValue": "SAMEORIGIN",
+        "customResponseHeaders": {"X-Robots-Tag": "noindex, nofollow"},
+    }
+}
 
 
 def _name(*parts: str) -> str:
@@ -42,6 +56,8 @@ def build_traefik_config(
         (priority 20); internal paths fall to the web router and 404, as on the static hosts
       - alias hosts get a `redirectregex` middleware (308) to the primary host.
     Per chat_redirect host: 302 to the tenant's Chatwoot account.
+    Per chatwoot host: `<key>-chatwoot` → the Chatwoot instance, minus its admin paths
+    (the fork binds the host to the tenant's account, ADR 0013).
     Hosts in `settings.static_edge_hosts` are skipped: the stack labels already route them.
     Certificates: `tls.certResolver` per router → HTTP-01 per host.
     """
@@ -73,6 +89,24 @@ def build_traefik_config(
                 continue
             base = _host_key(domain.hostname)
             host_rule = f"Host(`{domain.hostname}`)"
+
+            if domain.purpose == DomainPurpose.CHATWOOT:
+                services["chatwoot"] = {
+                    "loadBalancer": {
+                        "servers": [{"url": settings.edge_chatwoot_upstream}],
+                        "passHostHeader": True,
+                    }
+                }
+                middlewares["chatwoot-headers"] = CHATWOOT_HEADERS
+                routers[f"{base}-chatwoot"] = {
+                    "rule": f"{host_rule} && !PathRegexp({CHATWOOT_ADMIN_PATHS})",
+                    "entryPoints": ["websecure"],
+                    "service": "chatwoot",
+                    "middlewares": ["chatwoot-headers"],
+                    "tls": tls,
+                    "priority": 10,
+                }
+                continue
 
             if domain.purpose == DomainPurpose.CHAT_REDIRECT:
                 account_id = chatwoot_account_ids.get(tenant_id)

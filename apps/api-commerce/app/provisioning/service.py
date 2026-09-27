@@ -22,12 +22,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
 from app.audit.writer import audit
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.scopes import TenantRole
 from app.identity.repository import AdminUserRepository
 from app.identity.service import AdminAuthService
 from app.models.base import utcnow
-from app.tenancy.models import DomainKind, DomainPurpose, DomainRole, Tenant, TenantStatus
+from app.tenancy.models import (
+    DomainKind,
+    DomainPurpose,
+    DomainRole,
+    DomainStatus,
+    Tenant,
+    TenantDomain,
+    TenantStatus,
+)
 from app.tenancy.resolver import invalidate_host_cache
 from app.tenancy.service import Actor, TenantService
 
@@ -151,6 +161,82 @@ class StoreProvisioningService:
             await self._archive_reservation(tenant)
             released.append(tenant.id)
         return released
+
+    # ------------------------------------------------------------------ chatwoot (ADR 0013)
+    async def enable_chatwoot(self, subscription_ref: str, custom_domain: str | None) -> Tenant:
+        """Endereços do painel do Chatwoot do cliente. Idempotente.
+
+        `<slug>.chatwoot.muhbianco.com.br` entra ativo na hora (DNS curinga nosso); o domínio
+        do cliente entra pelo fluxo de sempre (TXT + CNAME, verificação pelo job) e só vira
+        router no Traefik quando estiver ativo. Trocar de domínio desliga o anterior.
+        """
+        tenant = await self._require(subscription_ref)
+        if tenant.status not in {TenantStatus.ACTIVE, TenantStatus.SUSPENDED}:
+            raise ConflictError("A loja precisa estar no ar para ligar o Chatwoot.")
+        repo = self.tenants.repo
+
+        platform_host = f"{tenant.slug}.{settings.chatwoot_base_domain}"
+        platform = await repo.get_domain_by_hostname(platform_host)
+        if platform is None:
+            self.session.add(
+                TenantDomain(
+                    tenant_id=tenant.id,
+                    hostname=platform_host,
+                    kind=DomainKind.PLATFORM_SUBDOMAIN,
+                    purpose=DomainPurpose.CHATWOOT,
+                    role=DomainRole.PRIMARY,
+                    status=DomainStatus.ACTIVE,
+                    verified_at=utcnow(),
+                )
+            )
+        elif platform.tenant_id != tenant.id:
+            raise ConflictError("Endereço do Chatwoot já é de outra loja.", hostname=platform_host)
+        else:
+            platform.status = DomainStatus.ACTIVE
+
+        wanted = None
+        if custom_domain:
+            try:
+                wanted = normalize_hostname(custom_domain)
+            except InvalidHostnameError as exc:
+                raise ValidationError(str(exc), hostname=custom_domain) from exc
+        for domain in await self._chatwoot_domains(tenant):
+            if domain.kind != DomainKind.PLATFORM_SUBDOMAIN and domain.hostname != wanted:
+                domain.status = DomainStatus.DISABLED
+        if wanted:
+            taken = await repo.get_domain_by_hostname(wanted)
+            if taken is not None and taken.tenant_id == tenant.id:
+                if taken.purpose != DomainPurpose.CHATWOOT:
+                    raise ConflictError("Esse domínio já é o endereço da loja.", hostname=wanted)
+                if taken.status == DomainStatus.DISABLED:
+                    # Volta a verificar: o TXT já provado vale, o job reativa quando o CNAME bater.
+                    taken.status = DomainStatus.PENDING_DNS
+            else:
+                await self.tenants.register_domain(
+                    tenant,
+                    hostname=wanted,
+                    purpose=DomainPurpose.CHATWOOT,
+                    role=DomainRole.ALIAS,
+                    actor=ACTOR,
+                )
+        await self.session.flush()
+        await self.session.refresh(tenant, ["domains"])
+        return tenant
+
+    async def disable_chatwoot(self, subscription_ref: str) -> Tenant:
+        """Add-on cancelado: os hosts saem do Traefik, mas continuam reservados à loja."""
+        tenant = await self._require(subscription_ref)
+        for domain in await self._chatwoot_domains(tenant):
+            domain.status = DomainStatus.DISABLED
+        await self.session.flush()
+        await self.session.refresh(tenant, ["domains"])
+        return tenant
+
+    async def _chatwoot_domains(self, tenant: Tenant) -> list[TenantDomain]:
+        stmt = select(TenantDomain).where(
+            TenantDomain.tenant_id == tenant.id, TenantDomain.purpose == DomainPurpose.CHATWOOT
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     # ------------------------------------------------------------------ internals
     async def _require(self, subscription_ref: str) -> Tenant:

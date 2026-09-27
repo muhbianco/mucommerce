@@ -339,10 +339,20 @@ class TenantService:
         except InvalidHostnameError as exc:
             raise ValidationError(str(exc), hostname=hostname) from exc
 
-        reserved = {settings.panel_host, settings.api_public_host, settings.platform_base_domain}
-        if host in reserved or (
-            is_subdomain_of(host, settings.platform_base_domain)
-            and host != f"{tenant.slug}.{settings.platform_base_domain}"
+        reserved = {
+            settings.panel_host,
+            settings.api_public_host,
+            settings.platform_base_domain,
+            settings.chatwoot_base_domain,
+        }
+        if (
+            host in reserved
+            or (
+                is_subdomain_of(host, settings.platform_base_domain)
+                and host != f"{tenant.slug}.{settings.platform_base_domain}"
+            )
+            # <slug>.chatwoot.* é criado pelo provisionamento do Chatwoot, nunca por aqui.
+            or is_subdomain_of(host, settings.chatwoot_base_domain)
         ):
             raise ValidationError("Hostname reservado pela plataforma.", hostname=host)
 

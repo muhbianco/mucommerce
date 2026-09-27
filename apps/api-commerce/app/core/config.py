@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     edge_api_upstream: str = "http://commerce-api:8000"
     edge_cert_resolver: str = "letsencryptresolver"
     chatwoot_public_url: str = "https://chatwoot.muhbianco.com.br"
+    # Todo cliente com Chatwoot ganha <slug>.<chatwoot_base_domain> (DNS curinga → edge).
+    chatwoot_base_domain: str = "chatwoot.muhbianco.com.br"
+    edge_chatwoot_upstream: str = "http://chatwoot_rails:3000"
     tenant_cache_ttl_seconds: int = 60
     dns_resolvers: str = "1.1.1.1,8.8.8.8"
     domain_verify_max_age_hours: int = 48

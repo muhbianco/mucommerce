@@ -47,6 +47,8 @@ class DomainKind(StrEnum):
 class DomainPurpose(StrEnum):
     STOREFRONT = "storefront"
     CHAT_REDIRECT = "chat_redirect"
+    # Painel do Chatwoot do cliente, servido pela instância única (ADR 0013).
+    CHATWOOT = "chatwoot"
 
 
 class DomainRole(StrEnum):
