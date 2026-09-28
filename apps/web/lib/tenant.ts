@@ -32,7 +32,12 @@ export interface StorefrontContext {
   features: Record<string, boolean>;
   branding: Record<string, unknown>;
   seo: Record<string, unknown>;
-  fulfillment: Record<string, unknown>;
+  /** O que a loja oferece, como `public_fulfillment` monta do lado da API. */
+  fulfillment: {
+    modes?: string[];
+    min_order_cents?: number;
+    shipping?: { free_above_cents?: number | null };
+  } & Record<string, unknown>;
   chatwoot_url?: string | null;
 }
 
