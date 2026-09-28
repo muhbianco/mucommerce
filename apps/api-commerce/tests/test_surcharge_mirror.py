@@ -65,6 +65,9 @@ def test_parcelando_alem_da_ultima_faixa_vale_a_ultima() -> None:
 
 def test_repasse_desligado_nao_cobra_nada() -> None:
     cfg = PaymentsV1.model_validate(
-        {"enabled": False, "card_installments": [{"up_to": 12, "percent_bps": 450, "fixed_cents": 0}]}
+        {
+            "enabled": False,
+            "card_installments": [{"up_to": 12, "percent_bps": 450, "fixed_cents": 0}],
+        }
     )
     assert compute(cfg, method="card", installments=12, base_cents=10_000) == 0

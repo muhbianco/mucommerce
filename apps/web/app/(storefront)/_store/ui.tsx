@@ -14,6 +14,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { type StorePillState } from "@/lib/store/states";
+import type { StorefrontContext } from "@/lib/tenant";
 import { bestPlan, type PublicPayments } from "@/lib/store/installments";
 import { discountPercent, freeShippingGap, money } from "@/lib/store/pricing";
 import { AVAILABILITY_LABEL, type Availability, formatPrice, type StorePrice } from "@/lib/storefront";
@@ -168,6 +169,61 @@ export function Installments({
 export function LowStockPill({ low }: { low: boolean }) {
   if (!low) return null;
   return <Pill state="warn">Últimas unidades</Pill>;
+}
+
+
+/**
+ * O que esta loja garante, com o que ela configurou de verdade.
+ *
+ * Nada de lista genérica de e-commerce: cada linha sai da configuração de entrega da loja, e
+ * some quando não se aplica. Prometer "entrega rápida" a quem só tem retirada no balcão é o
+ * jeito mais barato de gerar reclamação.
+ */
+export function StoreGuarantees({ context }: { context: StorefrontContext }) {
+  const f = context.fulfillment;
+  const modes = f.modes ?? [];
+  const linhas: string[] = [];
+
+  if (modes.includes("pickup")) {
+    const locais = f.pickup_locations ?? [];
+    linhas.push(locais.length === 1 ? `Retire em ${locais[0]!.name}` : "Retirada no local");
+  }
+
+  if (modes.includes("delivery")) {
+    // O prazo que vale anunciar é o pior entre as zonas: chegar antes é boa surpresa,
+    // chegar depois do prometido é reclamação.
+    const prazos = (f.delivery_zones ?? []).map((z) => z.eta_minutes).filter((m): m is number => !!m);
+    const pior = prazos.length ? Math.max(...prazos) : null;
+    linhas.push(
+      pior === null
+        ? "Entrega pela loja"
+        : pior < 60
+          ? `Entrega em até ${pior} minutos`
+          : `Entrega em até ${Math.round(pior / 60)}h`,
+    );
+  }
+
+  if (modes.includes("shipping")) {
+    const gratis = f.shipping?.free_above_cents ?? null;
+    linhas.push(
+      gratis ? `Frete grátis acima de ${money(gratis, context.tenant.currency)}` : "Envio para todo o Brasil",
+    );
+  }
+
+  if (f.min_order_cents) {
+    linhas.push(`Pedido mínimo de ${money(f.min_order_cents, context.tenant.currency)}`);
+  }
+
+  if (context.features.checkout) linhas.push("Pagamento pela loja, com recibo");
+  if (linhas.length === 0) return null;
+
+  return (
+    <ul className={styles.trust}>
+      {linhas.map((linha) => (
+        <li key={linha}>{linha}</li>
+      ))}
+    </ul>
+  );
 }
 
 /** Selo de situação. A cor ajuda; quem informa é o texto. */

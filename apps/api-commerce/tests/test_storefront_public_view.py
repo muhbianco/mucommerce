@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.catalog.storefront import LOW_STOCK_AT, variant_low_stock
 from app.catalog.models import Product, ProductVariant, StockPolicy
+from app.catalog.storefront import LOW_STOCK_AT, variant_low_stock
 from app.inventory.models import InventoryBalance
 from app.payments.public_view import public_payments
 from app.payments.registry import PaymentOption
@@ -60,10 +60,15 @@ class TestParcelamentoPublico:
 
     def test_o_teto_nunca_passa_de_doze(self) -> None:
         # O schema do painel já limita, mas um dado velho no banco não pode virar "em até 99x".
-        assert public_payments(_tenant(), [_option(installments_max=99)])["card_installments_max"] == 12
+        assert (
+            public_payments(_tenant(), [_option(installments_max=99)])["card_installments_max"]
+            == 12
+        )
 
     def test_repasse_desligado_nao_manda_faixa_nenhuma(self) -> None:
-        tenant = _tenant({"payments": {"enabled": False, "surcharge": {"card": {"percent_bps": 300}}}})
+        tenant = _tenant(
+            {"payments": {"enabled": False, "surcharge": {"card": {"percent_bps": 300}}}}
+        )
         assert public_payments(tenant, [_option()])["surcharge"] is None
 
     def test_repasse_ligado_manda_a_regra_e_nao_o_valor(self) -> None:

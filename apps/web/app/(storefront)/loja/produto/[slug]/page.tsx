@@ -36,6 +36,7 @@ import {
   Price,
   Section,
   Split,
+  StoreGuarantees,
 } from "../../../_store/ui";
 import { VariantPicker } from "../../../_store/variant-picker";
 
@@ -192,16 +193,7 @@ export default async function ProductPage({
                 byWeight={product.sold_by === "weight"}
               />
             ) : null}
-            {sells ? (
-              <ul className={styles.trust}>
-                {context.fulfillment.modes?.includes("pickup") ? <li>Retirada no local</li> : null}
-                {context.fulfillment.modes?.includes("delivery") ? <li>Entrega pela loja</li> : null}
-                {context.fulfillment.modes?.includes("shipping") ? <li>Envio para todo o Brasil</li> : null}
-                <li>Pagamento pela loja, com recibo</li>
-              </ul>
-            ) : (
-              <p className="muted">Pedidos online chegam em breve.</p>
-            )}
+            {sells ? <StoreGuarantees context={context} /> : <p className="muted">Pedidos online chegam em breve.</p>}
           </div>
         }
       >

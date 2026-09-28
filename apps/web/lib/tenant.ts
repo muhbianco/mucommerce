@@ -38,7 +38,9 @@ export interface StorefrontContext {
   fulfillment: {
     modes?: string[];
     min_order_cents?: number;
-    shipping?: { free_above_cents?: number | null };
+    pickup_locations?: { id: string; name: string; address: string; instructions: string | null }[];
+    delivery_zones?: { id: string; name: string; fee_cents: number; eta_minutes?: number | null }[];
+    shipping?: { enabled?: boolean; free_above_cents?: number | null; handling_days?: number };
   } & Record<string, unknown>;
   /** Meios aceitos e teto de parcelamento, para a vitrine anunciar antes do carrinho. */
   payments?: PublicPayments;
