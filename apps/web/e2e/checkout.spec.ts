@@ -37,7 +37,8 @@ test("carrinho: entra para comprar, escolhe tamanho e adicional, retira na loja"
 
   await page.getByLabel(/Retirar em Loja MuhBianco/).check();
   await page.getByRole("button", { name: "Usar esta opção" }).click();
-  await expect(page.getByText(/Total: R\$\s*79,00/)).toBeVisible();
+  // No carrinho o total vive no resumo, como par rótulo/valor numa lista de definição.
+  await expect(page.getByRole("complementary")).toContainText(/Total\s*R\$\s*79,00/);
   await expect(page.getByRole("link", { name: "Finalizar compra" })).toBeVisible();
 
   // A paused size cannot be added (the button is off for it).
@@ -109,8 +110,9 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await page.getByLabel("Cupom de desconto").fill("e2e10");
   await page.getByRole("button", { name: "Aplicar cupom" }).click();
   await expect(page.getByText("Cupom E2E10 aplicado.")).toBeVisible();
-  await expect(page.getByText(/Desconto:\s*−?R\$\s*5,90/)).toBeVisible();
-  await expect(page.getByText(/Total:\s*R\$\s*53,10/)).toBeVisible();
+  const resumo = page.getByRole("complementary");
+  await expect(resumo).toContainText(/Desconto\s*−R\$\s*5,90/);
+  await expect(resumo).toContainText(/Total\s*R\$\s*53,10/);
 
   await page.getByRole("link", { name: "Finalizar compra" }).click();
   const accept = page.getByRole("checkbox", { name: /Li e aceito/ });

@@ -1076,3 +1076,250 @@
   font-weight: 700;
   color: var(--store-ok-ink);
 }
+
+/* ------------------------------------------------------------------ carrinho */
+
+.cartTable {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cartTable th,
+.cartTable td {
+  padding: 1rem 0.5rem 1rem 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--store-line);
+  font-weight: 400;
+}
+
+.cartTable tr:last-child th,
+.cartTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.cartItem {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.cartItemText {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.storefront .cartItemText a {
+  font-weight: 600;
+  color: var(--store-ink);
+  text-decoration: none;
+}
+
+.storefront .cartItemText a:hover {
+  color: var(--store-brand-ink);
+  text-decoration: underline;
+}
+
+.cartUnit {
+  font-size: 0.85rem;
+  color: var(--store-muted);
+}
+
+.cartSubtotal {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Mais e menos, com o campo no meio para quem digita (e para quem compra por peso). */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1.5px solid var(--store-line);
+  border-radius: var(--store-radius);
+  overflow: hidden;
+  background: var(--store-surface);
+}
+
+.storefront .stepper button {
+  min-height: 0;
+  width: var(--store-tap);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.storefront .stepper button:hover {
+  background: var(--store-mist);
+}
+
+.storefront .stepper input {
+  width: 3.5rem;
+  min-height: 0;
+  border: 0;
+  border-left: 1px solid var(--store-line);
+  border-right: 1px solid var(--store-line);
+  border-radius: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.storefront .stepper input:focus {
+  box-shadow: none;
+}
+
+/* Quem digita precisa de um jeito de confirmar; quem usa os botões não vê este. */
+.storefront .stepperApply {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.storefront .stepperApply:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  padding: 0 0.75rem;
+  border-left: 1px solid var(--store-line);
+}
+
+/* ------------------------------------------------------------------ resumo do pedido */
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--store-surface);
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  box-shadow: var(--store-shadow);
+}
+
+.summary h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.totals {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.totals dt {
+  color: var(--store-muted);
+}
+
+.totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.discount {
+  color: var(--store-ok-ink);
+}
+
+.totalRow {
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--store-line);
+  font-size: 1.15rem;
+}
+
+.totalRow dt {
+  color: var(--store-ink);
+  font-weight: 700;
+}
+
+.totalRow dd {
+  font-weight: 800;
+}
+
+.couponForm label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--store-ink-soft);
+  margin-bottom: 0.35rem;
+}
+
+.couponRow {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.couponRow input {
+  flex: 1;
+  min-width: 0;
+}
+
+.couponOn {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.storefront .checkoutCta {
+  width: 100%;
+  font-size: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.keepShopping {
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.choice {
+  margin: 0 0 0.6rem;
+}
+
+.choice label {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .cartTable,
+  .cartTable tbody,
+  .cartTable tr,
+  .cartTable th,
+  .cartTable td {
+    display: block;
+    width: auto;
+  }
+
+  .cartTable tr {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--store-line);
+  }
+
+  .cartTable th,
+  .cartTable td {
+    border-bottom: 0;
+    padding: 0.35rem 0;
+  }
+
+  .cartSubtotal {
+    font-size: 1.05rem;
+  }
+}

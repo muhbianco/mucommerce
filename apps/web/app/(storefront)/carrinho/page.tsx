@@ -12,6 +12,7 @@ import { CART_ERRORS } from "../_store/add-to-cart";
 import { applyCoupon, chooseFulfillment, removeCartItem, removeCoupon, setCartQuantity } from "../_store/cart-actions";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
+import { EmptyState, FreeShippingBar, Notice, PageHead, Section, Split, TableWrap, Thumb } from "../_store/ui";
 
 export const metadata: Metadata = { title: "Carrinho", robots: { index: false, follow: false } };
 
@@ -125,64 +126,171 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
   const chosenSlot = chosen.slot_date && chosen.slot_start ? `${chosen.slot_date} ${chosen.slot_start}` : "";
   const slotChoices = chosen.type ? (options.slots[chosen.type] ?? []) : [];
 
+  const freeAbove = (context.fulfillment.shipping?.free_above_cents ?? null) as number | null;
+  const shippingOffered = Boolean(context.fulfillment.modes?.includes("shipping"));
+
   return (
     <StoreShell context={context}>
-      <h1>Carrinho</h1>
-      {ok === "adicionado" ? <p role="status">Item adicionado.</p> : null}
-      {erro ? <p role="alert">{CART_ERRORS[erro] ?? "Não foi possível atualizar o carrinho."}</p> : null}
+      <PageHead title="Carrinho" />
+      {ok === "adicionado" ? <Notice kind="ok">Item adicionado.</Notice> : null}
+      {ok === "cupom" ? <Notice kind="ok">Cupom aplicado.</Notice> : null}
+      {erro ? <Notice kind="error">{CART_ERRORS[erro] ?? "Não foi possível atualizar o carrinho."}</Notice> : null}
       {cart.items.length === 0 ? (
-        <p>
-          Seu carrinho está vazio. <Link href="/loja">Ver produtos</Link>
-        </p>
+        <EmptyState
+          title="Seu carrinho está vazio."
+          action={
+            <Link className="button" href="/loja">
+              Ver produtos
+            </Link>
+          }
+        >
+          O que você escolher aparece aqui, com o total e as formas de receber.
+        </EmptyState>
       ) : (
-        <>
-          <table className={styles.lots}>
-            <tbody>
-              {cart.items.map((item) => (
-                <tr key={item.id}>
-                  <th scope="row">
-                    {item.product_slug ? <Link href={`/loja/produto/${item.product_slug}`}>{item.name}</Link> : item.name}
-                    {item.modifiers.length ? (
-                      <div className="muted">{item.modifiers.map((m) => m.name).join(", ")}</div>
-                    ) : null}
-                    {item.problem ? (
-                      <div className={styles.soldOut}>{PROBLEM[item.problem.code] ?? "Indisponível."}</div>
-                    ) : null}
-                  </th>
-                  <td>{item.unit_price_cents !== null ? money(item.unit_price_cents, currency) : "—"}</td>
-                  <td>
-                    <form action={setCartQuantity} className={styles.buy}>
-                      <input type="hidden" name="item_id" value={item.id} />
-                      <input name="quantity" inputMode="decimal" defaultValue={item.quantity} size={4} aria-label="Quantidade" />
-                      <button type="submit" className="muted">
-                        Atualizar
-                      </button>
-                    </form>
-                  </td>
-                  <td>{item.subtotal_cents !== null ? money(item.subtotal_cents, currency) : "—"}</td>
-                  <td>
-                    <form action={removeCartItem}>
-                      <input type="hidden" name="item_id" value={item.id} />
-                      <button type="submit" className="muted">
-                        Remover
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Split
+          aside={
+            <div className={styles.summary} aria-label="Resumo do pedido">
+              <h2>Resumo</h2>
+              {shippingOffered ? (
+                <FreeShippingBar subtotalCents={quote.subtotal_cents} freeAboveCents={freeAbove} currency={currency} />
+              ) : null}
+              <dl className={styles.totals}>
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{money(quote.subtotal_cents, currency)}</dd>
+                </div>
+                {quote.discount_cents ? (
+                  <div>
+                    <dt>Desconto</dt>
+                    <dd className={styles.discount}>
+                      −{money(quote.discount_cents, currency)}
+                    </dd>
+                  </div>
+                ) : null}
+                {quote.delivery_fee_cents ? (
+                  <div>
+                    <dt>Entrega</dt>
+                    <dd>{money(quote.delivery_fee_cents, currency)}</dd>
+                  </div>
+                ) : null}
+                <div className={styles.totalRow}>
+                  <dt>Total</dt>
+                  <dd>{money(quote.total_cents, currency)}</dd>
+                </div>
+              </dl>
+
+              {quote.coupon && !quote.coupon.problem ? (
+                <p className={styles.couponOn}>
+                  Cupom {quote.coupon.code} aplicado.{" "}
+                  <form action={removeCoupon} style={{ display: "inline" }}>
+                    <button type="submit" className={styles.linkButton}>
+                      tirar
+                    </button>
+                  </form>
+                </p>
+              ) : (
+                <form action={applyCoupon} className={styles.couponForm}>
+                  <label htmlFor="cupom">Cupom de desconto</label>
+                  <div className={styles.couponRow}>
+                    <input id="cupom" name="code" maxLength={40} placeholder="ex.: BEMVINDO" />
+                    <button type="submit">Aplicar cupom</button>
+                  </div>
+                </form>
+              )}
+              {quote.coupon?.problem ? (
+                <Notice kind="warn">{COUPON_PROBLEM[quote.coupon.problem] ?? "Cupom indisponível."}</Notice>
+              ) : null}
+
+              {quote.can_checkout ? (
+                <Link href="/checkout" className={`button ${styles.checkoutCta}`}>
+                  Finalizar compra
+                </Link>
+              ) : (
+                <p className="muted">
+                  {quote.problems ? "Resolva os itens marcados para continuar." : "Escolha como receber para continuar."}
+                </p>
+              )}
+              <Link href="/loja" className={styles.keepShopping}>
+                Continuar comprando
+              </Link>
+            </div>
+          }
+        >
+          <TableWrap>
+            <table className={styles.cartTable}>
+              <tbody>
+                {cart.items.map((item) => (
+                  <tr key={item.id}>
+                    <th scope="row">
+                      <span className={styles.cartItem}>
+                        <Thumb url={item.image_url} />
+                        <span className={styles.cartItemText}>
+                          {item.product_slug ? (
+                            <Link href={`/loja/produto/${item.product_slug}`}>{item.name}</Link>
+                          ) : (
+                            item.name
+                          )}
+                          {item.modifiers.length ? (
+                            <span className="muted">{item.modifiers.map((m) => m.name).join(", ")}</span>
+                          ) : null}
+                          {item.unit_price_cents !== null ? (
+                            <span className={styles.cartUnit}>{money(item.unit_price_cents, currency)} cada</span>
+                          ) : null}
+                          {item.problem ? (
+                            <span className={styles.soldOut}>{PROBLEM[item.problem.code] ?? "Indisponível."}</span>
+                          ) : null}
+                        </span>
+                      </span>
+                    </th>
+                    <td>
+                      {/* Os botões mandam `delta`; o campo continua aqui para quem digita — e
+                          para quem compra por peso, onde "+1" não quer dizer nada. */}
+                      <form action={setCartQuantity} className={styles.stepper}>
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <input type="hidden" name="current" value={item.quantity} />
+                        <button type="submit" name="delta" value="-1" aria-label="Diminuir a quantidade">
+                          −
+                        </button>
+                        <input name="quantity" inputMode="decimal" defaultValue={item.quantity} aria-label="Quantidade" />
+                        <button type="submit" name="delta" value="1" aria-label="Aumentar a quantidade">
+                          +
+                        </button>
+                        <button type="submit" className={styles.stepperApply}>
+                          Atualizar
+                        </button>
+                      </form>
+                    </td>
+                    <td className={styles.cartSubtotal}>
+                      {item.subtotal_cents !== null ? money(item.subtotal_cents, currency) : "—"}
+                    </td>
+                    <td>
+                      <form action={removeCartItem}>
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <button type="submit" className={styles.linkButton}>
+                          Remover
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
 
           {quote.needs_fulfillment ? (
-            <section className={styles.section}>
-              <h2>Como receber</h2>
+            <Section title="Como receber" variant="card">
               {options.modes.length === 0 ? <p>A loja ainda não configurou retirada nem entrega.</p> : null}
               <form action={chooseFulfillment}>
                 {options.modes.includes("pickup")
                   ? options.pickup_locations.map((loc) => (
-                      <p key={loc.id}>
+                      <p key={loc.id} className={styles.choice}>
                         <label>
-                          <input type="radio" name="choice" value={`pickup:${loc.id}`} defaultChecked={current === `pickup:${loc.id}`} />{" "}
+                          <input
+                            type="radio"
+                            name="choice"
+                            value={`pickup:${loc.id}`}
+                            defaultChecked={current === `pickup:${loc.id}`}
+                          />{" "}
                           Retirar em {loc.name} — {loc.address}
                         </label>
                       </p>
@@ -191,7 +299,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
                 {options.modes.includes("delivery") ? (
                   options.addresses.length ? (
                     options.addresses.map((address) => (
-                      <p key={address.id}>
+                      <p key={address.id} className={styles.choice}>
                         <label>
                           <input
                             type="radio"
@@ -211,7 +319,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
                   )
                 ) : null}
                 {slotChoices.length ? (
-                  <p>
+                  <p className={styles.choice}>
                     <label>
                       Horário{" "}
                       <select name="slot" defaultValue={chosenSlot}>
@@ -232,50 +340,13 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
                 ) : null}
               </form>
               {quote.fulfillment?.problems.length ? (
-                <p role="alert">{quote.fulfillment.problems.map((p) => FULFILLMENT_PROBLEM[p] ?? p).join(" ")}</p>
+                <Notice kind="warn">
+                  {quote.fulfillment.problems.map((p) => FULFILLMENT_PROBLEM[p] ?? p).join(" ")}
+                </Notice>
               ) : null}
-            </section>
+            </Section>
           ) : null}
-
-          <section className={styles.section}>
-            <p>Subtotal: {money(quote.subtotal_cents, currency)}</p>
-            {quote.coupon && !quote.coupon.problem ? (
-              <p>
-                Cupom {quote.coupon.code} aplicado.{" "}
-                <form action={removeCoupon} style={{ display: "inline" }}>
-                  <button type="submit" className="muted">
-                    tirar
-                  </button>
-                </form>
-              </p>
-            ) : (
-              <form action={applyCoupon}>
-                <label>
-                  Cupom de desconto
-                  <input name="code" maxLength={40} placeholder="ex.: BEMVINDO" />
-                </label>
-                <button type="submit">Aplicar cupom</button>
-              </form>
-            )}
-            {quote.coupon?.problem ? (
-              <p role="alert">{COUPON_PROBLEM[quote.coupon.problem] ?? "Cupom indisponível."}</p>
-            ) : null}
-            {quote.discount_cents ? <p>Desconto: −{money(quote.discount_cents, currency)}</p> : null}
-            {quote.delivery_fee_cents ? <p>Entrega: {money(quote.delivery_fee_cents, currency)}</p> : null}
-            <p>
-              <strong>Total: {money(quote.total_cents, currency)}</strong>
-            </p>
-            {quote.can_checkout ? (
-              <Link href="/checkout" className="button">
-                Finalizar compra
-              </Link>
-            ) : (
-              <p className="muted">
-                {quote.problems ? "Resolva os itens marcados para continuar." : "Escolha como receber para continuar."}
-              </p>
-            )}
-          </section>
-        </>
+        </Split>
       )}
     </StoreShell>
   );

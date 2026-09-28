@@ -64,10 +64,29 @@ export async function addToCart(form: FormData): Promise<void> {
   );
 }
 
+/**
+ * Muda a quantidade de um item.
+ *
+ * Os botões "+" e "−" mandam `delta`: o `name`/`value` do botão que enviou o formulário entra
+ * no FormData, então o passo a passo funciona com o JavaScript desligado — que é a régua de
+ * todo o fluxo de compra aqui. O campo de texto continua existindo para quem digita,
+ * necessário em produto vendido por peso.
+ */
 export async function setCartQuantity(form: FormData): Promise<void> {
   const itemId = field(form, "item_id");
-  const amount = quantity(form);
+  const delta = field(form, "delta");
+  let amount = quantity(form);
+  if (delta === "1" || delta === "-1") {
+    const current = Number(field(form, "current").replace(",", "."));
+    if (!Number.isFinite(current)) redirect("/carrinho?erro=invalid_quantity");
+    // Zero remove o item: é o que "−" na última unidade quer dizer.
+    const next = Math.max(0, current + Number(delta));
+    amount = Number.isInteger(next) ? String(next) : next.toFixed(3);
+  }
   if (!ID.test(itemId) || amount === "invalid") redirect("/carrinho?erro=invalid_quantity");
+  if (amount === "0") {
+    await attempt("/carrinho", "/carrinho", () => customerApi(`/cart/items/${itemId}`, { method: "DELETE" }));
+  }
   await attempt("/carrinho", "/carrinho", () =>
     customerApi(`/cart/items/${itemId}`, { method: "PATCH", json: { quantity: amount } }),
   );
