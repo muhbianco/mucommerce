@@ -146,6 +146,9 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=ProductStatus.DRAFT)
     base_price_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     promo_price_cents: Mapped[int | None] = mapped_column(BigInteger)
+    # [{"min_qty_milli", "unit_price_cents"}]: desconto progressivo por quantidade.
+    # A variante com tabela propria sobrepoe a do produto, igual ao preco.
+    price_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     promo_starts_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     promo_ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     cost_cents_estimate: Mapped[int | None] = mapped_column(BigInteger)
@@ -195,6 +198,7 @@ class ProductVariant(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, Tenan
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     option_values: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     price_cents: Mapped[int | None] = mapped_column(BigInteger)
+    price_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     cost_cents: Mapped[int | None] = mapped_column(BigInteger)
     stock_policy: Mapped[str | None] = mapped_column(String(16))
     # Points at media_assets (phase 1, S4); the FK arrives with that table.

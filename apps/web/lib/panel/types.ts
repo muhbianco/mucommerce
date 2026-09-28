@@ -126,6 +126,8 @@ export interface Product extends ProductSummary {
   short_description: string | null;
   description_md: string | null;
   promo_price_cents: number | null;
+  /** Desconto progressivo: a partir de N unidades, este preço por unidade. */
+  price_tiers?: { min_qty_milli: number; unit_price_cents: number }[] | null;
   promo_starts_at: string | null;
   promo_ends_at: string | null;
   cost_cents_estimate: number | null;

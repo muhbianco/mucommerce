@@ -171,3 +171,81 @@ def price_with_modifiers(
         )
     total = base.amount_cents + sum(m.price_cents for m in chosen)
     return ModifiedPrice(total, base, tuple(chosen))
+
+
+# ------------------------------------------------------------------ preço por quantidade
+
+#: Um degrau: a partir de `min_qty_milli`, cada unidade sai por `unit_price_cents`.
+#: Guardado como JSON no produto (ou na variante, que sobrepõe), sempre em ordem crescente.
+MAX_TIERS = 8
+
+
+def parse_tiers(raw: Sequence[Mapping[str, Any]] | None) -> tuple[tuple[int, int], ...]:
+    """JSON guardado → degraus (quantidade, preço), ordenados. Lixo vira lista vazia."""
+    if not raw:
+        return ()
+    degraus: list[tuple[int, int]] = []
+    for item in raw:
+        try:
+            quantidade = int(item["min_qty_milli"])
+            preco = int(item["unit_price_cents"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if quantidade > 0 and preco > 0:
+            degraus.append((quantidade, preco))
+    return tuple(sorted(degraus))
+
+
+def tier_price(tiers: Sequence[tuple[int, int]], quantity_milli: int) -> int | None:
+    """Preço unitário do degrau que esta quantidade alcança. `None` = nenhum."""
+    alcancado: int | None = None
+    for minimo, preco in tiers:
+        if quantity_milli >= minimo:
+            alcancado = preco
+        else:
+            break  # ordenado: o primeiro que não alcança encerra a busca
+    return alcancado
+
+
+def apply_tiers(
+    base: EffectivePrice, tiers: Sequence[tuple[int, int]], quantity_milli: int
+) -> EffectivePrice:
+    """Aplica o degrau ao preço base.
+
+    Quando há promoção **e** degrau, vale o menor dos dois. Fazer o degrau sobrepor uma
+    promoção melhor seria subir o preço de quem comprou mais — o contrário do que a loja
+    anunciou, e a primeira reclamação do dia.
+    """
+    preco = tier_price(tiers, quantity_milli)
+    if preco is None or preco >= base.amount_cents:
+        return base
+    # O preço cheio fica como `compare_at` para a vitrine poder riscar.
+    return EffectivePrice(
+        amount_cents=preco,
+        compare_at_cents=base.compare_at_cents or base.amount_cents,
+        promo_active=base.promo_active,
+        promo_ends_at=base.promo_ends_at,
+    )
+
+
+def check_tiers(raw: Sequence[Mapping[str, Any]] | None, *, base_cents: int) -> None:
+    """Recusa tabela que não é desconto: preço acima do cheio, ou que sobe com a quantidade."""
+    if not raw:
+        return
+    if len(raw) > MAX_TIERS:
+        raise ValidationError("Degraus demais na tabela de preço.", max_tiers=MAX_TIERS)
+    degraus = parse_tiers(raw)
+    if len(degraus) != len(raw):
+        raise ValidationError("Degrau inválido: informe quantidade e preço maiores que zero.")
+    quantidades = [q for q, _ in degraus]
+    if len(set(quantidades)) != len(quantidades):
+        raise ValidationError("Duas faixas com a mesma quantidade mínima.")
+    anterior = base_cents
+    for quantidade, preco in degraus:
+        if preco >= anterior:
+            raise ValidationError(
+                "Cada faixa precisa custar menos que a anterior.",
+                min_qty_milli=quantidade,
+                unit_price_cents=preco,
+            )
+        anterior = preco

@@ -21,7 +21,7 @@ from app.api.deps import (
     StorefrontTenant,
     check_storefront_catalog,
 )
-from app.catalog.pricing import EffectivePrice
+from app.catalog.pricing import EffectivePrice, parse_tiers
 from app.catalog.schemas import LotState
 from app.catalog.storefront import (
     STOREFRONT_PAGE_MAX,
@@ -131,8 +131,15 @@ class OptionRef(BaseModel):
     values: list[str]
 
 
+class PriceTier(BaseModel):
+    min_qty_milli: int
+    unit_price_cents: int
+
+
 class ProductDetail(ProductCard):
     sku: str
+    #: Desconto por quantidade ("a partir de 10 un, R$ 9,00"), vazio quando não há.
+    price_tiers: list[PriceTier] = []
     options: list[OptionRef]
     modifier_groups: list[ModifierGroupRef]
     description_md: str | None
@@ -350,6 +357,10 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
     return ProductDetail(
         **card.model_dump(),
         sku=product.sku,
+        price_tiers=[
+            PriceTier(min_qty_milli=q, unit_price_cents=c)
+            for q, c in parse_tiers(product.price_tiers)
+        ],
         options=[OptionRef(**option) for option in product.options or []],
         modifier_groups=_modifier_groups(product.modifier_groups),
         description_md=product.description_md,

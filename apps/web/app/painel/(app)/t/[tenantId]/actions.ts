@@ -60,6 +60,7 @@ export async function updateProduct(form: FormData): Promise<void> {
         promo_starts_at: promoStarts,
         promo_ends_at: promoEnds,
         cost_cents_estimate: money(form, "cost"),
+        price_tiers: priceTiers(form),
         kind: text(form, "kind") || undefined,
         stock_policy: text(form, "stock_policy"),
         sold_by: text(form, "sold_by"),
@@ -71,6 +72,23 @@ export async function updateProduct(form: FormData): Promise<void> {
       },
     });
   });
+}
+
+/**
+ * Desconto progressivo: tres degraus na tela ("a partir de N unidades, R$ X cada").
+ * Linha sem os dois campos e ignorada, entao a pessoa preenche so o que usa.
+ */
+function priceTiers(form: FormData): { min_qty_milli: number; unit_price_cents: number }[] {
+  const tiers: { min_qty_milli: number; unit_price_cents: number }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const qty = Number(text(form, `tier_qty_${i}`) || 0);
+    const price = money(form, `tier_price_${i}`);
+    if (!qty && price === null) continue;
+    if (!Number.isInteger(qty) || qty <= 0) throw new FormError("quantidade_invalida");
+    if (price === null || price <= 0) throw new FormError("preco_obrigatorio");
+    tiers.push({ min_qty_milli: qty * 1000, unit_price_cents: price });
+  }
+  return tiers;
 }
 
 export async function setProductStatus(form: FormData): Promise<void> {

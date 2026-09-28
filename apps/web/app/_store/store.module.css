@@ -199,3 +199,14 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Desconto por quantidade: a tabela que faz a pessoa levar mais. */
+.tiers {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px dashed var(--line, #ddd);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}

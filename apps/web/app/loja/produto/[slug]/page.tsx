@@ -146,6 +146,18 @@ export default async function ProductPage({
               </span>
             ) : null}
           </p>
+          {product.price_tiers?.length ? (
+            <ul className={styles.tiers} aria-label="Desconto por quantidade">
+              {product.price_tiers.map((tier) => (
+                <li key={tier.min_qty_milli}>
+                  <strong>
+                    {Math.round(tier.min_qty_milli / 1000)} {product.unit_label} ou mais
+                  </strong>
+                  : {formatPrice({ ...product.price, amount_cents: tier.unit_price_cents })} cada
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <p>
             <span className={offSale(product.availability) ? styles.soldOut : styles.tag}>
               {AVAILABILITY_LABEL[product.availability]}

@@ -87,6 +87,8 @@ export interface ProductDetail extends ProductCard {
   categories: CategoryRef[];
   tags: TagRef[];
   seo: { title: string | null; description: string | null };
+  /** Desconto por quantidade, do menor para o maior. Vazio quando o preço é único. */
+  price_tiers: { min_qty_milli: number; unit_price_cents: number }[];
   updated_at: string;
 }
 

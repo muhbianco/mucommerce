@@ -185,6 +185,7 @@ export default async function ProductPage({
     }
   }
   const canWrite = scopes.can("catalog:write") && product.status !== "archived";
+  const tiers = (product.price_tiers ?? []) as { min_qty_milli: number; unit_price_cents: number }[];
   const zone = context.timezone;
   const hidden = (
     <>
@@ -479,6 +480,34 @@ export default async function ProductPage({
                     <input name="cost" inputMode="decimal" defaultValue={moneyInput(product.cost_cents_estimate)} />
                     <span className={styles.fieldHint}>Quanto custa para você. Não aparece na loja.</span>
                   </label>
+                </div>
+                <h4 className={local.subhead}>Desconto por quantidade</h4>
+                <p className={styles.fieldHint}>
+                  Quem leva mais paga menos por unidade. O desconto olha o total do produto no
+                  carrinho, some ou não em linhas separadas, e cada faixa precisa custar menos que
+                  a anterior. Deixe vazio para preço único.
+                </p>
+                <div className={styles.fields}>
+                  {[0, 1, 2].map((i) => {
+                    const tier = tiers[i];
+                    return (
+                      <label key={i} className={styles.field}>
+                        {i === 0 ? "A partir de (unidades)" : `Faixa ${i + 1} — a partir de`}
+                        <input
+                          name={`tier_qty_${i}`}
+                          type="number"
+                          min={1}
+                          defaultValue={tier ? Math.round(tier.min_qty_milli / 1000) : ""}
+                        />
+                        <span className={styles.fieldHint}>Preço por unidade nesta faixa (R$)</span>
+                        <input
+                          name={`tier_price_${i}`}
+                          inputMode="decimal"
+                          defaultValue={tier ? moneyInput(tier.unit_price_cents) : ""}
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
                 <h4 className={local.subhead}>Promoção</h4>
                 <div className={styles.fields}>

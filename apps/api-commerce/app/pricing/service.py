@@ -20,7 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.events import EventRepository, lot_state
 from app.catalog.models import ProductKind, ProductStatus, SoldBy, StockPolicy, VariantStatus
-from app.catalog.pricing import price_with_modifiers, variant_price
+from app.catalog.pricing import (
+    apply_tiers,
+    parse_tiers,
+    price_with_modifiers,
+    variant_price,
+)
 from app.core.exceptions import ValidationError
 from app.coupons.models import Coupon
 from app.coupons.rules import evaluate as evaluate_coupon
@@ -95,6 +100,11 @@ class PricingService:
         priced: list[PricedLine] = []
         problems: list[LineProblem] = []
         wanted: dict[str, int] = defaultdict(int)
+        # Desconto por quantidade olha o carrinho inteiro, nao a linha: quem leva 10 em duas
+        # linhas de 5 (adicionais diferentes) levou 10, e e assim que a pessoa entende.
+        no_carrinho: dict[str, int] = defaultdict(int)
+        for line in lines:
+            no_carrinho[line.variant_id] += line.quantity_milli
         for line in lines:
             pair = found.get(line.variant_id)
             if pair is None:
@@ -115,6 +125,11 @@ class PricingService:
                 starts_at=product.promo_starts_at,
                 ends_at=product.promo_ends_at,
                 now=self.now,
+            )
+            base = apply_tiers(
+                base,
+                parse_tiers(variant.price_tiers or product.price_tiers),
+                no_carrinho[line.variant_id],
             )
             try:
                 modified = price_with_modifiers(base, product.modifier_groups, line.modifier_ids)
