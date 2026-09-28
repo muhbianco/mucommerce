@@ -105,6 +105,14 @@ MODULES: tuple[Module, ...] = (
         requires=("checkout",),
     ),
     Module(
+        key="payments.pagbank",
+        label="PagBank",
+        summary="Pix, cartão e boleto na página do PagBank, com a conta da loja.",
+        where="pagamentos",
+        self_service=True,
+        requires=("checkout",),
+    ),
+    Module(
         key="payments.infinitepay",
         label="InfinitePay",
         summary="Link de pagamento da InfinitePay, com a conta da loja.",

@@ -135,11 +135,13 @@ class Settings(BaseSettings):
     # --- payments (stage E) ------------------------------------------------------------
     # Providers this deployment may use at all (comma separated); `fake` exists for tests and
     # the E2E suite and is refused in production.
-    payments_allowed_providers: str = "mercadopago,infinitepay"
+    payments_allowed_providers: str = "mercadopago,infinitepay,pagbank"
     payments_fake_webhook_secret: SecretStr = SecretStr("")
     payments_http_timeout_seconds: float = 10.0
     mercadopago_api_base: str = "https://api.mercadopago.com"
     infinitepay_api_base: str = "https://api.checkout.infinitepay.io"
+    pagbank_api_base: str = "https://api.pagseguro.com"
+    pagbank_sandbox_api_base: str = "https://sandbox.api.pagseguro.com"
     # No payment deadline goes beyond this, whatever the provider allows.
     checkout_max_order_age_minutes: int = 120
 
@@ -208,6 +210,8 @@ class Settings(BaseSettings):
                 raise ValueError("MERCADOPAGO_API_BASE must be Mercado Pago's API in production")
             if self.infinitepay_api_base != "https://api.checkout.infinitepay.io":
                 raise ValueError("INFINITEPAY_API_BASE must be InfinitePay's API in production")
+            if self.pagbank_api_base != "https://api.pagseguro.com":
+                raise ValueError("PAGBANK_API_BASE must be PagBank's API in production")
             if self.notify_n8n_url and not self.notify_n8n_secret.get_secret_value():
                 raise ValueError("NOTIFY_N8N_SECRET is required when NOTIFY_N8N_URL is set")
             if self.notify_n8n_url and not self.notify_n8n_url.startswith("https://"):

@@ -201,6 +201,7 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "chatwoot": False,
     "payments.mercadopago": False,
     "payments.infinitepay": False,
+    "payments.pagbank": False,
     # Etapa J: envio por transportadora. Convive com `delivery` (frota própria).
     "shipping.melhorenvio": False,
     # Phase A: store customers sign in with Google; phone check by WhatsApp code.

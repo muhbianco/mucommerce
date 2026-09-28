@@ -366,6 +366,13 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
     public: [{ key: "handle", label: "InfiniteTag (sem o $)" }],
     secrets: [],
   },
+  pagbank: {
+    label: "PagBank",
+    hint: "O cliente paga na página do PagBank (Pix, cartão ou boleto) e o dinheiro cai na conta da sua loja. Gere o token em Vendas → Integrações no PagBank; o juro do parcelamento segue o que estiver configurado lá.",
+    methods: ["link"],
+    public: [],
+    secrets: [{ key: "token", label: "Token da API" }],
+  },
   fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
 };
 
