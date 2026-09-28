@@ -582,6 +582,55 @@ export default async function ProductPage({
                     <span className={styles.fieldHint}>Ex.: un, kg, dúzia.</span>
                   </label>
                 </div>
+
+                <h4 className={local.subhead}>Peso e medidas da caixa</h4>
+                <p className={styles.fieldHint}>
+                  A transportadora cobra pelo volume. Sem as quatro, o carrinho não mostra frete
+                  nenhum para este produto — nem erro, só a opção sumindo. Deixe vazio se ele não
+                  é enviado (serviço, digital, ingresso).
+                </p>
+                <div className={styles.fields}>
+                  <label className={styles.field}>
+                    Peso com embalagem (g)
+                    <input
+                      name="weight_grams"
+                      type="number"
+                      min={0}
+                      max={1000000}
+                      defaultValue={product.weight_grams ?? ""}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    Largura (mm)
+                    <input
+                      name="width_mm"
+                      type="number"
+                      min={0}
+                      max={10000}
+                      defaultValue={product.width_mm ?? ""}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    Altura (mm)
+                    <input
+                      name="height_mm"
+                      type="number"
+                      min={0}
+                      max={10000}
+                      defaultValue={product.height_mm ?? ""}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    Profundidade (mm)
+                    <input
+                      name="depth_mm"
+                      type="number"
+                      min={0}
+                      max={10000}
+                      defaultValue={product.depth_mm ?? ""}
+                    />
+                  </label>
+                </div>
               </Section>
 
               <Section id="organizacao" title="Organização na loja">

@@ -11,9 +11,11 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
+from app.catalog.models import Product, ProductKind, ProductStatus
 from app.core.exceptions import NotFoundError
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope, scopes_for_tenant_role
@@ -39,6 +41,11 @@ Dispatcher = Annotated[TenantContext, Depends(require_tenant_scopes(Scope.ORDERS
 OrderId = Annotated[str, Path(min_length=36, max_length=36)]
 
 
+class UnmeasuredProduct(BaseModel):
+    id: str
+    name: str
+
+
 class ShippingStatusRead(BaseModel):
     provider: str
     flag_on: bool
@@ -48,6 +55,8 @@ class ShippingStatusRead(BaseModel):
     has_box: bool
     services: list[dict[str, Any]]
     missing: list[str]
+    #: Produtos à venda que não deixam cotar por falta de peso ou medida (no máximo 20).
+    unmeasured: list[UnmeasuredProduct] = []
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
 
@@ -78,6 +87,39 @@ class ShipmentRead(BaseModel):
     events: list[ShipmentEventRead] = []
 
 
+async def _unmeasured(session: AsyncSession, tenant_id: str) -> list[UnmeasuredProduct]:
+    """Produtos físicos à venda sem as quatro medidas.
+
+    A tela prometia dizer quais faltam e não dizia: o lojista terminava a configuração, via
+    tudo verde e o carrinho continuava sem frete. Mesma regra de `item_from_variant` — zero
+    conta como faltando, porque cotar com medida inventada vira prejuízo no despacho.
+    """
+    stmt = (
+        select(Product.id, Product.name)
+        .where(
+            Product.tenant_id == tenant_id,
+            # Sob encomenda também é caixa que viaja; serviço, digital e ingresso não.
+            Product.kind.in_((ProductKind.PHYSICAL, ProductKind.MADE_TO_ORDER)),
+            Product.status == ProductStatus.ACTIVE,
+            Product.archived_at.is_(None),
+            or_(
+                Product.weight_grams.is_(None),
+                Product.weight_grams == 0,
+                Product.width_mm.is_(None),
+                Product.width_mm == 0,
+                Product.height_mm.is_(None),
+                Product.height_mm == 0,
+                Product.depth_mm.is_(None),
+                Product.depth_mm == 0,
+            ),
+        )
+        .order_by(Product.name)
+        .limit(20)
+    )
+    linhas = (await session.execute(stmt)).tuples().all()
+    return [UnmeasuredProduct(id=row[0], name=row[1]) for row in linhas]
+
+
 def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
     cfg = fulfillment_settings(tenant.settings).shipping
     provider = registry.get_provider(cfg.provider)
@@ -104,7 +146,9 @@ def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
 async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingReader) -> Any:
     cfg = fulfillment_settings(tenant.settings).shipping
     token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
-    return _status(tenant, connected=bool(token))
+    status = _status(tenant, connected=bool(token))
+    status.unmeasured = await _unmeasured(session, tenant.id)
+    return status
 
 
 @router.put(

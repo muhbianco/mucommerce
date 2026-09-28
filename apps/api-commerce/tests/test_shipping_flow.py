@@ -242,3 +242,31 @@ async def test_rastreio_entregue_fecha_o_pedido(
         assert pedido is not None
         assert pedido.status == OrderStatus.DELIVERED
         assert pedido.delivered_at is not None
+
+
+async def test_a_tela_de_envio_aponta_o_produto_que_trava_a_cotacao(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A loja do Silvio: tudo configurado, tudo verde, e o frete não aparecia no carrinho.
+
+    O que faltava era peso e medida no produto — dado que o lojista não tinha como adivinhar
+    que faltava, porque nada na tela falava dele.
+    """
+    tenant, owner, _ = await loja(client, session_factory)
+    base = f"/api/v1/admin/tenants/{tenant.id}"
+
+    criado = await product(client, session_factory, tenant, owner, name="Rabiola sem medida")
+    produto_id = criado["id"]
+
+    status = await client.get(f"{base}/shipping", headers=owner)
+    assert status.status_code == 200, status.text
+    assert [p["name"] for p in status.json()["unmeasured"]] == ["Rabiola sem medida"]
+
+    # Preenchido, some da lista: a tela só cobra o que ainda falta.
+    await client.patch(
+        f"{base}/products/{produto_id}",
+        json={"weight_grams": 900, "width_mm": 200, "height_mm": 100, "depth_mm": 100},
+        headers=owner,
+    )
+    depois = await client.get(f"{base}/shipping", headers=owner)
+    assert depois.json()["unmeasured"] == []

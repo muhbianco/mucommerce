@@ -82,6 +82,41 @@ export async function chooseFulfillment(form: FormData): Promise<void> {
   await attempt("/carrinho", "/carrinho", () => customerApi("/cart/fulfillment", { method: "PUT", json: body }));
 }
 
+/**
+ * Pede a cotação para um endereço. Não grava nada: só leva o endereço escolhido para a URL,
+ * e a página cota a partir dela. Assim um F5 recota em vez de mostrar preço velho.
+ */
+export async function quoteShipping(form: FormData): Promise<void> {
+  const addressId = field(form, "address_id");
+  if (!ID.test(addressId)) redirect("/carrinho?erro=address_required");
+  redirect(`/carrinho?frete=${addressId}`);
+}
+
+/**
+ * Grava a cotação escolhida como forma de receber.
+ *
+ * O preço vem do navegador junto com a assinatura que nós emitimos. Não conferimos nada aqui:
+ * quem confere é o servidor, no `evaluate` e de novo no `place` — adulterar o valor neste
+ * formulário só produz `quote_invalid`.
+ */
+export async function chooseShipping(form: FormData): Promise<void> {
+  const addressId = field(form, "address_id");
+  if (!ID.test(addressId)) redirect("/carrinho?erro=address_required");
+  let shipping: unknown;
+  try {
+    shipping = JSON.parse(field(form, "option"));
+  } catch {
+    redirect(`/carrinho?frete=${addressId}&erro=quote_required`);
+  }
+  if (!shipping || typeof shipping !== "object") redirect(`/carrinho?frete=${addressId}&erro=quote_required`);
+  await attempt("/carrinho", "/carrinho?ok=frete", () =>
+    customerApi("/cart/fulfillment", {
+      method: "PUT",
+      json: { type: "shipping", address_id: addressId, shipping },
+    }),
+  );
+}
+
 /** Use a coupon on the cart. A code that cannot be used comes back with the reason. */
 export async function applyCoupon(form: FormData): Promise<void> {
   const code = field(form, "code").toUpperCase().slice(0, 40);

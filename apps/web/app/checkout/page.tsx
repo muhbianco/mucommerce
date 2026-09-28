@@ -55,6 +55,12 @@ function money(cents: number, currency: string): string {
 function fulfillmentLabel(quote: Cart["quote"]): string {
   const f = quote.fulfillment;
   if (!f || f.type === "none") return "Sem entrega (ingressos e serviços)";
+  // Transportadora não tem "nome do local": o que identifica é a empresa e o serviço.
+  if (f.type === "shipping") {
+    const carrier = String(f.snapshot.carrier ?? "");
+    const service = String(f.snapshot.service_name ?? "");
+    return `Envio por ${[carrier, service].filter(Boolean).join(" ") || "transportadora"}`;
+  }
   const name = String(f.snapshot.name ?? "");
   return f.type === "pickup" ? `Retirada em ${name}` : `Entrega (${name})`;
 }
@@ -94,7 +100,12 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
           ))}
         </ul>
         <p>{fulfillmentLabel(quote)}</p>
-        {quote.delivery_fee_cents ? <p>Entrega: {money(quote.delivery_fee_cents, quote.currency)}</p> : null}
+        {quote.delivery_fee_cents ? (
+          <p>
+            {quote.fulfillment?.type === "shipping" ? "Frete" : "Entrega"}:{" "}
+            {money(quote.delivery_fee_cents, quote.currency)}
+          </p>
+        ) : null}
         {quote.discount_cents ? <p>Desconto: −{money(quote.discount_cents, quote.currency)}</p> : null}
         <p>
           <strong>Total: {money(quote.total_cents, quote.currency)}</strong>

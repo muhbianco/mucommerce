@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { api, requireMe } from "@/lib/panel/api";
@@ -21,6 +22,7 @@ interface ShippingStatus {
   has_box: boolean;
   services: { code: string; name: string; carrier: string; active: boolean }[];
   missing: string[];
+  unmeasured: { id: string; name: string }[];
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
 }
@@ -121,6 +123,24 @@ export default async function Shipping({
           Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a
           configuração é da equipe da loja — aqui dá para conferir o estado.
         </p>
+      ) : null}
+
+      {status.unmeasured.length > 0 ? (
+        <Section
+          title="Produtos sem peso ou medida"
+          description="A transportadora cota pelo volume. Sem as quatro medidas, o carrinho não mostra frete nenhum para estes — e o cliente não descobre por quê."
+        >
+          <ul className={styles.steps}>
+            {status.unmeasured.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Peso com embalagem, e altura × largura × profundidade da caixa em que ele viaja.
+          </p>
+        </Section>
       ) : null}
 
       {status.missing.length > 0 ? (

@@ -134,6 +134,11 @@ export interface Product extends ProductSummary {
   stock_policy: string;
   sold_by: string;
   unit_label: string;
+  /** Sem as quatro, a transportadora não cota: o frete some do carrinho. */
+  weight_grams: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  depth_mm: number | null;
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
   tags: TagRef[];
