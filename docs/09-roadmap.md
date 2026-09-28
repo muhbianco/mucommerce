@@ -14,6 +14,7 @@ O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, u
 | C | Domínios próprios: `providers.http`, verificação e ativação, redirects, subdomínios de plataforma | F1 fatia 4 |
 | D | Catálogo completo: eventos, variantes/opções/modificadores, tags, estado `paused` ([runbook](runbooks/etapa-d-catalogo.md)) | F1 fatia 5 |
 | E | Carrinho, `OrderService.place`, reservas, MP + InfinitePay, e-mails, pedidos, cupons ([ADR 0011](adr/0011-checkout-pedidos-pagamentos.md), [runbook](runbooks/etapa-e-checkout.md)) | F2 |
+| J | Envio por transportadora: Melhor Envio (Correios PAC/SEDEX, Jadlog, Azul Cargo), cotação pelo endereço, despacho com etiqueta, rastreio ([ADR 0015](adr/0015-envio-por-transportadora.md)) | F2.5 |
 | F | Chatwoot operacional + Dashboard App | F3 |
 | G | Produção, insumos, custos | F4 |
 | H | Rede de inteligência: assinatura multi-instância, modos "agente" e "expor", WuzAPI isolado no número do cliente ([ADR 0010](adr/0010-rede-de-agentes.md)) | F5 (substituída) |
@@ -63,6 +64,45 @@ O dono testa o produto inteiro só no fim. Por isso cada etapa entrega testes, u
 
 **Feito (22/09/2026), na branch `feat/etapa-e-checkout`:** carrinho, endereços, entrega V2, `OrderService.place` como gate único, reservas e expiração, pagamentos (Pix e cartão) com caixa de entrada de webhooks, conciliação, devoluções com quatro olhos, pagamento tardio e em dobro, chargeback, e-mails pelo n8n, pedidos no painel, cupons, saúde e alertas. Migrations 0017–0024. O que **depende do dono** antes de valer em produção: credenciais do MP e da InfinitePay na loja modelo, workflow "commerce e-mail" no n8n (`NOTIFY_N8N_URL`/`NOTIFY_N8N_SECRET`) e a homologação de R$ 1,00. Falta conferir no teste com sandbox: hosts da CSP do Card Brick e se o MP assina os avisos enviados ao `notification_url` de cada pagamento.
 
+## Fase 2.5 (etapa J) — Envio por transportadora
+
+A entrega de hoje é de frota própria (zonas por CEP, taxa fixa) e não atende quem vende para o
+Brasil inteiro. Esta fase acrescenta um terceiro modo de fulfillment, ao lado de retirada e
+entrega por zona — as duas **continuam**. Decisões em [ADR 0015](adr/0015-envio-por-transportadora.md).
+
+**Escopo**: porta `ShippingProvider` (`quote`/`ship`/`track`/`cancel`) no molde do
+`PaymentProvider`, registry com flag `shipping.<provider>` e `FakeProvider`; provedor
+**Melhor Envio** com a conta da própria loja (OAuth, token cifrado em
+`tenant_integration_credentials`); empacotamento puro (linhas → volumes) com caixa padrão e
+endereço de origem da loja; cotação no checkout com cache, timeout e recado honesto quando o
+provedor cai; congelamento da cotação no `place`; despacho pelo operador (compra da etiqueta,
+idempotente, com o valor na tela), pedido → `shipped` com código de rastreio e e-mail ao
+cliente; rastreio por job com linha do tempo em "meus pedidos" e `delivered` automático.
+
+**Fatias** (cada uma atrás da flag, aceita numa loja antes de ligar para outra):
+
+| Fatia | Entrega | Depende de conta real? |
+|---|---|---|
+| J.1 | Porta, registry, fake, empacotamento, configuração, tela "Envio" no painel, validação de peso/dimensão | não |
+| J.2 | Cotação no carrinho/checkout, cache, timeout, fallback, congelamento no `place` | sandbox |
+| J.3 | Despacho, etiqueta, `shipped`, código de rastreio, e-mail ao cliente | sandbox |
+| J.4 | Rastreio automático, linha do tempo, `delivered` | sandbox |
+
+**Dados que faltavam**: `weight_grams`/`width_mm`/`height_mm`/`depth_mm` já existem na variante
+(quase sempre vazios — a fatia J.1 passa a cobrá-los); endereço de origem e caixa padrão entram
+na configuração de envio; `order_shipments` e `shipment_events` são tabelas novas.
+
+**Aceite**: loja com peso e dimensão cotando PAC, SEDEX, Jadlog e Azul Cargo pelo CEP de
+destino; preço escolhido igual ao cobrado no pedido; operador despacha, o pedido vira `shipped`
+com rastreio e o cliente recebe o código; provedor fora do ar não derruba o checkout.
+
+**Dependências**: etapa E (carrinho e pedido) pronta; conta da loja no Melhor Envio e saldo na
+carteira para o primeiro despacho real; CEP de origem da loja.
+
+**Riscos/rollback**: flag `shipping.melhorenvio` por tenant; desligar volta a loja para retirada
+e entrega por zona sem tocar em pedido nenhum. Carteira pré-paga sem saldo é erro esperado, não
+muda o estado do pedido.
+
 ## Fase 3 — Chatwoot operacional e Dashboard App
 
 **Escopo**: conversa por pedido na inbox Loja, atributos e labels por status, notas privadas em transições, Dashboard App "Pedido" (`/cw-app`) com transições permitidas, aprovação de acesso e link para painel; automations opcionais (`pedido-acao-*` → webhook); reconciliação Chatwoot; `api-agents`: `channel_tenant_bindings` para handoff cair na account do tenant; e-mails restantes (aceito, em preparo, pronto, enviado, entregue); CSAT opcional; cupons básicos (percentual/valor, mínimo, validade) se a fase 2 fechou no prazo.
@@ -110,7 +150,7 @@ Substitui o desenho anterior (`shared`/`owned`); decisão em [ADR 0010](adr/0010
 
 ## Fase 6 — InfinitePay avançado, logística, fiscal, analytics/LLM e melhorias
 
-**Escopo**: MP Connect (OAuth) e `application_fee`; frete por transportadora (`ShippingProvider`: Melhor Envio/Correios) e raio por geocodificação; NF-e/NFC-e via provedor (`TaxProvider`); camada analítica `rpt_*` + usuário read-only + tools de insight para o LLM (custo, variação, desperdício, margem, ruptura, precificação, consumo projetado); wildcard/DNS-01 e CDN quando houver API do DNS; magic link; price lists; bundles; produtos digitais/ingressos; assinaturas (avaliar); exportações LGPD self-service; SSO admin → Chatwoot (`/users/{id}/login`).
+**Escopo**: MP Connect (OAuth) e `application_fee`; raio por geocodificação e provedor de frete direto (Correios CWS) para quem tiver contrato — o envio por transportadora em si saiu daqui e virou a [Fase 2.5](#fase-25-etapa-j--envio-por-transportadora); NF-e/NFC-e via provedor (`TaxProvider`); camada analítica `rpt_*` + usuário read-only + tools de insight para o LLM (custo, variação, desperdício, margem, ruptura, precificação, consumo projetado); wildcard/DNS-01 e CDN quando houver API do DNS; magic link; price lists; bundles; produtos digitais/ingressos; assinaturas (avaliar); exportações LGPD self-service; SSO admin → Chatwoot (`/users/{id}/login`).
 
 **Aceite** (por item): analytics — perguntas do LLM só tocam `rpt_*` com `tenant_id` injetado (teste de política); fiscal — NFC-e emitida em homologação para pedido pago; MP Connect — tenant conecta a conta sem colar token.
 

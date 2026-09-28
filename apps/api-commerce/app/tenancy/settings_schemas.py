@@ -118,7 +118,7 @@ class LandingV1(_Setting):
 
 
 Cents = Annotated[int, Field(ge=0, le=100_000_000)]
-FulfillmentMode = Literal["pickup", "delivery"]
+FulfillmentMode = Literal["pickup", "delivery", "shipping"]
 SettingId = Annotated[str, Field(min_length=1, max_length=36)]
 Cep = Annotated[str, Field(pattern=r"^\d{8}$")]
 ClockTime = Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
@@ -172,7 +172,7 @@ class DeliveryWindow(_Setting):
     weekday: Annotated[int, Field(ge=0, le=6)]  # 0 = Monday (date.weekday())
     start: ClockTime
     end: ClockTime
-    modes: Annotated[list[FulfillmentMode], Field(min_length=1, max_length=2)]
+    modes: Annotated[list[FulfillmentMode], Field(min_length=1, max_length=3)]
 
     @model_validator(mode="after")
     def _ordered(self) -> DeliveryWindow:
@@ -198,13 +198,69 @@ class SchedulingSettings(_Setting):
     days_ahead: Annotated[int, Field(ge=1, le=30)] = 7
 
 
+class ShippingOrigin(_Setting):
+    """De onde a mercadoria sai. A transportadora cota a partir daqui e a etiqueta imprime isto."""
+
+    name: PlaceName
+    postal_code: Cep
+    address: Annotated[str, Field(min_length=1, max_length=120)]
+    number: Annotated[str, Field(min_length=1, max_length=20)]
+    district: Annotated[str, Field(min_length=1, max_length=80)]
+    city: PlaceName
+    state: Annotated[str, Field(pattern=r"^[A-Z]{2}$")]
+    complement: Annotated[str, Field(max_length=80)] | None = None
+    #: CPF ou CNPJ do remetente, só dígitos (a transportadora exige um dos dois na etiqueta).
+    document: Annotated[str, Field(pattern=r"^\d{11}|\d{14}$")] | None = None
+    phone: Annotated[str, Field(max_length=20)] | None = None
+    email: Annotated[str, Field(max_length=120)] | None = None
+
+
+class ShippingBoxSetting(_Setting):
+    """Caixa padrão da loja. Sem ela o empacotador usa uma caixa pequena genérica."""
+
+    width_mm: Annotated[int, Field(ge=10, le=2000)]
+    height_mm: Annotated[int, Field(ge=10, le=2000)]
+    depth_mm: Annotated[int, Field(ge=10, le=2000)]
+    max_weight_grams: Annotated[int, Field(ge=100, le=100_000)] = 30_000
+    #: Tara: caixa vazia também pesa, e a transportadora cobra o peso real.
+    empty_weight_grams: Annotated[int, Field(ge=0, le=10_000)] = 0
+
+
+class ShippingService(_Setting):
+    """Um serviço que a loja resolveu oferecer, como ele voltou da cotação."""
+
+    code: Annotated[str, Field(min_length=1, max_length=24)]
+    name: Annotated[str, Field(min_length=1, max_length=80)]
+    carrier: Annotated[str, Field(max_length=60)] = ""
+    active: bool = True
+
+
+class ShippingSettings(_Setting):
+    """Envio por transportadora (ADR 0015). Convive com retirada e entrega por zona."""
+
+    enabled: bool = False
+    provider: Annotated[str, Field(min_length=1, max_length=24)] = "melhorenvio"
+    origin: ShippingOrigin | None = None
+    box: ShippingBoxSetting | None = None
+    #: Vazio = oferece tudo que a transportadora devolver.
+    services: Annotated[list[ShippingService], Field(max_length=20)] = []
+    #: Acréscimo da loja sobre o frete cotado (embalagem, mão de obra).
+    markup_percent: Annotated[int, Field(ge=0, le=100)] = 0
+    markup_cents: Annotated[int, Field(ge=0, le=10_000_000)] = 0
+    #: Acima deste subtotal o frete sai zero para o cliente (a loja continua pagando a etiqueta).
+    free_above_cents: Cents | None = None
+    #: Dias de preparo somados ao prazo da transportadora.
+    handling_days: Annotated[int, Field(ge=0, le=30)] = 0
+
+
 class FulfillmentV2(_Setting):
     """Pickup locations, delivery zones (CEP ranges or districts) and time windows.
 
-    V1 (`{modes, min_order_cents}`) became this in migration 0017."""
+    V1 (`{modes, min_order_cents}`) became this in migration 0017; `shipping` entrou na etapa J."""
 
     pickup: PickupSettings = PickupSettings()
     delivery: DeliverySettings = DeliverySettings()
+    shipping: ShippingSettings = ShippingSettings()
     min_order_cents: Cents = 0
     scheduling: SchedulingSettings = SchedulingSettings()
 
