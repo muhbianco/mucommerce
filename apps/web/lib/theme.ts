@@ -19,7 +19,9 @@ import { contrast, fromOklch, rgbTriplet, toOklch, towardContrast, withLightness
 const FONTS = {
   system: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   serif: 'Georgia, "Times New Roman", serif',
-  rounded: 'ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif',
+  // `--store-font-rounded` vem do `next/font` (app/(storefront)/_store/fonts.ts). O resto da
+  // pilha é a rede de segurança para antes da fonte carregar.
+  rounded: 'var(--store-font-rounded), ui-rounded, "SF Pro Rounded", system-ui, sans-serif',
 } as const;
 
 export type StoreFont = keyof typeof FONTS;

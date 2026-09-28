@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { getStorefrontContext } from "@/lib/server-context";
 import { type Branding, themeVariables } from "@/lib/theme";
 
+import { storeFonts } from "./_store/fonts";
 import styles from "./_store/store.module.css";
 
 /**
@@ -19,7 +20,7 @@ export default async function StorefrontLayout({ children }: { children: ReactNo
   if (!context) return <>{children}</>;
   const branding = context.branding as Branding;
   return (
-    <div className={styles.storefront} style={themeVariables(branding)}>
+    <div className={`${styles.storefront} ${storeFonts}`} style={themeVariables(branding)}>
       {children}
     </div>
   );

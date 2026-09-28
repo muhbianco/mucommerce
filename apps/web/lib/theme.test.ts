@@ -123,3 +123,13 @@ describe("a paleta se defende da cor que o lojista escolheu", () => {
     `);
   });
 });
+
+describe("fontes", () => {
+  it("a arredondada aponta para a fonte que o app hospeda", () => {
+    // Era `ui-rounded`, que só existe em aparelho da Apple: no Android a escolha do lojista
+    // não valia nada. A variável vem do `next/font`, e a pilha atrás dela é a rede de segurança.
+    const fonte = themeVariables({ font: "rounded" })["--brand-font"]!;
+    expect(fonte).toContain("--store-font-rounded");
+    expect(fonte).toContain("sans-serif");
+  });
+});
