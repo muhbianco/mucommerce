@@ -1,9 +1,17 @@
+/*
+ * O mínimo que vale para o documento inteiro.
+ *
+ * O painel tem os tokens dele em `.shell` e a loja em `.storefront`, cada um com o próprio
+ * `--muted`, `--line`, `.button` e `.card`. Nada disso pode morar em `:root`: o layout raiz é
+ * compartilhado pelos dois, e uma variável global vazaria de um para o outro.
+ *
+ * Sobra aqui o que as páginas sem tenant precisam — o 404 e o "loja indisponível", que são
+ * renderizadas antes de existir marca nenhuma para aplicar.
+ */
+
 :root {
-  --brand-primary: #111111;
-  --bg: #ffffff;
-  --fg: #111111;
-  --muted: #6b7280;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
 }
 
 * {
@@ -12,8 +20,8 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
+  background: #ffffff;
+  color: #111111;
 }
 
 main {
@@ -22,15 +30,7 @@ main {
   padding: 3rem 1.5rem;
 }
 
+/* Páginas neutras: sem tenant resolvido, sem marca, e ainda assim legíveis. */
 .muted {
-  color: var(--muted);
-}
-
-.button {
-  display: inline-block;
-  padding: 0.75rem 1.25rem;
-  border-radius: 8px;
-  background: var(--brand-primary);
-  color: var(--brand-on-primary, #fff);
-  text-decoration: none;
+  color: #6b7280;
 }
