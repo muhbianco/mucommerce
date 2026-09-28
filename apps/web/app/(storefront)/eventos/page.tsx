@@ -10,6 +10,7 @@ import { type EventPage, isIndexable, storeOrigin } from "@/lib/storefront";
 import { EventCard } from "../_store/event-card";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
+import { EmptyState, Grid, PageHead } from "../_store/ui";
 
 export async function generateMetadata({
   searchParams,
@@ -39,16 +40,23 @@ export default async function Events({ searchParams }: { searchParams: Promise<{
 
   return (
     <StoreShell context={context}>
-      <h1>Eventos</h1>
-      {page.items.length === 0 ? <p>Nenhum evento marcado por enquanto.</p> : null}
-      <div className={styles.grid}>
-        {page.items.map((event) => (
-          <EventCard key={event.slug} event={event} timeZone={context.tenant.timezone} />
-        ))}
-      </div>
+      <PageHead title="Eventos" />
+      {page.items.length === 0 ? (
+        <EmptyState title="Nenhum evento marcado por enquanto.">
+          Quando a loja marcar o próximo, ele aparece aqui com data, local e os lotes à venda.
+        </EmptyState>
+      ) : (
+        <Grid>
+          {page.items.map((event) => (
+            <EventCard key={event.slug} event={event} timeZone={context.tenant.timezone} />
+          ))}
+        </Grid>
+      )}
       {page.next_cursor ? (
         <p className={styles.section}>
-          <Link href={`/eventos?cursor=${encodeURIComponent(page.next_cursor)}`}>Mais eventos →</Link>
+          <Link className="button" href={`/eventos?cursor=${encodeURIComponent(page.next_cursor)}`}>
+            Ver mais eventos
+          </Link>
         </p>
       ) : null}
     </StoreShell>

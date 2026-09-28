@@ -18,6 +18,7 @@ import { ProductCard } from "./_store/product-card";
 import { StoreImage } from "./_store/store-image";
 import { StoreShell } from "./_store/store-shell";
 import styles from "./_store/store.module.css";
+import { EmptyState, Grid, Section } from "./_store/ui";
 
 export async function generateMetadata(): Promise<Metadata> {
   const context = await getStorefrontContext();
@@ -69,6 +70,11 @@ export default async function Home() {
         <section className={styles.hero}>
           <div>
             <h1>{context.tenant.name}</h1>
+            <p className={styles.lead}>
+              {catalogOn
+                ? "Veja o que a loja tem disponível agora."
+                : "Esta loja está montando a vitrine. Volte em breve."}
+            </p>
             {catalogOn ? (
               <Link className="button" href="/loja">
                 Ver produtos
@@ -104,14 +110,22 @@ function Block({
         <section className={styles.hero}>
           <div>
             <Heading>{title}</Heading>
-            {typeof block.subtitle === "string" ? <p className="muted">{block.subtitle}</p> : null}
+            {typeof block.subtitle === "string" ? <p className={styles.lead}>{block.subtitle}</p> : null}
             {showCta ? (
               <a className="button" href={href}>
                 {String(block.cta_label)}
               </a>
             ) : null}
           </div>
-          {image ? <StoreImage image={image} alt={title ?? ""} sizes="(min-width: 760px) 460px, 100vw" priority={first} className={styles.photo} /> : null}
+          {image ? (
+            <StoreImage
+              image={image}
+              alt={title ?? ""}
+              sizes="(min-width: 760px) 520px, 100vw"
+              priority={first}
+              className={styles.heroPhoto}
+            />
+          ) : null}
         </section>
       );
     }
@@ -120,14 +134,13 @@ function Block({
       if (block.locked === true) return <LockedSection title={title} label="Entrar para ver os produtos" />;
       if (products.length === 0) return null;
       return (
-        <section className={styles.section}>
-          <h2>{title}</h2>
-          <div className={styles.grid}>
+        <Section title={title ?? undefined} actions={<Link href="/loja">Ver todos</Link>}>
+          <Grid>
             {products.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}
-          </div>
-        </section>
+          </Grid>
+        </Section>
       );
     }
     case "categories": {
@@ -135,45 +148,48 @@ function Block({
       if (block.locked === true) return <LockedSection title={title} label="Entrar para ver as categorias" />;
       if (categories.length === 0) return null;
       return (
-        <section className={styles.section}>
-          <h2>{title}</h2>
-          <nav className={styles.nav}>
+        <Section title={title ?? undefined}>
+          <nav className={styles.chips} aria-label={title ?? "Categorias"}>
             {categories.map((category) => (
-              <Link key={category.id} href={`/loja/categoria/${category.slug}`}>
+              <Link key={category.id} href={`/loja/categoria/${category.slug}`} className={styles.chip}>
                 {category.name}
               </Link>
             ))}
           </nav>
-        </section>
+        </Section>
       );
     }
     case "text":
       return (
-        <section className={styles.section}>
-          {title ? <h2>{title}</h2> : null}
-          {image ? <StoreImage image={image} alt={title ?? ""} sizes="(min-width: 760px) 720px, 100vw" className={styles.photo} /> : null}
+        <Section title={title ?? undefined}>
+          {image ? (
+            <StoreImage
+              image={image}
+              alt={title ?? ""}
+              sizes="(min-width: 760px) 720px, 100vw"
+              className={styles.widePhoto}
+            />
+          ) : null}
           <p className={styles.description}>{String(block.body ?? "")}</p>
-        </section>
+        </Section>
       );
     case "gallery": {
       const images = (block.images as Image[] | undefined) ?? [];
       if (images.length === 0) return null;
       return (
-        <section className={styles.section}>
-          {title ? <h2>{title}</h2> : null}
-          <div className={styles.grid}>
+        <Section title={title ?? undefined}>
+          <div className={styles.gallery}>
             {images.map((item, i) => (
-              <StoreImage key={i} image={item} alt="" sizes="(min-width: 760px) 240px, 50vw" className={styles.photo} />
+              <StoreImage key={i} image={item} alt="" sizes="(min-width: 760px) 300px, 50vw" className={styles.photo} />
             ))}
           </div>
-        </section>
+        </Section>
       );
     }
     case "contact":
       return (
-        <section className={styles.section}>
-          <h2>{title ?? "Contato"}</h2>
-          <ul>
+        <Section title={title ?? "Contato"} variant="card">
+          <ul className={styles.contactList}>
             {typeof block.whatsapp_e164 === "string" ? (
               <li>
                 WhatsApp: <a href={whatsappLink(block.whatsapp_e164)}>{block.whatsapp_e164}</a>
@@ -195,7 +211,7 @@ function Block({
             {typeof block.address === "string" ? <li>Endereço: {block.address}</li> : null}
             {typeof block.hours === "string" ? <li>Horário: {block.hours}</li> : null}
           </ul>
-        </section>
+        </Section>
       );
     default:
       return null;
@@ -205,12 +221,17 @@ function Block({
 /** Catalog block of a store that asks for login/approval: the title stays, the products do not. */
 function LockedSection({ title, label }: { title: string | null; label: string }) {
   return (
-    <section className={styles.section}>
-      {title ? <h2>{title}</h2> : null}
-      <p className="muted">Esta loja atende clientes cadastrados. Entre com a sua conta para ver.</p>
-      <Link className="button" href="/entrar">
-        {label}
-      </Link>
-    </section>
+    <Section title={title ?? undefined}>
+      <EmptyState
+        title="Esta loja atende clientes cadastrados."
+        action={
+          <Link className="button" href="/entrar">
+            {label}
+          </Link>
+        }
+      >
+        Entre com a sua conta para ver o que está à venda.
+      </EmptyState>
+    </Section>
   );
 }

@@ -1429,3 +1429,74 @@
   padding-top: 1rem;
   border-top: 1px solid var(--store-line);
 }
+
+/* ------------------------------------------------------------------ blocos da página inicial */
+
+/* A foto do hero não é quadrada como a de produto: é um retrato da loja. */
+.heroPhoto {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--store-radius-lg);
+  background: var(--store-mist);
+}
+
+.widePhoto {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--store-radius-lg);
+  background: var(--store-mist);
+  margin-bottom: 1rem;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.6rem;
+}
+
+@media (min-width: 640px) {
+  .gallery {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+
+.contactList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* ------------------------------------------------------------------ área do cliente */
+
+.accountLinks {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  overflow: hidden;
+  background: var(--store-surface);
+  margin-bottom: 1.5rem;
+}
+
+.storefront .accountLinks a {
+  padding: 1rem 1.1rem;
+  border-top: 1px solid var(--store-line);
+  color: var(--store-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.storefront .accountLinks a:first-child {
+  border-top: 0;
+}
+
+.storefront .accountLinks a:hover {
+  background: var(--store-mist);
+}

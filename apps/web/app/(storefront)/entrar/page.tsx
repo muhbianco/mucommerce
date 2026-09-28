@@ -7,6 +7,7 @@ import { getStorefrontContext } from "@/lib/server-context";
 import { storefrontApi } from "@/lib/storefront-api";
 
 import { StoreShell } from "../_store/store-shell";
+import { Notice, PageHead } from "../_store/ui";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
@@ -45,8 +46,8 @@ export default async function LoginPage({
   if (shown.privacy) start.set("pv", String(shown.privacy.version));
   return (
     <StoreShell context={context}>
-      <h1>Entrar em {context.tenant.name}</h1>
-      {erro ? <p role="alert">{ERRORS[erro] ?? "Não foi possível entrar."}</p> : null}
+      <PageHead title={`Entrar em ${context.tenant.name}`} />
+      {erro ? <Notice kind="error">{ERRORS[erro] ?? "Não foi possível entrar."}</Notice> : null}
       {enabled ? (
         <>
           <p>Use sua conta Google para ver o catálogo e acompanhar seus pedidos.</p>

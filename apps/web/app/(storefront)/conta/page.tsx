@@ -9,6 +9,8 @@ import { getStorefrontContext } from "@/lib/server-context";
 
 import { PhoneConfirm } from "../_store/phone-confirm";
 import { StoreShell } from "../_store/store-shell";
+import styles from "../_store/store.module.css";
+import { PageHead } from "../_store/ui";
 
 export const metadata: Metadata = { title: "Minha conta", robots: { index: false, follow: false } };
 
@@ -31,26 +33,17 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const { tel } = await searchParams;
   return (
     <StoreShell context={context}>
-      <h1>Minha conta</h1>
-      <p>
-        {session.customer.name ?? "Cliente"}
-        {session.customer.email_masked ? ` · ${session.customer.email_masked}` : null}
-      </p>
+      <PageHead
+        title="Minha conta"
+        lead={`${session.customer.name ?? "Cliente"}${
+          session.customer.email_masked ? ` · ${session.customer.email_masked}` : ""
+        }`}
+      />
       <PhoneConfirm context={context} back="/conta" error={tel} />
-      <p>
+      <nav className={styles.accountLinks} aria-label="Sua conta">
         <Link href="/conta/pedidos">Meus pedidos</Link>
-        {context.features.checkout ? (
-          <>
-            {" · "}
-            <Link href="/conta/enderecos">Meus endereços</Link>
-          </>
-        ) : null}
-      </p>
-      <form action="/auth/sair" method="post">
-        <button type="submit" className="muted">
-          Sair
-        </button>
-      </form>
+        {context.features.checkout ? <Link href="/conta/enderecos">Meus endereços</Link> : null}
+      </nav>
     </StoreShell>
   );
 }
