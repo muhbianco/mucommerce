@@ -7,6 +7,7 @@ levou 10 em duas linhas de 5 não ganharia nada).
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
 import pytest
@@ -154,3 +155,63 @@ def test_adicional_nao_entra_no_desconto() -> None:
     # 800 do degrau + 200 do adicional, não 800 com o adicional descontado junto.
     assert com_adicional.unit_cents == 1000
     assert com_adicional.base.amount_cents == 800
+
+
+def test_o_painel_devolve_todo_campo_que_ele_mesmo_grava() -> None:
+    """`_product_read` monta o `ProductRead` campo a campo, e eu esqueci um.
+
+    `price_tiers` tinha default `None` no schema, então a omissão não deu erro nenhum: a API
+    gravava as faixas e devolvia "sem faixa". O lojista via o formulário vazio, concluía que
+    não salvou — e a próxima gravação de qualquer outra seção mandava a lista vazia e apagava
+    o que ele tinha cadastrado.
+
+    Introspecção de propósito: o que protege não é esta faixa, é a regra de que nenhum campo
+    do `ProductRead` pode ficar de fora do construtor.
+    """
+    import ast
+
+    from app.catalog.schemas import ProductRead
+
+    fonte = ast.parse(
+        (pathlib.Path(__file__).parents[1] / "app/api/v1/endpoints/admin_catalog.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    funcao = next(
+        n for n in ast.walk(fonte) if isinstance(n, ast.FunctionDef) and n.name == "_product_read"
+    )
+    chamada = next(
+        n
+        for n in ast.walk(funcao)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "ProductRead"
+    )
+    passados = {k.arg for k in chamada.keywords}
+    faltando = sorted(set(ProductRead.model_fields) - passados)
+    assert not faltando, f"_product_read não passa: {faltando}"
+
+
+async def test_faixa_cadastrada_volta_no_painel(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """O caminho inteiro: grava pelo painel, lê pelo painel."""
+    from tests.shoppers import selling_store
+    from tests.test_catalog import member_headers
+
+    tenant = await selling_store(session_factory)
+    owner = await member_headers(client, session_factory, tenant)
+    base = f"/api/v1/admin/tenants/{tenant.id}"
+
+    criado = await client.post(
+        f"{base}/products", json={"name": "Rabiola", "base_price_cents": 4000}, headers=owner
+    )
+    assert criado.status_code == 201, criado.text
+    produto_id = criado.json()["id"]
+
+    salvo = await client.patch(
+        f"{base}/products/{produto_id}", json={"price_tiers": SILVIO}, headers=owner
+    )
+    assert salvo.status_code == 200, salvo.text
+    assert salvo.json()["price_tiers"] == SILVIO
+
+    lido = await client.get(f"{base}/products/{produto_id}", headers=owner)
+    assert lido.json()["price_tiers"] == SILVIO

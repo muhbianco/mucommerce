@@ -264,7 +264,9 @@ class ProductSummary(BaseModel):
 class ProductRead(ProductSummary):
     short_description: str | None
     description_md: str | None
-    price_tiers: list[dict[str, int]] | None = None
+    # Sem default de propósito: com `= None` este campo ficou fora do `_product_read` e o
+    # painel lia "sem faixa" para um produto que tinha três. Obrigatório, esquecer não compila.
+    price_tiers: list[dict[str, int]] | None
     promo_price_cents: int | None
     promo_starts_at: datetime | None
     promo_ends_at: datetime | None
