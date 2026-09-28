@@ -39,6 +39,7 @@ from app.payments.models import (
     Refund,
     TenantPaymentConfig,
 )
+from app.production.models import Supplier, Supply, SupplyMovement, SupplyReceipt
 from app.shipping.models import OrderShipment, ShipmentEvent
 from app.tenancy.models import (
     Tenant,
@@ -90,6 +91,10 @@ __all__ = [
     "Refund",
     "ShipmentEvent",
     "StockAdjustment",
+    "Supplier",
+    "Supply",
+    "SupplyMovement",
+    "SupplyReceipt",
     "Tenant",
     "TenantDomain",
     "TenantFeatureFlag",
