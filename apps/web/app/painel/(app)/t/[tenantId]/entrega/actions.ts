@@ -2,6 +2,7 @@
 
 import { api } from "@/lib/panel/api";
 import { lines, parseCepRanges } from "@/lib/panel/format";
+import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import { FormError, money, run, tenantBase, text } from "../form-kit";
 
@@ -68,10 +69,14 @@ export async function saveFulfillment(form: FormData): Promise<void> {
       const modes = (["pickup", "delivery"] as const).filter((mode) => checked(form, `win_${mode}_${i}`));
       windows.push({ weekday: int(form, `win_weekday_${i}`, 0), start, end, modes });
     }
+    // `fulfillment` guarda retirada, zonas **e** envio por transportadora. Reler antes de
+    // gravar é o que impede esta tela de apagar a configuração de envio (e vice-versa).
+    const atual = (await loadTenantContext(text(form, "tenant_id"))).settings.fulfillment ?? {};
     await api(`${path}/settings/fulfillment`, {
       method: "PUT",
       json: {
         value: {
+          ...(atual as Record<string, unknown>),
           pickup: { enabled: checked(form, "pickup_enabled"), locations },
           delivery: { enabled: checked(form, "delivery_enabled"), zones },
           min_order_cents: money(form, "min_order") ?? 0,

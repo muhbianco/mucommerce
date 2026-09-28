@@ -47,6 +47,10 @@ const OK: Record<string, string> = {
   dominio_ativo: "DNS no ar: o domínio já responde pela sua loja.",
   dominio_principal: "Endereço principal atualizado.",
   dominio_desativado: "Domínio desativado.",
+  envio_origem: "Endereço de origem salvo.",
+  envio_regras: "Configuração de envio salva.",
+  envio_conectado: "Conta da transportadora conectada.",
+  envio_testado: "Teste feito: veja o resultado acima.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -85,6 +89,8 @@ const ERRORS: Record<string, string> = {
   integration_unavailable: "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos.",
   dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",
   dns_sem_txt: "Ainda não encontrei o registro TXT. Depois de criar, o DNS pode levar alguns minutos.",
+  cep_origem_invalido: "CEP de origem inválido: informe os 8 dígitos.",
+  token_invalido: "Token muito curto — confira se copiou inteiro.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 
