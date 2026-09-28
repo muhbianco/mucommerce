@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -271,7 +272,11 @@ export default async function Payments({
           >
             {spec.hint ? <p className={styles.lead}>{spec.hint}</p> : null}
             {!p.flag_on ? (
-              <p className={styles.hint}>Este meio não está liberado para a loja. Fale com o suporte para liberar.</p>
+              <p className={styles.hint}>
+                Este meio está desligado. Ligue em{" "}
+                <Link href={`/painel/t/${tenantId}/modulos`}>Módulos</Link> e volte aqui para
+                cadastrar as credenciais.
+              </p>
             ) : null}
             {p.missing.length ? (
               <p className={`${styles.note} ${local.status}`}>
