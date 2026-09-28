@@ -65,6 +65,11 @@ function ModuleRow({
             Ligue antes: {blocked.map((key) => labels[key] ?? key).join(", ")}.
           </p>
         ) : null}
+        {item.enabled && blocked.length > 0 ? (
+          <p className={styles.note}>
+            Ligado, mas parado: falta {blocked.map((key) => labels[key] ?? key).join(", ")}.
+          </p>
+        ) : null}
         {item.enabled && held.length > 0 ? (
           <p className={styles.note}>
             Em uso por {held.map((key) => labels[key] ?? key).join(", ")} — desligue esses antes.
@@ -114,6 +119,11 @@ export default async function Modules({
     if (item.enabled) labels[`on:${item.key}`] = "1";
   }
 
+  // Ligado mas com dependência desligada: é o estado em que a vitrine abre e o carrinho trava.
+  const broken = modules.filter(
+    (item) => item.enabled && item.requires.some((key) => !labels[`on:${key}`]),
+  );
+
   return (
     <>
       <PageHeader
@@ -122,6 +132,29 @@ export default async function Modules({
         lead="Ligue só o que a sua loja usa. O que está ligado aparece no menu e na vitrine; o que está desligado some sem apagar nada."
       />
       <Flash ok={ok} erro={erro} />
+
+      {broken.length ? (
+        <Section
+          title="Sua loja não consegue vender assim"
+          description="Um módulo ligado depende de outro que está desligado."
+        >
+          <ul className={styles.steps}>
+            {broken.map((item) => (
+              <li key={item.key}>
+                <strong>{item.label}</strong> está ligado, mas precisa de{" "}
+                {item.requires
+                  .filter((key) => !labels[`on:${key}`])
+                  .map((key) => labels[key] ?? key)
+                  .join(", ")}
+                .
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Enquanto isso, quem entra na loja vê os produtos e trava no carrinho.
+          </p>
+        </Section>
+      ) : null}
 
       <Section
         title="O que a sua loja faz"

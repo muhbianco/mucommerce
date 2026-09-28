@@ -60,7 +60,9 @@ MODULES: tuple[Module, ...] = (
         summary="O cliente monta o carrinho, escolhe entrega e paga.",
         where="entrega",
         self_service=True,
-        requires=("catalog",),
+        # O carrinho é de uma pessoa: sem login não há a quem pertencer. Sem esta dependência
+        # dá para deixar a loja num estado em que a vitrine abre e ninguém consegue comprar.
+        requires=("catalog", "customer_login"),
     ),
     Module(
         key="pickup",
@@ -120,8 +122,8 @@ MODULES: tuple[Module, ...] = (
     Module(
         key="customer_login",
         label="Login dos clientes",
-        summary="Quem compra entra com a conta Google dele.",
-        locked_reason="Depende de configuração da plataforma. Peça para a MuhBianco.",
+        summary="Quem compra entra com a conta Google dele. É o que permite ter carrinho.",
+        self_service=True,
     ),
     Module(
         key="customer_phone_otp",

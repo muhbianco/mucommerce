@@ -134,3 +134,30 @@ async def test_modo_de_acesso_invalido_e_recusado(
         f"{base(tenant)}/storefront/access", json={"access_mode": "aberto"}, headers=owner
     )
     assert resposta.status_code == 422
+
+
+async def test_vitrine_publica_sem_login_e_estado_que_nao_vende(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Regressão da loja do Silvio: catálogo aberto, checkout ligado, login desligado.
+
+    O carrinho é de uma pessoa; sem login não há a quem pertencer, e a loja ficava visível e
+    inviável ao mesmo tempo. Agora o checkout cobra o login, e o login é self-service.
+    """
+    tenant, owner = await loja(client, session_factory, checkout=False, customer_login=False)
+    recusa = await client.put(
+        f"{base(tenant)}/modules", json={"flags": {"checkout": True}}, headers=owner
+    )
+    assert recusa.status_code == 422, recusa.text
+    assert recusa.json()["error"]["details"]["requires"] == ["customer_login"]
+
+    # E o lojista consegue resolver sozinho: o login não depende de ninguém da plataforma.
+    ligou = await client.put(
+        f"{base(tenant)}/modules", json={"flags": {"customer_login": True}}, headers=owner
+    )
+    assert ligou.status_code == 200, ligou.text
+    agora = await client.put(
+        f"{base(tenant)}/modules", json={"flags": {"checkout": True}}, headers=owner
+    )
+    assert agora.status_code == 200, agora.text
+    assert by_key(agora.json())["checkout"]["enabled"] is True
