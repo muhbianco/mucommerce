@@ -78,10 +78,13 @@ class ShipmentService:
     async def dispatch(self, order: Order, *, scopes: frozenset[str]) -> OrderShipment:
         """Compra a etiqueta e leva o pedido para `shipped`. Idempotente por pedido."""
         cfg = fulfillment_settings(self.tenant.settings).shipping
+        # Primeiro a remessa, depois as regras: pedido já despachado responde o que existe em
+        # vez de reclamar do estado (ele virou `shipped` por causa do próprio despacho).
+        pronta = await self.get(order.id)
+        if pronta is not None and pronta.status in _DONE:
+            return pronta
         self._check(order, cfg)
         remessa = await self._row(order, cfg)
-        if remessa.status in _DONE:
-            return remessa  # já despachado: devolve o que existe em vez de comprar de novo
 
         provider = registry.get_provider(cfg.provider)
         if provider is None:

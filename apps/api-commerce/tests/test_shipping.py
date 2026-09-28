@@ -220,14 +220,23 @@ def cotar(tenant: TenantContext, selection: ShippingSelection | None, **kwargs: 
     )
 
 
-def test_modo_aparece_so_com_flag_config_e_origem() -> None:
+def test_modo_precisa_de_configuracao_e_origem() -> None:
     assert "shipping" in offered_modes(loja())
+    # Sem endereço de origem não há de onde cotar.
     assert "shipping" not in offered_modes(
-        store({"shipping.fake": True}, {"shipping": {"enabled": True, "provider": "fake"}})
+        store({}, {"shipping": {"enabled": True, "provider": "fake"}})
     )
+    # Desligado no painel não aparece, mesmo com tudo configurado.
     assert "shipping" not in offered_modes(
-        store({}, {"shipping": {"enabled": True, "provider": "fake", "origin": ORIGEM}})
+        store({}, {"shipping": {"enabled": False, "provider": "fake", "origin": ORIGEM}})
     )
+
+
+def test_transportadora_de_verdade_ainda_depende_da_flag() -> None:
+    """O `fake` é exceção (só existe onde o ambiente permite); o resto precisa da flag."""
+    config = {"enabled": True, "provider": "melhorenvio", "origin": ORIGEM}
+    assert "shipping" not in offered_modes(store({}, {"shipping": config}))
+    assert "shipping" in offered_modes(store({"shipping.melhorenvio": True}, {"shipping": config}))
 
 
 def test_cotacao_valida_vira_frete_do_pedido() -> None:

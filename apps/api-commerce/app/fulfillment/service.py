@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from app.fulfillment.windows import Slot, find_slot, needs_slot
 from app.fulfillment.zones import match_zone
+from app.shipping import registry as shipping_registry
 from app.shipping import signing
 from app.shipping.selection import ShippingSelection
 from app.tenancy.context import TenantContext
@@ -77,9 +78,9 @@ def offered_modes(tenant: TenantContext, cfg: FulfillmentV2 | None = None) -> li
     ):
         modes.append("delivery")
     if (
-        tenant.feature(f"shipping.{cfg.shipping.provider}")
-        and cfg.shipping.enabled
+        cfg.shipping.enabled
         and cfg.shipping.origin is not None
+        and shipping_registry.flag_on(tenant, cfg.shipping.provider)
     ):
         modes.append("shipping")
     return modes
