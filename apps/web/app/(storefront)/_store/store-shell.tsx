@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import type { StorefrontContext } from "@/lib/tenant";
-import { type Branding, themeVariables } from "@/lib/theme";
 
 import styles from "./store.module.css";
 
@@ -14,16 +13,28 @@ interface Logo {
   height: number | null;
 }
 
-/** Brand header + footer around every storefront page. */
+/**
+ * Cabeçalho e rodapé de toda página da loja.
+ *
+ * Não abre uma `<div>` própria de propósito: o pai direto do `<header>` tem de ser o elemento do
+ * layout que carrega as variáveis de marca. Um `<header>` por documento, e cada rótulo do
+ * cabeçalho aparecendo uma vez só — é o que mantém os seletores por papel (`getByRole`) sem
+ * ambiguidade.
+ *
+ * Aqui se lê cookie, mas nunca se chama a API: ler cookie não custa cacheabilidade nenhuma (a
+ * página já é dinâmica), enquanto uma chamada autenticada por página custaria uma ida ao
+ * servidor em toda visita.
+ */
 export async function StoreShell({ context, children }: { context: StorefrontContext; children: ReactNode }) {
-  // Public stores stay cacheable: only closed stores read the session cookie.
-  const signedIn =
-    context.access_mode !== "public" && Boolean((await cookies()).get(CUSTOMER_SESSION_COOKIE));
-  const branding = context.branding as Branding & { logo?: Logo | null };
+  const signedIn = Boolean((await cookies()).get(CUSTOMER_SESSION_COOKIE));
+  const branding = context.branding as { logo?: Logo | null };
   const logo = branding.logo;
   return (
-    <div style={{ ...themeVariables(branding), fontFamily: "var(--brand-font)" }}>
-      <header className={styles.header}>
+    <>
+      <a className={styles.skip} href="#conteudo">
+        Ir para o conteúdo
+      </a>
+      <header className={styles.header} data-store-header>
         <Link href="/" className={styles.brand}>
           {logo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -50,10 +61,10 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
           </form>
         ) : null}
       </header>
-      <main>{children}</main>
-      <footer className={styles.footer}>
-        {context.tenant.name} · loja online por MuhBianco
-      </footer>
-    </div>
+      <main id="conteudo" className={styles.page}>
+        {children}
+      </main>
+      <footer className={styles.footer}>{context.tenant.name} · loja online por MuhBianco</footer>
+    </>
   );
 }

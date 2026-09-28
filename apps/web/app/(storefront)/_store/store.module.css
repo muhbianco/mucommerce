@@ -1,34 +1,288 @@
-.header {
+/*
+ * Design system da vitrine. Espelha o do painel (`app/painel/panel.module.css`) na anatomia:
+ * tokens numa classe de escopo, elementos sem classe herdando com especificidade zero, e um
+ * arquivo só, para dar para auditar por contraste.
+ *
+ * A diferença é de quem é a cor. O painel é a MuhBianco; a loja é do lojista. As variáveis de
+ * marca (`--brand-*`, `--store-*`) chegam inline, calculadas em `lib/theme.ts`, e a regra que
+ * vale em toda a folha abaixo é:
+ *
+ *   `--brand-primary` só preenche superfície. Quem pinta letra é `--store-brand-ink`.
+ *
+ * Sem modo escuro: o fundo é da marca do lojista, e inverter uma paleta derivada de uma cor
+ * arbitrária dobraria a superfície de contraste a garantir, sem ninguém ter pedido.
+ */
+
+.storefront {
+  /* Estrutura: não depende do tenant, então fica aqui e não viaja inline a cada request. */
+  --store-radius: 8px;
+  --store-radius-lg: 14px;
+  --store-radius-pill: 999px;
+  --store-shadow: 0 1px 2px rgb(var(--store-ink-rgb) / 6%), 0 8px 24px -12px rgb(var(--store-ink-rgb) / 18%);
+  --store-shadow-lg: 0 12px 32px -8px rgb(var(--store-ink-rgb) / 24%);
+  --store-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --store-header-h: 3.5rem;
+  --store-tap: 44px;
+  --store-page: 1120px;
+
+  /* Apelidos para as regras antigas que ainda dizem `var(--muted)`. Saem quando a migração
+     terminar; até lá são o que faz cada página herdar o tema sem ser editada. */
+  --muted: var(--store-muted);
+  --line: var(--store-line);
+
+  min-height: 100vh;
   display: flex;
+  flex-direction: column;
+  font-family: var(--brand-font);
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--store-ink);
+  background: var(--store-paper);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ------------------------------------------------------------------ elementos sem classe */
+
+.storefront :where(h1, h2, h3, h4) {
+  font-family: var(--brand-font-display, var(--brand-font));
+  color: var(--store-ink);
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.storefront :where(h1) {
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  margin: 0 0 0.75rem;
+}
+
+.storefront :where(h2) {
+  font-size: clamp(1.2rem, 3.5vw, 1.45rem);
+  margin: 0 0 0.6rem;
+}
+
+.storefront :where(h3) {
+  font-size: 1.05rem;
+  margin: 0 0 0.4rem;
+}
+
+.storefront :where(p) {
+  margin: 0 0 0.85rem;
+}
+
+.storefront :where(a) {
+  color: var(--store-brand-ink);
+  text-underline-offset: 3px;
+}
+
+.storefront :where(a:hover) {
+  color: var(--store-ink);
+}
+
+/* Botão sem classe = secundário. `:where` zera a especificidade, para as classes vencerem. */
+.storefront :where(button, .button, .buttonGhost, .buttonSmall) {
+  display: inline-flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 1rem 1.5rem;
-  border-bottom: 1px solid #eee;
-}
-
-.header a {
-  color: inherit;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: var(--store-tap);
+  padding: 0.65rem 1.1rem;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  border-radius: var(--store-radius);
+  border: 1.5px solid var(--store-line);
+  background: var(--store-surface);
+  color: var(--store-ink);
+  cursor: pointer;
   text-decoration: none;
+  transition:
+    transform 0.2s var(--store-ease),
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
 }
 
-.brand {
+.storefront :where(button:hover) {
+  border-color: var(--store-ink);
+}
+
+.storefront :where(button:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.storefront :where(input, select, textarea) {
+  font: inherit;
+  /* Abaixo de 16px o iOS dá zoom ao focar o campo. */
+  font-size: 1rem;
+  min-height: var(--store-tap);
+  color: var(--store-ink);
+  padding: 0.6rem 0.75rem;
+  border: 1.5px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.storefront :where(input, select, textarea):focus {
+  outline: none;
+  border-color: var(--store-brand-ink);
+  box-shadow: 0 0 0 3px rgb(var(--store-brand-rgb) / 25%);
+}
+
+.storefront :where(button, a, summary, input, select, textarea):focus-visible {
+  outline: 3px solid rgb(var(--store-brand-rgb) / 55%);
+  outline-offset: 2px;
+}
+
+.storefront :where(input[type="checkbox"], input[type="radio"]) {
+  accent-color: var(--brand-primary);
+  width: 1.15rem;
+  height: 1.15rem;
+  min-height: 0;
+  padding: 0;
+}
+
+.storefront :where(fieldset) {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.storefront :where(details) > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* Classes globais que as páginas usam sem importar nada deste arquivo. */
+.storefront :global(.muted) {
+  color: var(--store-muted);
+}
+
+.storefront :where(:global(.button)) {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--brand-on-primary);
+}
+
+.storefront :where(:global(.button)):hover {
+  background: var(--store-brand-hover);
+  border-color: var(--store-brand-hover);
+  color: var(--brand-on-primary);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .storefront *,
+  .storefront *::before,
+  .storefront *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------ estrutura */
+
+/* "Ir para o conteúdo": fora da tela até o teclado chegar nele. */
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.7rem 1rem;
+  background: var(--store-ink);
+  color: var(--store-paper);
+  border-radius: 0 0 var(--store-radius) 0;
+}
+
+.skip:focus {
+  left: 0;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  font-weight: 700;
-  font-size: 1.15rem;
+  min-height: var(--store-header-h);
+  padding: 0.5rem clamp(0.85rem, 3vw, 1.5rem);
+  background: var(--store-surface);
+  border-bottom: 1px solid var(--store-line);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: none;
+  min-width: 0;
+  font-family: var(--brand-font-display, var(--brand-font));
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.storefront .brand {
+  color: var(--store-ink);
+  text-decoration: none;
+}
+
+.brand img {
+  display: block;
+  width: auto;
+  max-height: 2.4rem;
+  object-fit: contain;
 }
 
 .spacer {
   flex: 1;
 }
 
+.page {
+  flex: 1;
+  width: 100%;
+  max-width: var(--store-page);
+  margin: 0 auto;
+  padding: clamp(1.25rem, 3vw, 2.25rem) clamp(1rem, 3vw, 1.5rem) 3.5rem;
+}
+
+.footer {
+  border-top: 1px solid var(--store-line);
+  padding: 2rem clamp(1rem, 3vw, 1.5rem);
+  text-align: center;
+  color: var(--store-muted);
+  font-size: 0.9rem;
+  background: var(--store-mist);
+}
+
+.section {
+  margin: 2.5rem 0;
+}
+
+.card {
+  background: var(--store-surface);
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  box-shadow: var(--store-shadow);
+  padding: 1.25rem 1.35rem;
+}
+
 .hero {
   display: grid;
-  gap: 1.5rem;
+  gap: clamp(1rem, 3vw, 2rem);
   align-items: center;
   grid-template-columns: 1fr;
-  padding: 2.5rem 0;
+  padding: clamp(1.5rem, 4vw, 3rem) 0;
 }
 
 @media (min-width: 760px) {
@@ -38,122 +292,287 @@
 }
 
 .hero h1 {
-  font-size: 2.2rem;
-  margin: 0 0 0.75rem;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
 }
+
+/* ------------------------------------------------------------------ catálogo */
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: clamp(0.75rem, 2vw, 1.25rem);
 }
 
-.card {
+@media (min-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+}
+
+.productCard {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  color: inherit;
+  gap: 0.35rem;
+  padding: 0.6rem;
+  background: var(--store-surface);
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
   text-decoration: none;
+  transition:
+    transform 0.2s var(--store-ease),
+    box-shadow 0.2s,
+    border-color 0.2s;
 }
 
-.card img,
+.storefront .productCard {
+  color: var(--store-ink);
+}
+
+.productCard:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--store-shadow);
+  border-color: rgb(var(--store-brand-rgb) / 45%);
+}
+
+.productCard img,
 .photo {
   width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
   object-fit: cover;
-  border-radius: 10px;
-  background: #f3f4f6;
+  border-radius: var(--store-radius);
+  background: var(--store-mist);
 }
 
-.price {
+/* Num cartão (coluna flex) o selo esticaria de ponta a ponta. */
+.productCard .badge {
+  align-self: flex-start;
+}
+
+.cardName {
   font-weight: 600;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  /* Duas linhas: nome comprido não pode empurrar o preço para fora do alinhamento da grade. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ preço */
+
+.price {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--store-ink);
+}
+
+.priceLg {
+  font-size: clamp(1.6rem, 6vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .compare {
-  color: var(--muted);
+  color: var(--store-muted);
   text-decoration: line-through;
   font-weight: 400;
+  font-size: 0.85em;
   margin-left: 0.4rem;
 }
 
+/* ------------------------------------------------------------------ selos */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: var(--store-radius-pill);
+  border: 1px solid var(--store-line);
+  background: var(--store-surface);
+  color: var(--store-ink-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Um ponto colorido além do texto: cor sozinha não carrega significado (WCAG 1.4.1). */
+.pill {
+  composes: badge;
+}
+
+.pill::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill[data-state="ok"] {
+  border-color: var(--store-ok);
+  background: var(--store-ok-tint);
+  color: var(--store-ok-ink);
+}
+
+.pill[data-state="warn"] {
+  border-color: var(--store-warn);
+  background: var(--store-warn-tint);
+  color: var(--store-warn-ink);
+}
+
+.pill[data-state="danger"] {
+  border-color: var(--store-danger);
+  background: var(--store-danger-tint);
+  color: var(--store-danger-ink);
+}
+
+.pill[data-state="brand"] {
+  border-color: rgb(var(--store-brand-rgb) / 40%);
+  background: var(--store-brand-tint);
+  color: var(--store-on-brand-tint);
+}
+
+.pill[data-state="info"] {
+  background: var(--store-mist);
+}
+
+.pill[data-state="off"] {
+  color: var(--store-muted);
+}
+
 .tag {
-  display: inline-block;
-  font-size: 0.8rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: #374151;
+  composes: badge;
 }
 
 .soldOut {
-  composes: tag;
-  background: #fee2e2;
-  color: #991b1b;
+  composes: badge;
+  border-color: var(--store-danger);
+  background: var(--store-danger-tint);
+  color: var(--store-danger-ink);
 }
 
-.buy {
+/* ------------------------------------------------------------------ recados */
+
+.notice {
+  padding: 0.8rem 1rem;
+  border-radius: var(--store-radius);
+  border: 1px solid var(--store-line);
+  background: var(--store-mist);
+  font-size: 0.95rem;
+  margin: 0 0 1rem;
+}
+
+.notice[data-kind="ok"] {
+  border-color: var(--store-ok);
+  background: var(--store-ok-tint);
+  color: var(--store-ok-ink);
+  font-weight: 600;
+}
+
+.notice[data-kind="warn"] {
+  border-color: var(--store-warn);
+  background: var(--store-warn-tint);
+  color: var(--store-warn-ink);
+  font-weight: 600;
+}
+
+.notice[data-kind="error"] {
+  border-color: var(--store-danger);
+  background: var(--store-danger-tint);
+  color: var(--store-danger-ink);
+  font-weight: 600;
+}
+
+.empty {
+  padding: 2.5rem 1.25rem;
+  text-align: center;
+  border: 1.5px dashed var(--store-line);
+  border-radius: var(--store-radius-lg);
+  background: var(--store-surface);
+}
+
+.emptyTitle {
+  margin: 0;
+  font-family: var(--brand-font-display, var(--brand-font));
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.emptyText {
+  max-width: 44ch;
+  margin: 0.4rem auto 0;
+  color: var(--store-muted);
+  font-size: 0.95rem;
+}
+
+.emptyAction {
+  margin-top: 1.25rem;
+}
+
+/* ------------------------------------------------------------------ navegação e filtros */
+
+.nav,
+.chips {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 0.5rem;
-  margin: 0.75rem 0;
-}
-
-.lots {
-  border-collapse: collapse;
-  margin: 1rem 0;
-}
-
-.lots caption {
-  text-align: left;
-  font-weight: 600;
-}
-
-.lots th,
-.lots td {
-  padding: 0.35rem 0.75rem 0.35rem 0;
-  text-align: left;
-}
-
-.picker fieldset {
-  border: 0;
+  margin: 0 0 1.5rem;
   padding: 0;
-  margin: 0 0 0.75rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
+  list-style: none;
 }
 
-.picker legend {
+.storefront .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--store-radius-pill);
+  border: 1px solid var(--store-line);
+  background: var(--store-surface);
+  color: var(--store-ink-soft);
+  font-size: 0.9rem;
   font-weight: 600;
-  margin-bottom: 0.25rem;
+  text-decoration: none;
+  white-space: nowrap;
 }
 
-.muted {
-  opacity: 0.55;
+.storefront .chip:hover {
+  border-color: var(--store-ink);
+  color: var(--store-ink);
 }
 
-.nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  margin: 1rem 0 1.5rem;
+.storefront .chip[aria-current] {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--brand-on-primary);
 }
 
-.nav a {
-  color: inherit;
+.breadcrumb {
+  font-size: 0.85rem;
+  color: var(--store-muted);
+  margin: 0 0 1rem;
 }
+
+.storefront .breadcrumb a {
+  color: var(--store-muted);
+}
+
+/* ------------------------------------------------------------------ produto */
 
 .product {
   display: grid;
-  gap: 2rem;
+  gap: clamp(1.25rem, 3vw, 2.5rem);
   grid-template-columns: 1fr;
+  align-items: start;
 }
 
-@media (min-width: 760px) {
+@media (min-width: 900px) {
   .product {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1.1fr) minmax(19rem, 0.9fr);
   }
 }
 
@@ -166,36 +585,109 @@
 
 .description {
   white-space: pre-line;
+  line-height: 1.7;
+  color: var(--store-ink-soft);
+}
+
+.buy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.picker fieldset {
+  margin: 0 0 1rem;
+}
+
+.picker legend {
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  padding: 0;
+}
+
+.picker fieldset > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 1rem 0.4rem 0;
+}
+
+/* Combinação indisponível: apagada, mas ainda legível. */
+.storefront .muted {
+  color: var(--store-muted);
+}
+
+/* Desconto por quantidade: a tabela que faz a pessoa levar mais. */
+.tiers {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--store-line);
+  border-left: 3px solid var(--brand-primary);
+  border-radius: var(--store-radius);
+  background: var(--store-brand-tint);
+  color: var(--store-on-brand-tint);
+  font-size: 0.92rem;
   line-height: 1.6;
 }
 
-.section {
-  margin: 2.5rem 0;
+/* ------------------------------------------------------------------ tabelas */
+
+.tableWrap {
+  overflow-x: auto;
 }
 
-.breadcrumb {
-  font-size: 0.9rem;
-  color: var(--muted);
+.lots {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.95rem;
 }
 
-.breadcrumb a {
-  color: inherit;
+.lots caption {
+  text-align: left;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
 }
 
-.footer {
-  border-top: 1px solid #eee;
-  padding: 1.5rem;
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.9rem;
+.lots th,
+.lots td {
+  padding: 0.7rem 0.75rem 0.7rem 0;
+  text-align: left;
+  border-bottom: 1px solid var(--store-line);
+  vertical-align: middle;
+}
+
+.lots tr:last-child th,
+.lots tr:last-child td {
+  border-bottom: 0;
 }
 
 .linkButton {
   background: none;
   border: 0;
   padding: 0;
+  min-height: 0;
   color: inherit;
   font: inherit;
   text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
+}
+
+.storefront .linkButton:hover {
+  background: none;
+  border-color: transparent;
+  color: var(--store-brand-ink);
+}
+
+/* ------------------------------------------------------------------ celular */
+
+@media (max-width: 640px) {
+  .card {
+    padding: 1rem;
+  }
 }

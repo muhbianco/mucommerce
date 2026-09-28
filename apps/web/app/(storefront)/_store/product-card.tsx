@@ -7,7 +7,7 @@ import styles from "./store.module.css";
 
 export function ProductCard({ product }: { product: Card }) {
   return (
-    <Link href={`/loja/produto/${product.slug}`} className={styles.card}>
+    <Link href={`/loja/produto/${product.slug}`} className={styles.productCard}>
       {product.image ? (
         <StoreImage
           image={product.image}
@@ -17,7 +17,7 @@ export function ProductCard({ product }: { product: Card }) {
       ) : (
         <div className={styles.photo} aria-hidden="true" />
       )}
-      <strong>{product.name}</strong>
+      <strong className={styles.cardName}>{product.name}</strong>
       <span className={styles.price}>
         {formatPrice(product.price)}
         {product.price.compare_at_cents ? (

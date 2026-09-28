@@ -8,13 +8,13 @@ import styles from "./store.module.css";
 export function EventCard({ event, timeZone }: { event: Card; timeZone: string }) {
   const open = event.availability === "on_sale";
   return (
-    <Link href={`/eventos/${event.slug}`} className={styles.card}>
+    <Link href={`/eventos/${event.slug}`} className={styles.productCard}>
       {event.image ? (
         <StoreImage image={event.image} alt={event.name} sizes="(min-width: 760px) 240px, 50vw" />
       ) : (
         <div className={styles.photo} aria-hidden="true" />
       )}
-      <strong>{event.name}</strong>
+      <strong className={styles.cardName}>{event.name}</strong>
       <span>{formatEventDate(event.starts_at, null, timeZone)}</span>
       <span className="muted">
         {[event.venue_name, event.city].filter(Boolean).join(" · ") || (event.online ? "Online" : "")}
