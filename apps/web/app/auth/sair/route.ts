@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 
+import { CART_COUNT_COOKIE } from "@/lib/cart-count";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE, customerCookie } from "@/lib/customer-cookies";
 import { relativeRedirect } from "@/lib/relative-redirect";
@@ -18,5 +19,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   const response = relativeRedirect("/");
   response.cookies.set(CUSTOMER_SESSION_COOKIE, "", customerCookie(0));
+  // O número do carrinho é de quem estava logado: sai junto com a sessão.
+  response.cookies.set(CART_COUNT_COOKIE, "", customerCookie(0));
   return response;
 }

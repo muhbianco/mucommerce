@@ -1,8 +1,11 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { CART_COUNT_COOKIE, CART_COUNT_MAX_AGE } from "@/lib/cart-count";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
+import { customerCookie } from "@/lib/customer-cookies";
 
 // Places the reviewed cart. The idempotency key is rendered with the page, so a double click or
 // a retried POST returns the same order instead of a second one. Server Actions are same-origin
@@ -54,5 +57,7 @@ export async function placeOrder(form: FormData): Promise<void> {
     if (error.status === 403) redirect("/acesso-pendente?next=%2Fcheckout");
     redirect(`${TO_CART.has(error.code) ? "/carrinho" : "/checkout"}?erro=${encodeURIComponent(error.code)}`);
   }
+  // O carrinho virou pedido: o ícone do cabeçalho zera junto.
+  (await cookies()).set(CART_COUNT_COOKIE, "0", customerCookie(CART_COUNT_MAX_AGE));
   redirect(`/conta/pedidos/${orderId}?ok=pedido`);
 }

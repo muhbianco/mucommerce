@@ -10,6 +10,7 @@ import { type CategoryRef, isIndexable, type ProductPage, storeOrigin, type TagR
 import { ProductCard } from "../_store/product-card";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
+import { Chip, Chips, EmptyState, Grid, PageHead } from "../_store/ui";
 
 export async function generateMetadata({
   searchParams,
@@ -59,46 +60,60 @@ export default async function Store({
 
   return (
     <StoreShell context={context}>
-      <h1>Produtos</h1>
-      <form method="get" action="/loja">
-        <input name="q" defaultValue={query ?? ""} placeholder="Buscar produtos" aria-label="Buscar produtos" minLength={2} />{" "}
-        <button type="submit" className="button">
-          Buscar
-        </button>
-      </form>
+      <PageHead
+        title={query ? `Resultados para "${query}"` : "Produtos"}
+        lead={query || selectedTag ? `${page.items.length} ${page.items.length === 1 ? "item" : "itens"}` : undefined}
+      />
+      {/* A busca mora no cabeçalho, em toda página. Repetir aqui daria duas caixas iguais. */}
       {roots.length ? (
-        <nav className={styles.nav} aria-label="Categorias">
+        <Chips label="Categorias">
           {roots.map((category) => (
-            <Link key={category.id} href={`/loja/categoria/${category.slug}`}>
+            <Chip key={category.id} href={`/loja/categoria/${category.slug}`}>
               {category.name}
-            </Link>
+            </Chip>
           ))}
-        </nav>
+        </Chips>
       ) : null}
       {tagList.length ? (
-        <nav className={styles.nav} aria-label="Filtrar por tag">
-          {tagList.map((item) =>
-            item.slug === selectedTag ? (
-              <Link key={item.slug} href="/loja" className={styles.tag} aria-current="true">
-                {item.name} ×
-              </Link>
-            ) : (
-              <Link key={item.slug} href={`/loja?tag=${encodeURIComponent(item.slug)}`} className={styles.tag}>
-                {item.name}
-              </Link>
-            ),
-          )}
-        </nav>
+        <Chips label="Filtrar por tag">
+          {tagList.map((item) => (
+            <Chip
+              key={item.slug}
+              href={item.slug === selectedTag ? "/loja" : `/loja?tag=${encodeURIComponent(item.slug)}`}
+              active={item.slug === selectedTag}
+            >
+              {item.name}
+            </Chip>
+          ))}
+        </Chips>
       ) : null}
-      {page.items.length === 0 ? <p>Nenhum produto encontrado.</p> : null}
-      <div className={styles.grid}>
-        {page.items.map((product) => (
-          <ProductCard key={product.id} product={product} />
-        ))}
-      </div>
+      {page.items.length === 0 ? (
+        <EmptyState
+          title="Nenhum produto encontrado."
+          action={
+            query || selectedTag ? (
+              <Link className="button" href="/loja">
+                Ver todos os produtos
+              </Link>
+            ) : null
+          }
+        >
+          {query
+            ? `Nada por aqui com "${query}". Tente outra palavra, ou veja tudo o que a loja tem.`
+            : "A loja ainda não publicou produtos nesta seção."}
+        </EmptyState>
+      ) : (
+        <Grid>
+          {page.items.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </Grid>
+      )}
       {page.next_cursor ? (
         <p className={styles.section}>
-          <Link href={`/loja?${next.toString()}`}>Mais produtos →</Link>
+          <Link className="button" href={`/loja?${next.toString()}`}>
+            Ver mais produtos
+          </Link>
         </p>
       ) : null}
     </StoreShell>

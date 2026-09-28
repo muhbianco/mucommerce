@@ -1,9 +1,11 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { CART_COUNT_COOKIE, CART_COUNT_MAX_AGE, cartCountOf } from "@/lib/cart-count";
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
-import { safeStorePath } from "@/lib/customer-cookies";
+import { customerCookie, safeStorePath } from "@/lib/customer-cookies";
 
 // Cart writes from the storefront. Server Actions are same-origin only (CSRF); the API prices
 // everything and checks the store's rules, so these only pass ids and quantities along. A
@@ -23,9 +25,25 @@ function quantity(form: FormData): string {
   return raw.replace(",", ".");
 }
 
+/**
+ * Guarda quantas linhas o carrinho tem, para o ícone no cabeçalho.
+ *
+ * A resposta da escrita já traz o carrinho inteiro, então isto não custa nenhuma ida ao
+ * servidor. Se o formato vier diferente do esperado, o cookie não é tocado: um número velho
+ * incomoda menos do que um número errado, e ele vence sozinho em uma hora.
+ */
+async function rememberCartCount(cart: unknown): Promise<void> {
+  if (!cart || typeof cart !== "object" || !Array.isArray((cart as { items?: unknown }).items)) return;
+  (await cookies()).set(
+    CART_COUNT_COOKIE,
+    String(cartCountOf(cart as { items: unknown[] })),
+    customerCookie(CART_COUNT_MAX_AGE),
+  );
+}
+
 async function attempt(back: string, done: string, work: () => Promise<unknown>): Promise<never> {
   try {
-    await work();
+    await rememberCartCount(await work());
   } catch (error) {
     if (!(error instanceof CustomerApiError)) throw error;
     if (error.status === 401) redirect(`/entrar?next=${encodeURIComponent(back)}`);
