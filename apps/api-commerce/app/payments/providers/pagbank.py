@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.payments.models import PaymentStatus
 from app.payments.provider import (
     ChargeRequest,
@@ -46,6 +47,8 @@ from app.payments.provider import (
     WebhookHint,
     WebhookVerdict,
 )
+
+logger = get_logger(__name__)
 
 CHARGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 #: O que a página do PagBank oferece. A loja pode restringir em `public_config.payment_methods`.
@@ -198,6 +201,17 @@ class PagBankProvider:
                 f"PagBank answered {status}", http_status=status, code="unavailable"
             )
         if status >= 400:
+            # O corpo é o único lugar onde o PagBank diz *por que* recusou. Sem isto sobra o
+            # número, e "403" não conta a ninguém se é token, permissão ou conta sem a API
+            # liberada. Vai só a resposta deles: o token nunca entra em log.
+            logger.warning(
+                "PagBank recusou",
+                extra={
+                    "pagbank_status": status,
+                    "pagbank_path": path,
+                    "pagbank_body": response.text[:500],
+                },
+            )
             raise ProviderError(
                 _error_message(data) or f"PagBank refused ({status})",
                 http_status=status,
@@ -295,20 +309,37 @@ class PagBankProvider:
         )
 
     async def test_credentials(self, creds: ProviderCredentials) -> CredentialTest:
-        """Sonda de leitura: pergunta por uma cobrança que não existe.
+        """Sonda de leitura: pergunta por uma cobrança que não existe. Nada é criado na conta.
 
-        401/403 = token errado. 404 = token aceito (a conta respondeu "não achei"). Nada é
-        criado na conta da loja, que é o ponto — testar credencial não pode gerar cobrança.
+        A leitura da resposta é o que importa, e eu errei da primeira vez: supus que "não
+        achei" seria 404. O PagBank responde **406** quando o id nem tem o formato dele — ou
+        seja, recusa antes de olhar o token, e o teste dizia "falhou" sem ter testado nada.
+
+        Agora cada resposta diz uma coisa diferente, e o que não distingue token de outra
+        coisa é relatado como *não deu para testar*, não como reprovado.
         """
         try:
             await self._request(creds, "GET", "/charges/CHAR_TESTE_MUHBIANCO")
         except ProviderError as exc:
-            if exc.http_status in (401, 403):
-                return CredentialTest(ok=False, detail="Token recusado pelo PagBank")
+            if exc.http_status == 401:
+                return CredentialTest(ok=False, detail="Token recusado pelo PagBank.")
+            if exc.http_status == 403:
+                # Token existe e foi lido; a conta é que não pode usar esta API. É o mesmo
+                # 403 que derruba a criação do checkout, então vale dizer com todas as letras.
+                return CredentialTest(
+                    ok=False,
+                    detail=(
+                        "O PagBank leu o token mas não liberou a API de pagamentos para esta "
+                        "conta. Confira se o token é o da conta (Integrações) e não o de uma "
+                        "aplicação, e se a conta já está habilitada para vender online."
+                    ),
+                )
             if exc.http_status == 404:
-                return CredentialTest(ok=True, detail="Token aceito")
-            return CredentialTest(ok=False, detail=str(exc)[:200])
-        return CredentialTest(ok=True, detail="Token aceito")
+                return CredentialTest(ok=True, detail="Token aceito.")
+            return CredentialTest(
+                ok=False, detail=f"Não deu para testar agora ({exc}).".strip()[:280]
+            )
+        return CredentialTest(ok=True, detail="Token aceito.")
 
 
 def _error_message(data: Mapping[str, Any]) -> str:

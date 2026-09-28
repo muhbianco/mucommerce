@@ -254,3 +254,29 @@ async def test_teste_de_credencial_nao_cria_nada_na_conta() -> None:
 
     ruim = ProviderCredentials(secrets={"access_token": "errado"}, public_config={}, sandbox=True)
     assert (await api.provider().test_credentials(ruim)).ok is False
+
+
+@pytest.mark.parametrize(
+    ("status", "ok", "trecho"),
+    [
+        (404, True, "aceito"),
+        (401, False, "recusado"),
+        # 403: o token foi lido, a conta é que não pode. É o mesmo erro que derruba o
+        # `POST /checkouts`, então a tela tem que dizer o que fazer, não só "falhou".
+        (403, False, "não liberou a API"),
+        # 406: o PagBank recusa o formato do id antes de olhar o token. Não testou nada —
+        # chamar isso de reprovado foi o que fez a loja do Silvio parecer com token ruim.
+        (406, False, "Não deu para testar"),
+    ],
+)
+async def test_o_teste_de_credencial_diz_o_que_cada_resposta_significa(
+    status: int, ok: bool, trecho: str
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"  # nunca cria nada na conta da loja
+        return httpx.Response(status, json={})
+
+    provider = PagBankProvider(httpx.MockTransport(handler))
+    resultado = await provider.test_credentials(CREDS)
+    assert resultado.ok is ok
+    assert trecho in (resultado.detail or "")
