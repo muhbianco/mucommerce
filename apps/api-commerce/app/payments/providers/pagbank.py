@@ -62,7 +62,7 @@ _STATUS = {
 
 
 def _token(creds: ProviderCredentials) -> str:
-    token = str(creds.secrets.get("token") or "").strip()
+    token = str(creds.secrets.get("access_token") or "").strip()
     if not token:
         raise ProviderError("PagBank token ausente", code="token_missing", definitive=True)
     return token
@@ -157,7 +157,7 @@ class PagBankProvider:
         cancel=False,
         refunds=False,
         signed_webhooks=True,
-        required_secrets=("token",),
+        required_secrets=("access_token",),
         required_public=(),
     )
 

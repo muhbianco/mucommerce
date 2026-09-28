@@ -32,7 +32,7 @@ from app.payments.providers.pagbank import (
 )
 
 TOKEN = "tok-" + "a" * 30
-CREDS = ProviderCredentials(secrets={"token": TOKEN}, public_config={}, sandbox=True)
+CREDS = ProviderCredentials(secrets={"access_token": TOKEN}, public_config={}, sandbox=True)
 PAY = "https://pagbank.test/checkout/CHEC_123"
 
 
@@ -135,7 +135,7 @@ async def test_cria_o_checkout_e_devolve_o_link() -> None:
 
 async def test_token_errado_para_na_hora() -> None:
     api = FakePagBank()
-    creds = ProviderCredentials(secrets={"token": "outro"}, public_config={}, sandbox=True)
+    creds = ProviderCredentials(secrets={"access_token": "outro"}, public_config={}, sandbox=True)
     with pytest.raises(ProviderError) as erro:
         await api.provider().create_charge(creds, request())
     assert erro.value.http_status == 401
@@ -252,5 +252,5 @@ async def test_teste_de_credencial_nao_cria_nada_na_conta() -> None:
     assert resultado.ok is True
     assert all(metodo == "GET" for metodo, _, _ in api.seen)
 
-    ruim = ProviderCredentials(secrets={"token": "errado"}, public_config={}, sandbox=True)
+    ruim = ProviderCredentials(secrets={"access_token": "errado"}, public_config={}, sandbox=True)
     assert (await api.provider().test_credentials(ruim)).ok is False

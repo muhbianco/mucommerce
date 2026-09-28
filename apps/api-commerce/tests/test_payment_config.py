@@ -243,3 +243,20 @@ async def test_cofre_mal_configurado_nao_vira_erro_interno(
             .all()
         )
     assert guardadas == []
+
+
+def test_todo_segredo_que_um_provedor_exige_cabe_no_formulario() -> None:
+    """Regressão do PagBank: o provedor pedia `token`, o schema só aceitava `access_token`.
+
+    O lojista colava a chave e recebia "algum campo está inválido", sem dizer qual. Nada no
+    servidor ligava as duas pontas — este teste liga.
+    """
+    from app.payments import registry
+    from app.payments.config_service import SecretsIn
+
+    aceitos = set(SecretsIn.model_fields)
+    for nome in registry.allowed():
+        provider = registry.get_provider(nome)
+        assert provider is not None
+        faltando = set(provider.capabilities.required_secrets) - aceitos
+        assert not faltando, f"{nome} exige {sorted(faltando)}, que o formulário não aceita"

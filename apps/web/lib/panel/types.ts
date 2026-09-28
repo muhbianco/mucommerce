@@ -371,7 +371,7 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
     hint: "O cliente paga na página do PagBank (Pix, cartão ou boleto) e o dinheiro cai na conta da sua loja. Gere o token em Vendas → Integrações no PagBank; o juro do parcelamento segue o que estiver configurado lá.",
     methods: ["link"],
     public: [],
-    secrets: [{ key: "token", label: "Token da API" }],
+    secrets: [{ key: "access_token", label: "Token da API" }],
   },
   fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
 };
