@@ -14,10 +14,13 @@ from zoneinfo import ZoneInfo
 
 from app.fulfillment.windows import Slot, find_slot, needs_slot
 from app.fulfillment.zones import match_zone
+from app.shipping import registry as shipping_registry
+from app.shipping import signing
+from app.shipping.selection import ShippingSelection
 from app.tenancy.context import TenantContext
 from app.tenancy.settings_schemas import FulfillmentMode, FulfillmentV2, fulfillment_settings
 
-FulfillmentType = Literal["pickup", "delivery", "none"]
+FulfillmentType = Literal["pickup", "delivery", "shipping", "none"]
 FulfillmentProblem = Literal[
     "mode_unavailable",
     "location_unknown",
@@ -26,6 +29,9 @@ FulfillmentProblem = Literal[
     "below_minimum",
     "slot_required",
     "slot_invalid",
+    "quote_required",
+    "quote_expired",
+    "quote_invalid",
 ]
 
 
@@ -42,6 +48,8 @@ class FulfillmentChoice:
     pickup_location_id: str | None = None
     slot_date: date | None = None
     slot_start: str | None = None
+    #: Só para `shipping`: a cotação escolhida, assinada por nós.
+    shipping: ShippingSelection | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +77,12 @@ def offered_modes(tenant: TenantContext, cfg: FulfillmentV2 | None = None) -> li
         and any(zone.active for zone in cfg.delivery.zones)
     ):
         modes.append("delivery")
+    if (
+        cfg.shipping.enabled
+        and cfg.shipping.origin is not None
+        and shipping_registry.flag_on(tenant, cfg.shipping.provider)
+    ):
+        modes.append("shipping")
     return modes
 
 
@@ -79,8 +93,13 @@ def evaluate(
     subtotal_cents: int,
     address: DeliveryAddress | None,
     now: datetime,
+    cart_signature: str | None = None,
 ) -> FulfillmentQuote:
-    """Fee, snapshot and problems of `choice` for an order of `subtotal_cents`."""
+    """Fee, snapshot and problems of `choice` for an order of `subtotal_cents`.
+
+    `cart_signature` só importa em `shipping`: é com ela que a cotação assinada é conferida
+    contra o carrinho que está sendo fechado.
+    """
     if choice.type == "none":
         return FulfillmentQuote("none")
     cfg = fulfillment_settings(tenant.settings)
@@ -107,6 +126,18 @@ def evaluate(
             "address": location.address,
             "instructions": location.instructions,
         }
+    elif choice.type == "shipping":
+        if address is None:
+            return FulfillmentQuote("shipping", problems=("address_required",))
+        problema = _shipping_problem(
+            tenant, choice.shipping, now=now, cart_signature=cart_signature
+        )
+        if problema is not None:
+            return FulfillmentQuote("shipping", problems=(problema,))
+        escolha = choice.shipping
+        assert escolha is not None  # _shipping_problem já garantiu
+        fee = _shipping_fee(cfg, escolha, subtotal_cents)
+        snapshot = escolha.snapshot() | {"fee_cents": fee}
     else:
         if address is None:
             return FulfillmentQuote("delivery", problems=("address_required",))
@@ -148,6 +179,41 @@ def evaluate(
     return FulfillmentQuote(choice.type, fee, snapshot, slot, tuple(problems))
 
 
+def _shipping_problem(
+    tenant: TenantContext,
+    selection: ShippingSelection | None,
+    *,
+    now: datetime,
+    cart_signature: str | None,
+) -> FulfillmentProblem | None:
+    """A cotação escolhida ainda vale? Ordem importa: faltando < vencida < adulterada."""
+    if selection is None:
+        return "quote_required"
+    if signing.expired(selection.quoted_at, now):
+        return "quote_expired"
+    if cart_signature is not None and selection.cart != cart_signature:
+        # Mudou item ou endereço depois de cotar: recotar é obrigatório, não opcional.
+        return "quote_expired"
+    confere = signing.verify(
+        signature=selection.signature,
+        tenant_id=tenant.id,
+        cart=selection.cart,
+        provider=selection.provider,
+        service_code=selection.service_code,
+        price_cents=selection.price_cents,
+        quoted_at=selection.quoted_at,
+    )
+    return None if confere else "quote_invalid"
+
+
+def _shipping_fee(cfg: FulfillmentV2, selection: ShippingSelection, subtotal_cents: int) -> int:
+    """O preço já vem com acréscimo (foi assinado assim); aqui só entra o frete grátis."""
+    gratis = cfg.shipping.free_above_cents
+    if gratis is not None and subtotal_cents >= gratis:
+        return 0
+    return selection.price_cents
+
+
 def public_fulfillment(tenant: TenantContext) -> dict[str, Any]:
     """What the storefront may show: offered modes, active places and zone fees (no CEP lists
     or districts, which are long and only matter to the matcher)."""
@@ -178,4 +244,11 @@ def public_fulfillment(tenant: TenantContext) -> dict[str, Any]:
             if "delivery" in modes and zone.active
         ],
         "scheduling": cfg.scheduling.enabled,
+        # Endereço de origem e caixa são operação da loja: a vitrine só precisa saber que há
+        # envio e a partir de quanto ele sai de graça.
+        "shipping": {
+            "enabled": "shipping" in modes,
+            "free_above_cents": cfg.shipping.free_above_cents,
+            "handling_days": cfg.shipping.handling_days,
+        },
     }

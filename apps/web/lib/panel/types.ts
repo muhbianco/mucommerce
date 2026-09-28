@@ -126,12 +126,19 @@ export interface Product extends ProductSummary {
   short_description: string | null;
   description_md: string | null;
   promo_price_cents: number | null;
+  /** Desconto progressivo: a partir de N unidades, este preço por unidade. */
+  price_tiers?: { min_qty_milli: number; unit_price_cents: number }[] | null;
   promo_starts_at: string | null;
   promo_ends_at: string | null;
   cost_cents_estimate: number | null;
   stock_policy: string;
   sold_by: string;
   unit_label: string;
+  /** Sem as quatro, a transportadora não cota: o frete some do carrinho. */
+  weight_grams: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  depth_mm: number | null;
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
   tags: TagRef[];
@@ -363,6 +370,13 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
     methods: ["link"],
     public: [{ key: "handle", label: "InfiniteTag (sem o $)" }],
     secrets: [],
+  },
+  pagbank: {
+    label: "PagBank",
+    hint: "O cliente paga na página do PagBank (Pix, cartão ou boleto) e o dinheiro cai na conta da sua loja. Gere o token em Vendas → Integrações no PagBank; o juro do parcelamento segue o que estiver configurado lá.",
+    methods: ["link"],
+    public: [],
+    secrets: [{ key: "access_token", label: "Token da API" }],
   },
   fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
 };

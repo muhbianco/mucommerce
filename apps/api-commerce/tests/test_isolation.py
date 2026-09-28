@@ -67,6 +67,12 @@ COVERED_TENANT_SCOPED_TABLES = {
     "customer_sessions",
     "legal_documents",
     "consents",
+    "order_shipments",
+    "shipment_events",
+    "suppliers",
+    "supplies",
+    "supply_receipts",
+    "supply_movements",
 }
 
 

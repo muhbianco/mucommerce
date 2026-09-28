@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, status
+from pydantic import BaseModel, Field
 
 from app.api.deps import (
     CheckoutShopper,
@@ -33,11 +34,13 @@ from app.cart.schemas import (
 )
 from app.cart.service import CartService, CartView
 from app.core.rate_limit import rate_limit
+from app.customers.addresses import AddressService
 from app.fulfillment.service import public_fulfillment
 from app.fulfillment.windows import Slot
 from app.media.service import rendition_urls
 from app.models.base import utcnow
 from app.pricing.quote import MILLI
+from app.shipping.service import QuoteLine, ShippingQuoteService
 from app.tenancy.context import TenantContext
 
 router = APIRouter(tags=["Carrinho e checkout"])
@@ -229,3 +232,52 @@ async def set_coupon(session: DbSession, shopper: CheckoutShopper, body: CouponI
 async def clear_coupon(session: DbSession, shopper: CheckoutShopper) -> CartRead:
     service = CartService(session, shopper.tenant, shopper.viewer.customer_id, utcnow())
     return cart_read(await service.clear_coupon(), shopper.tenant)
+
+
+class ShippingOptionsIn(BaseModel):
+    address_id: Annotated[str, Field(min_length=36, max_length=36)]
+
+
+class ShippingOptionRead(BaseModel):
+    provider: str
+    service_code: str
+    service_name: str
+    carrier: str
+    price_cents: int
+    delivery_days: int | None
+    quoted_at: str
+    signature: str
+    cart: str
+
+
+class ShippingOptionsRead(BaseModel):
+    options: list[ShippingOptionRead] = []
+    #: `None` = deu certo. Senão diz por que não há frete agora, para a tela falar a verdade.
+    problem: str | None = None
+
+
+@router.post(
+    "/cart/shipping/options",
+    response_model=ShippingOptionsRead,
+    summary="Cota o frete para um endereço do cliente",
+    dependencies=[
+        Depends(require_same_origin),
+        Depends(rate_limit("shipping_quote", 30, 60, key_fn=customer_rate_key)),
+    ],
+)
+async def shipping_options(
+    session: DbSession, shopper: CheckoutShopper, body: ShippingOptionsIn
+) -> ShippingOptionsRead:
+    """As opções vêm assinadas: a escolhida volta no `place` e é conferida lá."""
+    endereco = await AddressService(session).get_owned(shopper.viewer.customer_id, body.address_id)
+    service = CartService(session, shopper.tenant, shopper.viewer.customer_id, utcnow())
+    cart = await service.active()
+    itens = await service.items(cart) if cart is not None else []
+    resultado = await ShippingQuoteService(session, shopper.tenant, utcnow()).options(
+        [QuoteLine(item.variant_id, item.quantity_milli) for item in itens],
+        destination_postal_code=endereco.postal_code,
+    )
+    return ShippingOptionsRead(
+        options=[ShippingOptionRead(**opcao.as_dict()) for opcao in resultado.options],
+        problem=resultado.problem,
+    )

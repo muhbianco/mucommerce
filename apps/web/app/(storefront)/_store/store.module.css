@@ -1500,3 +1500,63 @@
 .storefront .accountLinks a:hover {
   background: var(--store-mist);
 }
+
+/* ------------------------------------------------------------------ frete por transportadora */
+
+.shipping {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--store-line);
+}
+
+.shipping h3 {
+  margin-bottom: 0.75rem;
+}
+
+.quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* Cada cotação é uma linha clicável inteira: no celular, acertar o radio é difícil. */
+.quote {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  border: 1.5px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface);
+  cursor: pointer;
+}
+
+.quote:hover {
+  border-color: var(--store-ink);
+}
+
+.quote:has(input:checked) {
+  border-color: var(--brand-primary);
+  background: var(--store-brand-tint);
+}
+
+.quoteName {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.quoteName .muted {
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.quotePrice {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

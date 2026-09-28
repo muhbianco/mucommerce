@@ -13,8 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import utcnow
+from app.orders.models import Order
+from app.orders.state_machine import OrderStatus
 from app.payments.events import emit_payment, record_event
 from app.payments.models import Payment, PaymentStatus
+from app.payments.surcharge import set_order_surcharge
 
 
 async def close_active_payment(
@@ -45,5 +48,10 @@ async def close_active_payment(
         session, payment, "closed", before, target, actor_id=actor_id, detail={"reason": reason}
     )
     await session.flush()
+    # O acrescimo era daquele meio de pagamento; com a tentativa encerrada, ele sai do total.
+    order = await session.get(Order, order_id)
+    if order is not None and order.status == OrderStatus.AWAITING_PAYMENT:
+        set_order_surcharge(order, 0)
+        await session.flush()
     await emit_payment(session, tenant_id, payment, f"payment.{target}", reason=reason)
     return payment

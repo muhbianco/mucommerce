@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.workers.orders",
         "app.workers.payments",
         "app.workers.notifications",
+        "app.workers.shipping",
     ],
 )
 
@@ -46,6 +47,7 @@ celery_app.conf.update(
         "app.workers.payments.process_refund": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.sweep_refunds": {"queue": QUEUE_PAYMENTS},
         "app.workers.payments.payments_health_check": {"queue": QUEUE_PAYMENTS},
+        "app.workers.shipping.track_shipments": {"queue": QUEUE_PAYMENTS},
         "app.workers.notifications.send_notifications": {"queue": QUEUE_NOTIFICATIONS},
     },
     task_acks_late=True,
@@ -86,6 +88,10 @@ celery_app.conf.update(
             "schedule": 60.0,
         },
         "sweep-refunds": {"task": "app.workers.payments.sweep_refunds", "schedule": 60.0},
+        "track-shipments": {
+            "task": "app.workers.shipping.track_shipments",
+            "schedule": 600.0,
+        },
         "send-notifications": {
             "task": "app.workers.notifications.send_notifications",
             "schedule": 15.0,

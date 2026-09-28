@@ -57,7 +57,7 @@ async def panel_context(
 # Keys the tenant edits in the panel. Access mode, fulfillment and checkout stay with MuhBianco
 # ops for now (they change what customers can do, and phase 2 owns fulfillment/checkout).
 # Day-to-day settings the store edits in its panel (platform ones stay in the site admin).
-TenantEditableSetting = Literal["branding", "landing", "seo", "fulfillment", "checkout"]
+TenantEditableSetting = Literal["branding", "landing", "seo", "fulfillment", "checkout", "payments"]
 
 
 @router.get(

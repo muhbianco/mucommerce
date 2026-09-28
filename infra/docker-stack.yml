@@ -67,6 +67,12 @@ x-api-env: &api_env
   STORAGE_PUBLIC_URL: https://storage.s3.muhbianco.com.br
   STORAGE_ACCESS_KEY: ${MINIO_ACCESS_KEY}
   STORAGE_SECRET_KEY: ${MINIO_SECRET_KEY}
+  # Quais provedores este ambiente oferece. Aqui e nao no codigo porque tirar um do ar e
+  # decisao de operacao, nao de release: some da tela de Pagamentos/Envio de todas as lojas na
+  # proxima subida da stack. O default e o do codigo, entao esquecer a chave no Env do
+  # Portainer nao derruba o checkout -- so mantem o que ja estava valendo.
+  PAYMENTS_ALLOWED_PROVIDERS: ${PAYMENTS_ALLOWED_PROVIDERS:-mercadopago,infinitepay,pagbank}
+  SHIPPING_ALLOWED_PROVIDERS: ${SHIPPING_ALLOWED_PROVIDERS:-melhorenvio}
 
 services:
   commerce-api:

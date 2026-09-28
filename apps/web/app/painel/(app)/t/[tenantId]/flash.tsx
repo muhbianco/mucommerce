@@ -47,6 +47,14 @@ const OK: Record<string, string> = {
   dominio_ativo: "DNS no ar: o domínio já responde pela sua loja.",
   dominio_principal: "Endereço principal atualizado.",
   dominio_desativado: "Domínio desativado.",
+  envio_origem: "Endereço de origem salvo.",
+  envio_regras: "Configuração de envio salva.",
+  envio_conectado: "Conta da transportadora conectada.",
+  envio_testado: "Teste feito: veja o resultado acima.",
+  modulo_ligado: "Módulo ligado.",
+  modulo_desligado: "Módulo desligado. Nada foi apagado.",
+  vitrine: "Quem vê a vitrine foi atualizado.",
+  taxa: "Repasse da taxa salvo.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -77,12 +85,19 @@ const ERRORS: Record<string, string> = {
   four_eyes: "Quem pediu a devolução não pode aprová-la; peça a outra pessoa da loja.",
   motivo_obrigatorio: "Escreva o motivo (mínimo 3 caracteres).",
   codigo_invalido: "Código inválido: use letras, números, hífen ou _ (3 a 40).",
-  percentual_invalido: "Porcentagem inválida (de 0,01 a 100).",
+  percentual_invalido: "Porcentagem inválida (de 0 a 30).",
   coupon_code_taken: "Já existe um cupom com esse código.",
   evidencia_obrigatoria: "Descreva como a devolução foi feita (mínimo 10 caracteres).",
   rate_limited: "Muitas tentativas seguidas. Espere um minuto e tente de novo.",
+  credential_vault_unavailable: "O cofre de credenciais da plataforma está indisponível. Nada foi salvo — avise a MuhBianco.",
+  integration_unavailable: "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos.",
   dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",
   dns_sem_txt: "Ainda não encontrei o registro TXT. Depois de criar, o DNS pode levar alguns minutos.",
+  module_not_self_service: "Este módulo é um serviço à parte: contrate na sua conta MuhBianco.",
+  module_requires: "Ligue antes os módulos de que este depende.",
+  module_in_use: "Outro módulo ligado depende deste; desligue aquele primeiro.",
+  cep_origem_invalido: "CEP de origem inválido: informe os 8 dígitos.",
+  token_invalido: "Token muito curto — confira se copiou inteiro.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 

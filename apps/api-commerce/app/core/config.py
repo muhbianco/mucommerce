@@ -135,13 +135,25 @@ class Settings(BaseSettings):
     # --- payments (stage E) ------------------------------------------------------------
     # Providers this deployment may use at all (comma separated); `fake` exists for tests and
     # the E2E suite and is refused in production.
-    payments_allowed_providers: str = "mercadopago,infinitepay"
+    payments_allowed_providers: str = "mercadopago,infinitepay,pagbank"
     payments_fake_webhook_secret: SecretStr = SecretStr("")
     payments_http_timeout_seconds: float = 10.0
     mercadopago_api_base: str = "https://api.mercadopago.com"
     infinitepay_api_base: str = "https://api.checkout.infinitepay.io"
+    pagbank_api_base: str = "https://api.pagseguro.com"
+    pagbank_sandbox_api_base: str = "https://sandbox.api.pagseguro.com"
     # No payment deadline goes beyond this, whatever the provider allows.
     checkout_max_order_age_minutes: int = 120
+
+    # --- envio por transportadora (etapa J, ADR 0015) ----------------------------------
+    # Transportadoras que este ambiente permite; `fake` é de teste e é recusado em produção.
+    shipping_allowed_providers: str = "melhorenvio"
+    # Cotação entra no caminho do checkout: timeout curto, senão a tela trava esperando.
+    shipping_timeout_seconds: float = 8.0
+    # A API do Melhor Envio exige identificação com contato no User-Agent.
+    shipping_user_agent: str = "MuhBianco Commerce (contato@muhbianco.com.br)"
+    # Quanto a cotação vale: no cache e no pedido. Passou disso, recota antes de cobrar.
+    shipping_quote_ttl_minutes: int = 30
 
     # --- transactional e-mail (stage E) ------------------------------------------------
     # n8n webhook that sends the store's e-mails; empty means e-mails are only recorded.
@@ -192,10 +204,14 @@ class Settings(BaseSettings):
                 raise ValueError("STOREFRONT_ORIGIN_TEMPLATE must be https in production")
             if "fake" in self.payments_allowed_provider_list:
                 raise ValueError("The fake payment provider is not allowed in production")
+            if "fake" in self.shipping_allowed_provider_list:
+                raise ValueError("The fake shipping provider is not allowed in production")
             if self.mercadopago_api_base != "https://api.mercadopago.com":
                 raise ValueError("MERCADOPAGO_API_BASE must be Mercado Pago's API in production")
             if self.infinitepay_api_base != "https://api.checkout.infinitepay.io":
                 raise ValueError("INFINITEPAY_API_BASE must be InfinitePay's API in production")
+            if self.pagbank_api_base != "https://api.pagseguro.com":
+                raise ValueError("PAGBANK_API_BASE must be PagBank's API in production")
             if self.notify_n8n_url and not self.notify_n8n_secret.get_secret_value():
                 raise ValueError("NOTIFY_N8N_SECRET is required when NOTIFY_N8N_URL is set")
             if self.notify_n8n_url and not self.notify_n8n_url.startswith("https://"):
@@ -283,6 +299,10 @@ class Settings(BaseSettings):
     @property
     def payments_allowed_provider_list(self) -> list[str]:
         return [p.strip() for p in self.payments_allowed_providers.split(",") if p.strip()]
+
+    @property
+    def shipping_allowed_provider_list(self) -> list[str]:
+        return [p.strip() for p in self.shipping_allowed_providers.split(",") if p.strip()]
 
     def storefront_origin(self, host: str) -> str:
         return self.storefront_origin_template.format(host=host).rstrip("/")

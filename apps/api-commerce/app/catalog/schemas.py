@@ -49,10 +49,19 @@ class ProductSeo(StrictModel):
     description: Annotated[str, Field(max_length=160)] | None = None
 
 
+class PriceTierIn(StrictModel):
+    """Um degrau do desconto progressivo: a partir desta quantidade, este preço por unidade."""
+
+    min_qty_milli: Annotated[int, Field(gt=0, le=1_000_000_000)]
+    unit_price_cents: Annotated[int, Field(gt=0, le=100_000_000)]
+
+
 class _ProductFields(StrictModel):
     short_description: Annotated[str, Field(max_length=500)] | None = None
     description_md: Annotated[str, Field(max_length=20_000)] | None = None
     kind: ProductKindIn = "physical"
+    #: Vazio = preço único. Cada faixa precisa custar menos que a anterior.
+    price_tiers: Annotated[list[PriceTierIn], Field(max_length=8)] | None = None
     promo_price_cents: Money | None = None
     promo_starts_at: AwareDatetime | None = None
     promo_ends_at: AwareDatetime | None = None
@@ -94,6 +103,7 @@ class ProductUpdate(StrictModel):
     short_description: Annotated[str, Field(max_length=500)] | None = None
     description_md: Annotated[str, Field(max_length=20_000)] | None = None
     kind: ProductKindIn | None = None
+    price_tiers: Annotated[list[PriceTierIn], Field(max_length=8)] | None = None
     promo_price_cents: Money | None = None
     promo_starts_at: AwareDatetime | None = None
     promo_ends_at: AwareDatetime | None = None
@@ -254,6 +264,7 @@ class ProductSummary(BaseModel):
 class ProductRead(ProductSummary):
     short_description: str | None
     description_md: str | None
+    price_tiers: list[dict[str, int]] | None = None
     promo_price_cents: int | None
     promo_starts_at: datetime | None
     promo_ends_at: datetime | None

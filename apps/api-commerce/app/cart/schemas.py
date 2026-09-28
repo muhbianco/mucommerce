@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -24,12 +24,31 @@ class CartItemQuantity(StrictModel):
     quantity: Annotated[Decimal, Field(ge=0, le=999, decimal_places=3)]
 
 
+class ShippingChoiceIn(StrictModel):
+    """A cotação que o cliente escolheu, exatamente como a vitrine a recebeu.
+
+    O preço vem do navegador, então nada aqui é confiável sozinho: a assinatura é conferida
+    no `evaluate` antes de virar frete do pedido.
+    """
+
+    provider: Annotated[str, Field(min_length=1, max_length=24)]
+    service_code: Annotated[str, Field(min_length=1, max_length=24)]
+    service_name: Annotated[str, Field(max_length=80)] = ""
+    carrier: Annotated[str, Field(max_length=60)] = ""
+    price_cents: Annotated[int, Field(ge=0, le=10_000_000)]
+    delivery_days: Annotated[int, Field(ge=0, le=365)] | None = None
+    quoted_at: datetime
+    signature: Annotated[str, Field(min_length=16, max_length=128)]
+    cart: Annotated[str, Field(min_length=8, max_length=64)]
+
+
 class FulfillmentChoiceIn(StrictModel):
-    type: Literal["pickup", "delivery"]
+    type: Literal["pickup", "delivery", "shipping"]
     pickup_location_id: Annotated[str, Field(max_length=36)] | None = None
     address_id: EntityId | None = None
     slot_date: date | None = None
     slot_start: Annotated[str, Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")] | None = None
+    shipping: ShippingChoiceIn | None = None
 
 
 class MoneyRead(BaseModel):

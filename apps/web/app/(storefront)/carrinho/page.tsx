@@ -9,7 +9,15 @@ import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice, type StorePrice } from "@/lib/storefront";
 
 import { CART_ERRORS } from "../_store/add-to-cart";
-import { applyCoupon, chooseFulfillment, removeCartItem, removeCoupon, setCartQuantity } from "../_store/cart-actions";
+import {
+  applyCoupon,
+  chooseFulfillment,
+  chooseShipping,
+  quoteShipping,
+  removeCartItem,
+  removeCoupon,
+  setCartQuantity,
+} from "../_store/cart-actions";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
 import { EmptyState, FreeShippingBar, Notice, PageHead, Section, Split, TableWrap, Thumb } from "../_store/ui";
@@ -37,11 +45,36 @@ interface Slot {
   end: string;
 }
 
+/** Uma cotação como a loja a recebeu, assinada por nós. Volta inteira no `place`. */
+interface ShippingOption {
+  provider: string;
+  service_code: string;
+  service_name: string;
+  carrier: string;
+  price_cents: number;
+  delivery_days: number | null;
+  quoted_at: string;
+  signature: string;
+  cart: string;
+}
+
+interface ShippingQuote {
+  options: ShippingOption[];
+  problem: string | null;
+}
+
 interface Cart {
   id: string | null;
   version: number;
   items: CartItem[];
-  fulfillment: { type?: string; pickup_location_id?: string; address_id?: string; slot_date?: string; slot_start?: string } | null;
+  fulfillment: {
+    type?: string;
+    pickup_location_id?: string;
+    address_id?: string;
+    slot_date?: string;
+    slot_start?: string;
+    shipping?: { carrier?: string; service_name?: string; price_cents?: number; delivery_days?: number | null };
+  } | null;
   quote: {
     subtotal_cents: number;
     discount_cents: number;
@@ -81,8 +114,21 @@ const COUPON_PROBLEM: Record<string, string> = {
   coupon_customer_limit: "Você já usou esse cupom o número de vezes permitido.",
 };
 
+/** Por que não há frete agora. Cada um manda o cliente para uma saída diferente. */
+const SHIPPING_PROBLEM: Record<string, string> = {
+  shipping_disabled: "Esta loja não está enviando por transportadora agora.",
+  not_configured: "A loja ainda não terminou de configurar o envio.",
+  missing_dimensions: "Falta o peso ou o tamanho de um item para calcular o frete. Avise a loja.",
+  unavailable: "A transportadora não respondeu agora. Tente de novo em instantes.",
+  no_service: "Nenhuma transportadora atende esse endereço com o que está no carrinho.",
+  address_required: "Escolha um endereço para calcular.",
+};
+
 const FULFILLMENT_PROBLEM: Record<string, string> = {
   mode_unavailable: "Essa forma de receber não está disponível.",
+  quote_required: "Calcule o frete e escolha uma opção.",
+  quote_expired: "O frete que você escolheu venceu ou o carrinho mudou. Calcule de novo.",
+  quote_invalid: "Não conseguimos confirmar esse frete. Calcule de novo.",
   location_unknown: "Escolha um local de retirada.",
   address_required: "Escolha um endereço de entrega.",
   out_of_zone: "A loja não entrega nesse endereço.",
@@ -96,12 +142,22 @@ function money(cents: number, currency: string): string {
   return formatPrice(price);
 }
 
+/** Prazo da transportadora, em dias úteis, ou nada quando ela não informou. */
+function prazo(days: number | null): string {
+  if (days === null) return "";
+  return days === 1 ? " · 1 dia útil" : ` · até ${days} dias úteis`;
+}
+
 function slotLabel(slot: Slot): string {
   const day = new Date(`${slot.date}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" });
   return `${day} ${slot.start}–${slot.end}`;
 }
 
-export default async function CartPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
+export default async function CartPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ok?: string; erro?: string; frete?: string }>;
+}) {
   const context = await getStorefrontContext();
   if (!context || !context.features.checkout) notFound();
   if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect("/entrar?next=%2Fcarrinho");
@@ -113,7 +169,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
     if (error instanceof CustomerApiError && error.status === 403) redirect("/acesso-pendente?next=%2Fcarrinho");
     throw error;
   }
-  const { ok, erro } = await searchParams;
+  const { ok, erro, frete } = await searchParams;
   const { quote, options } = cart;
   const currency = quote.currency;
   const chosen = cart.fulfillment ?? {};
@@ -127,7 +183,22 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
   const slotChoices = chosen.type ? (options.slots[chosen.type] ?? []) : [];
 
   const freeAbove = (context.fulfillment.shipping?.free_above_cents ?? null) as number | null;
-  const shippingOffered = Boolean(context.fulfillment.modes?.includes("shipping"));
+
+  // Frete é cotado na hora, nunca guardado entre visitas: preço de transportadora vence.
+  // Só cota quando o cliente pediu (`?frete=<endereço>`), para não gastar chamada em quem
+  // vai retirar no balcão.
+  const shippingOn = options.modes.includes("shipping");
+  let shippingQuote: ShippingQuote | null = null;
+  if (shippingOn && frete) {
+    try {
+      shippingQuote = await customerApi<ShippingQuote>("/cart/shipping/options", {
+        json: { address_id: frete },
+      });
+    } catch (error) {
+      if (!(error instanceof CustomerApiError)) throw error;
+      shippingQuote = { options: [], problem: error.code };
+    }
+  }
 
   return (
     <StoreShell context={context}>
@@ -151,7 +222,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
           aside={
             <div className={styles.summary} aria-label="Resumo do pedido">
               <h2>Resumo</h2>
-              {shippingOffered ? (
+              {shippingOn ? (
                 <FreeShippingBar subtotalCents={quote.subtotal_cents} freeAboveCents={freeAbove} currency={currency} />
               ) : null}
               <dl className={styles.totals}>
@@ -169,7 +240,7 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
                 ) : null}
                 {quote.delivery_fee_cents ? (
                   <div>
-                    <dt>Entrega</dt>
+                    <dt>{chosen.type === "shipping" ? "Frete" : "Entrega"}</dt>
                     <dd>{money(quote.delivery_fee_cents, currency)}</dd>
                   </div>
                 ) : null}
@@ -333,12 +404,76 @@ export default async function CartPage({ searchParams }: { searchParams: Promise
                     </label>
                   </p>
                 ) : null}
-                {options.modes.length ? (
+                {options.modes.includes("pickup") || options.modes.includes("delivery") ? (
                   <button type="submit" className="button">
                     Usar esta opção
                   </button>
                 ) : null}
               </form>
+
+              {shippingOn ? (
+                <div className={styles.shipping}>
+                  <h3>Receber por transportadora</h3>
+                  {chosen.type === "shipping" && chosen.shipping ? (
+                    <Notice kind="ok" role="status">
+                      Escolhido: {chosen.shipping.carrier} {chosen.shipping.service_name}
+                      {typeof chosen.shipping.price_cents === "number"
+                        ? ` — ${money(chosen.shipping.price_cents, currency)}`
+                        : ""}
+                      {prazo(chosen.shipping.delivery_days ?? null)}
+                    </Notice>
+                  ) : null}
+                  {options.addresses.length === 0 ? (
+                    <p>
+                      Para calcular o frete, <Link href="/conta/enderecos">cadastre um endereço</Link>.
+                    </p>
+                  ) : (
+                    <>
+                      <form action={quoteShipping}>
+                        {options.addresses.map((address) => (
+                          <p key={address.id} className={styles.choice}>
+                            <label>
+                              <input
+                                type="radio"
+                                name="address_id"
+                                value={address.id}
+                                defaultChecked={(frete ?? chosen.address_id) === address.id}
+                              />{" "}
+                              {address.label ? `${address.label}: ` : ""}
+                              {address.summary}
+                            </label>
+                          </p>
+                        ))}
+                        <button type="submit">Calcular frete</button>
+                      </form>
+                      {shippingQuote === null ? null : shippingQuote.problem ? (
+                        <Notice kind="warn">
+                          {SHIPPING_PROBLEM[shippingQuote.problem] ?? "Não foi possível calcular o frete agora."}
+                        </Notice>
+                      ) : shippingQuote.options.length === 0 ? (
+                        <Notice kind="warn">{SHIPPING_PROBLEM.no_service}</Notice>
+                      ) : (
+                        <form action={chooseShipping} className={styles.quotes}>
+                          <input type="hidden" name="address_id" value={frete} />
+                          {shippingQuote.options.map((option) => (
+                            <label key={`${option.provider}:${option.service_code}`} className={styles.quote}>
+                              <input type="radio" name="option" value={JSON.stringify(option)} required />
+                              <span className={styles.quoteName}>
+                                {option.carrier} {option.service_name}
+                                <span className="muted">{prazo(option.delivery_days).replace(/^ · /, "")}</span>
+                              </span>
+                              <span className={styles.quotePrice}>{money(option.price_cents, currency)}</span>
+                            </label>
+                          ))}
+                          <button type="submit" className="button">
+                            Usar este frete
+                          </button>
+                        </form>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
               {quote.fulfillment?.problems.length ? (
                 <Notice kind="warn">
                   {quote.fulfillment.problems.map((p) => FULFILLMENT_PROBLEM[p] ?? p).join(" ")}

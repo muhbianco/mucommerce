@@ -70,7 +70,7 @@ class ActorKind(StrEnum):
 @dataclass(frozen=True, slots=True)
 class OrderSnapshot:
     status: str
-    fulfillment_type: str  # pickup | delivery | none
+    fulfillment_type: str  # pickup | delivery | shipping | none
     has_approved_payment: bool = False
     customer_cancel_until: str = OrderStatus.ACCEPTED
 
@@ -94,9 +94,9 @@ def _customer_window(order: OrderSnapshot) -> str | None:
     return None
 
 
-def _fulfillment(kind: str) -> Guard:
+def _fulfillment(*kinds: str) -> Guard:
     def guard(order: OrderSnapshot) -> str | None:
-        return None if order.fulfillment_type == kind else "wrong_fulfillment"
+        return None if order.fulfillment_type in kinds else "wrong_fulfillment"
 
     return guard
 
@@ -154,7 +154,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         S.SHIPPED,
         {A.OPERATOR},
         scope=Scope.ORDERS_TRANSITION,
-        guard=_fulfillment("delivery"),
+        # Entrega por zona (frota própria) e envio por transportadora saem do mesmo jeito.
+        guard=_fulfillment("delivery", "shipping"),
     ),
     _t(
         {S.ACCEPTED, S.IN_PRODUCTION},
@@ -164,6 +165,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         guard=_fulfillment("none"),
     ),
     _t({S.READY_FOR_PICKUP, S.SHIPPED}, S.DELIVERED, {A.OPERATOR}, scope=Scope.ORDERS_TRANSITION),
+    # O rastreio da transportadora disse que chegou: ninguém precisa clicar para confirmar.
+    _t(S.SHIPPED, S.DELIVERED, {A.SYSTEM}),
 )
 
 # Timestamp column each target stamps.

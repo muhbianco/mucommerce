@@ -60,10 +60,15 @@ export async function updateProduct(form: FormData): Promise<void> {
         promo_starts_at: promoStarts,
         promo_ends_at: promoEnds,
         cost_cents_estimate: money(form, "cost"),
+        price_tiers: priceTiers(form),
         kind: text(form, "kind") || undefined,
         stock_policy: text(form, "stock_policy"),
         sold_by: text(form, "sold_by"),
         unit_label: text(form, "unit_label") || "un",
+        weight_grams: measure(form, "weight_grams"),
+        width_mm: measure(form, "width_mm"),
+        height_mm: measure(form, "height_mm"),
+        depth_mm: measure(form, "depth_mm"),
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
         tags: tagNames(form),
@@ -71,6 +76,35 @@ export async function updateProduct(form: FormData): Promise<void> {
       },
     });
   });
+}
+
+/**
+ * Peso e medida da caixa. Vazio vira `null` de proposito: e assim que o produto declara que
+ * nao tem medida, e a cotacao recusa em vez de inventar volume.
+ */
+function measure(form: FormData, name: string): number | null {
+  const raw = text(form, name);
+  if (!raw) return null;
+  const value = Number(raw.replace(",", "."));
+  if (!Number.isFinite(value) || value < 0) throw new FormError("medida_invalida");
+  return Math.round(value);
+}
+
+/**
+ * Desconto progressivo: tres degraus na tela ("a partir de N unidades, R$ X cada").
+ * Linha sem os dois campos e ignorada, entao a pessoa preenche so o que usa.
+ */
+function priceTiers(form: FormData): { min_qty_milli: number; unit_price_cents: number }[] {
+  const tiers: { min_qty_milli: number; unit_price_cents: number }[] = [];
+  for (let i = 0; i < 3; i++) {
+    const qty = Number(text(form, `tier_qty_${i}`) || 0);
+    const price = money(form, `tier_price_${i}`);
+    if (!qty && price === null) continue;
+    if (!Number.isInteger(qty) || qty <= 0) throw new FormError("quantidade_invalida");
+    if (price === null || price <= 0) throw new FormError("preco_obrigatorio");
+    tiers.push({ min_qty_milli: qty * 1000, unit_price_cents: price });
+  }
+  return tiers;
 }
 
 export async function setProductStatus(form: FormData): Promise<void> {

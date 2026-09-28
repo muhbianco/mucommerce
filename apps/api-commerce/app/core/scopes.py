@@ -34,6 +34,8 @@ class Scope(StrEnum):
     PAYMENTS_REFUND_REQUEST = "payments:refund_request"
     PAYMENTS_REFUND_APPROVE = "payments:refund_approve"
     PAYMENTS_CONFIG = "payments:config"
+    # A credencial da transportadora compra etiqueta: gasta dinheiro, logo é do dono.
+    SHIPPING_CONFIG = "shipping:config"
     CUSTOMERS_READ = "customers:read"
     CUSTOMERS_APPROVE = "customers:approve"
     CUSTOMERS_EXPORT = "customers:export"
@@ -54,7 +56,7 @@ _TENANT_ROLE_SCOPES: dict[TenantRole, frozenset[Scope]] = {
     TenantRole.OWNER: _ALL_TENANT_SCOPES,
     # Payment credentials are the owner's alone (ADR 0011 §8).
     TenantRole.ADMIN: _ALL_TENANT_SCOPES
-    - {Scope.CUSTOMERS_ERASE, Scope.MEMBERS_WRITE, Scope.PAYMENTS_CONFIG},
+    - {Scope.CUSTOMERS_ERASE, Scope.MEMBERS_WRITE, Scope.PAYMENTS_CONFIG, Scope.SHIPPING_CONFIG},
     TenantRole.OPS: frozenset(
         {
             Scope.CATALOG_READ,

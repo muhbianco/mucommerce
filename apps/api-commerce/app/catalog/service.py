@@ -43,7 +43,13 @@ from app.catalog.models import (
     Tag,
     VariantStatus,
 )
-from app.catalog.pricing import EffectivePrice, check_promotion, effective_price, variant_price
+from app.catalog.pricing import (
+    EffectivePrice,
+    check_promotion,
+    check_tiers,
+    effective_price,
+    variant_price,
+)
 from app.catalog.repository import MAX_CATEGORIES, MAX_TAGS, CatalogRepository
 from app.catalog.schemas import (
     CATEGORY_REQUIRED_FIELDS,
@@ -149,6 +155,10 @@ class CatalogService:
             starts_at=data.promo_starts_at,
             ends_at=data.promo_ends_at,
         )
+        check_tiers(
+            [t.model_dump() for t in data.price_tiers] if data.price_tiers else None,
+            base_cents=data.base_price_cents,
+        )
         category_ids = await self._checked_category_ids(data.category_ids)
         tags = await self._resolve_tags(data.tags)
         sku = data.sku or await self._generate_sku()
@@ -218,6 +228,12 @@ class CatalogService:
             "ends_at": changes.get("promo_ends_at", product.promo_ends_at),
         }
         check_promotion(**merged)
+        if "price_tiers" in changes:
+            faixas = changes["price_tiers"]
+            check_tiers(
+                [dict(t) for t in faixas] if faixas else None,
+                base_cents=int(merged["base_cents"]),
+            )
         new_kind = changes.get("kind", product.kind)
         if new_kind != product.kind:
             if product.kind == ProductKind.TICKET and await self.repo.has_event(product.id):

@@ -11,6 +11,8 @@ import type { Category } from "@/lib/panel/types";
 import styles from "../../../../panel.module.css";
 import { archiveCategory, saveCategory } from "../actions";
 import { Flash } from "../flash";
+import { EmptyState, PageHeader, Section } from "../ui";
+import local from "./categorias.module.css";
 
 export const metadata: Metadata = { title: "Categorias" };
 
@@ -33,7 +35,7 @@ export default async function Categories({
 
   const parentSelect = (current: Category | null) => (
     <select name="parent_id" defaultValue={current?.parent_id ?? ""}>
-      <option value="">(topo)</option>
+      <option value="">Nenhuma (categoria principal)</option>
       {roots
         .filter((root) => root.id !== current?.id)
         .map((root) => (
@@ -46,73 +48,110 @@ export default async function Categories({
 
   return (
     <>
+      <PageHeader
+        eyebrow="Categorias"
+        title="Organize a loja em categorias"
+        lead="Agrupe os produtos para o cliente achar o que procura. Uma categoria pode ter subcategorias; cada produto entra nas categorias pela página dele."
+      />
       <Flash ok={ok} erro={erro} />
+
       {canWrite ? (
-        <section className={styles.card}>
-          <h2>Nova categoria</h2>
-          <form action={saveCategory} className={styles.form}>
+        <Section title="Nova categoria" description="Para criar uma subcategoria, escolha em qual ela fica">
+          <form action={saveCategory}>
             <input type="hidden" name="tenant_id" value={context.tenant_id} />
             <input type="hidden" name="idempotency_key" value={randomUUID()} />
-            <label>
-              Nome
-              <input name="name" required maxLength={120} />
-            </label>
-            <label>
-              Dentro de
-              {parentSelect(null)}
-            </label>
-            <label>
-              Ordem
-              <input name="position" type="number" defaultValue={0} style={{ width: "5rem" }} />
-            </label>
-            <button type="submit" className={styles.button}>
-              Criar
-            </button>
-          </form>
-        </section>
-      ) : null}
-      <section className={styles.card}>
-        <h2>Categorias</h2>
-        {ordered.length === 0 ? <p>Nenhuma categoria.</p> : null}
-        {ordered.map((category) => (
-          <div key={category.id} className={styles.form} style={{ marginBottom: "0.75rem" }}>
-            <form action={saveCategory} className={styles.form}>
-              <input type="hidden" name="tenant_id" value={context.tenant_id} />
-              <input type="hidden" name="category_id" value={category.id} />
-              <label>
-                {category.parent_id ? "↳ Nome" : "Nome"}
-                <input name="name" required maxLength={120} defaultValue={category.name} disabled={!canWrite} />
+            <div className={styles.fields}>
+              <label className={styles.field}>
+                Nome
+                <input name="name" required maxLength={120} placeholder="ex.: Bolos" />
               </label>
-              <label>
-                Slug
-                <input name="slug" maxLength={160} defaultValue={category.slug} disabled={!canWrite} />
-              </label>
-              <label>
+              <label className={styles.field}>
                 Dentro de
-                {parentSelect(category)}
+                {parentSelect(null)}
               </label>
-              <label>
+              <label className={styles.field}>
                 Ordem
-                <input name="position" type="number" defaultValue={category.position} style={{ width: "5rem" }} />
+                <input name="position" type="number" defaultValue={0} />
+                <span className={styles.fieldHint}>Menor aparece primeiro.</span>
               </label>
-              {canWrite ? (
-                <button type="submit" className={styles.buttonGhost}>
-                  Salvar
-                </button>
-              ) : null}
-            </form>
+            </div>
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.button}>
+                Criar categoria
+              </button>
+            </div>
+          </form>
+        </Section>
+      ) : null}
+
+      <Section
+        title="Suas categorias"
+        description={ordered.length ? (ordered.length === 1 ? "1 categoria" : `${ordered.length} categorias`) : undefined}
+      >
+        {ordered.length === 0 ? (
+          <EmptyState title="Nenhuma categoria ainda">
+            {canWrite
+              ? "Crie a primeira acima. Depois, marque na página de cada produto as categorias dele."
+              : "Quando a loja tiver categorias, elas aparecem aqui."}
+          </EmptyState>
+        ) : (
+          <>
             {canWrite ? (
-              <form action={archiveCategory}>
-                <input type="hidden" name="tenant_id" value={context.tenant_id} />
-                <input type="hidden" name="category_id" value={category.id} />
-                <button type="submit" className={styles.buttonGhost}>
-                  Arquivar
-                </button>
-              </form>
+              <p className={local.intro}>
+                Mude o que precisar e clique em Salvar na mesma linha. O endereço é o fim do link da categoria na
+                loja (<code>/loja/categoria/endereço</code>).
+              </p>
             ) : null}
-          </div>
-        ))}
-      </section>
+            <ul className={`${styles.rows} ${local.list}`}>
+              {ordered.map((category) => {
+                const child = Boolean(category.parent_id);
+                return (
+                  <li key={category.id} className={child ? `${styles.row} ${local.child}` : styles.row}>
+                    <form action={saveCategory} className={local.edit}>
+                      <input type="hidden" name="tenant_id" value={context.tenant_id} />
+                      <input type="hidden" name="category_id" value={category.id} />
+                      <fieldset disabled={!canWrite} className={local.fieldset}>
+                        <div className={local.fields}>
+                          <label className={styles.field}>
+                            {child ? "Subcategoria" : "Categoria"}
+                            <input name="name" required maxLength={120} defaultValue={category.name} />
+                          </label>
+                          <label className={styles.field}>
+                            Endereço
+                            <input name="slug" maxLength={160} defaultValue={category.slug} />
+                          </label>
+                          <label className={styles.field}>
+                            Dentro de
+                            {parentSelect(category)}
+                          </label>
+                          <label className={styles.field}>
+                            Ordem
+                            <input name="position" type="number" defaultValue={category.position} />
+                          </label>
+                        </div>
+                      </fieldset>
+                      {canWrite ? (
+                        <button type="submit" className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
+                          Salvar
+                        </button>
+                      ) : null}
+                    </form>
+                    {canWrite ? (
+                      <form action={archiveCategory} className={local.archive}>
+                        <input type="hidden" name="tenant_id" value={context.tenant_id} />
+                        <input type="hidden" name="category_id" value={category.id} />
+                        <button type="submit" className={`${styles.buttonDanger} ${styles.buttonSmall}`}>
+                          Arquivar
+                        </button>
+                      </form>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </Section>
     </>
   );
 }

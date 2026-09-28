@@ -112,6 +112,77 @@ class AccessBlockedError(PermissionDeniedError):
     message = "Seu acesso a esta loja não está liberado."
 
 
+class IntegrationUnavailableError(DomainError):
+    """Uma dependência nossa está fora do ar ou mal configurada.
+
+    503 e não 500: o pedido de quem chamou estava certo, quem falhou foi a nossa ponta.
+    A mensagem diz o que importa do outro lado — que nada foi gravado.
+    """
+
+    status_code = 503
+    error_code = "integration_unavailable"
+    message = "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos."
+
+
+class CredentialVaultUnavailableError(IntegrationUnavailableError):
+    """A chave mestra das credenciais não está configurada (ou está inválida).
+
+    Erro de plataforma, não da loja: o lojista não tem o que corrigir na tela dele.
+    """
+
+    error_code = "credential_vault_unavailable"
+    message = (
+        "O cofre de credenciais da plataforma está indisponível. "
+        "Nada foi salvo — avise a MuhBianco."
+    )
+
+
+class ShippingUnavailableError(IntegrationUnavailableError):
+    """A transportadora não respondeu. Nada foi comprado."""
+
+    error_code = "shipping_unavailable"
+    message = "A transportadora não respondeu agora. Nada foi comprado; tente de novo."
+
+
+class ShippingBalanceError(DomainError):
+    """Carteira do frete sem saldo: operação da loja, não defeito do pedido."""
+
+    status_code = 422
+    error_code = "shipping_insufficient_balance"
+    message = (
+        "Saldo insuficiente na carteira do frete. Recarregue e despache de novo — "
+        "o pedido continua como estava."
+    )
+
+
+class ShipmentInProgressError(ConflictError):
+    """Já existe um despacho em curso para este pedido (clique duplo, duas abas)."""
+
+    error_code = "shipment_in_progress"
+    message = "O despacho deste pedido já está em andamento."
+
+
+class ModuleNotSelfServiceError(PermissionDeniedError):
+    """Módulo que o painel não liga: ou cobra, ou é chave da plataforma."""
+
+    error_code = "module_not_self_service"
+    message = "Este módulo não é ligado por aqui."
+
+
+class ModuleRequiresError(ValidationError):
+    """Faltou ligar um módulo do qual este depende."""
+
+    error_code = "module_requires"
+    message = "Ligue antes os módulos de que este depende."
+
+
+class ModuleInUseError(ConflictError):
+    """Desligar quebraria outro módulo que está ligado."""
+
+    error_code = "module_in_use"
+    message = "Outro módulo depende deste; desligue-o primeiro."
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"

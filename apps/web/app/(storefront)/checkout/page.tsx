@@ -52,6 +52,12 @@ const ERRORS: Record<string, string> = {
 function fulfillmentLabel(quote: Cart["quote"]): string {
   const f = quote.fulfillment;
   if (!f || f.type === "none") return "Sem entrega (ingressos e serviços)";
+  // Transportadora não tem "nome do local": o que identifica é a empresa e o serviço.
+  if (f.type === "shipping") {
+    const carrier = String(f.snapshot.carrier ?? "");
+    const service = String(f.snapshot.service_name ?? "");
+    return `Envio por ${[carrier, service].filter(Boolean).join(" ") || "transportadora"}`;
+  }
   const name = String(f.snapshot.name ?? "");
   return f.type === "pickup" ? `Retirada em ${name}` : `Entrega (${name})`;
 }

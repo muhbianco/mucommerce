@@ -7,6 +7,10 @@ export interface PaymentOption {
   is_default: boolean;
   public_config: Record<string, unknown>;
   installments_max: number;
+  /** Quanto entra a mais por meio de pagamento. A lei pede que apareça antes da escolha. */
+  surcharge_cents?: Record<string, number>;
+  /** Por parcela, no cartão. */
+  surcharge_by_installment?: Record<string, number>;
 }
 
 export interface Payment {

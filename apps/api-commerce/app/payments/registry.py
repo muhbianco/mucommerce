@@ -18,12 +18,14 @@ from app.payments.provider import PaymentMethod, PaymentProvider
 from app.payments.providers.fake import FakeProvider
 from app.payments.providers.infinitepay import InfinitePayProvider
 from app.payments.providers.mercadopago import MercadoPagoProvider
+from app.payments.providers.pagbank import PagBankProvider
 from app.tenancy.context import TenantContext
 
 _PROVIDERS: dict[str, PaymentProvider] = {
     "fake": FakeProvider(),
     "mercadopago": MercadoPagoProvider(),
     "infinitepay": InfinitePayProvider(),
+    "pagbank": PagBankProvider(),
 }
 
 

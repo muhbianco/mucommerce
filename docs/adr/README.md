@@ -16,5 +16,6 @@
 | [0012](0012-loja-como-servico.md) | A loja é um serviço do catálogo: reserve → débito → activate, idempotente pela assinatura, carência de 3 dias |
 | [0013](0013-chatwoot-por-cliente.md) | Chatwoot por cliente: uma account por loja no domínio do cliente, provisionada pela api-agents; host → account no fork |
 | [0014](0014-painel-por-loja.md) | Painel por loja no endereço dela (`<slug>.painel.*` ou `painel.<domínio>`); painel.muhbianco.com.br só da equipe; login volta ao host que pediu |
+| [0015](0015-envio-por-transportadora.md) | Envio por transportadora via agregador (Melhor Envio) com a conta da própria loja; `ShippingProvider` no molde do `PaymentProvider`; entrega por zona continua |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

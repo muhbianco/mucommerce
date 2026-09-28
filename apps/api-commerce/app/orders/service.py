@@ -133,7 +133,7 @@ class OrderService:
         fulfillment = dict(fq.snapshot)
         # The coupon was locked before the balances, so what the quote used is what is charged.
         applied = quote.coupon if quote.coupon and quote.coupon.discount_cents else None
-        if address is not None and fq.type == "delivery":
+        if address is not None and fq.type in ("delivery", "shipping"):
             fulfillment["address"] = address_snapshot(address)
         order = self._insert_order(
             number=number,
@@ -402,6 +402,19 @@ class OrderService:
             raise StaleOrderError(version=order.version, expected=expected_version)
         await self._transition(
             order, target, ActorKind.OPERATOR, source="panel", reason=reason, scopes=scopes
+        )
+
+    async def carrier_delivered(self, order: Order) -> None:
+        """A transportadora confirmou a entrega: ninguém precisa clicar para repetir isso."""
+        if order.status != OrderStatus.SHIPPED:
+            return
+        await self._transition(
+            order,
+            OrderStatus.DELIVERED,
+            ActorKind.SYSTEM,
+            source="tracking",
+            reason="transportadora confirmou a entrega",
+            scopes=frozenset(),
         )
 
     def allowed_transitions(self, order: Order, scopes: frozenset[str]) -> list[str]:

@@ -1,0 +1,54 @@
+/*
+ * Cupons: o que o kit do painel não tem. Só variáveis do `.shell`.
+ */
+
+/* O código como o cliente digita. */
+.code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-weight: 700;
+  font-size: 1.02rem;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  font-style: italic;
+}
+
+/* Regras do cupom, antes do formulário de criar. */
+.rules {
+  margin: 0 0 1.25rem;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.rules li + li {
+  margin-top: 0.25rem;
+}
+
+/* Novo cupom: some o campo que não vale para o tipo escolhido (sem :has, todos aparecem). */
+.newForm:has(select[name="kind"] option[value="fixed"]:checked) .onlyPercent,
+.newForm:has(select[name="kind"] option[value="percent"]:checked) .onlyFixed {
+  display: none;
+}
+
+/* Editar dentro da linha do cupom. */
+/* Classe dobrada: vence o `details > summary` genérico do painel (mesma especificidade). */
+.edit.edit > summary {
+  display: inline-block;
+  font-size: 0.88rem;
+  color: var(--teal-deep);
+}
+
+.editBody {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.archivedRows {
+  margin-top: 1rem;
+}
