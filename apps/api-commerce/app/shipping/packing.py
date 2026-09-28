@@ -59,7 +59,14 @@ class PackItem:
 
 
 class MissingDimensions(ValueError):
-    """Item sem peso ou sem as três medidas: não dá para cotar, e chutar sai caro."""
+    """Item sem peso ou sem as três medidas: não dá para cotar, e chutar sai caro.
+
+    Carrega quais variantes travaram, para a tela dizer o que falta em vez de "erro".
+    """
+
+    def __init__(self, message: str, variants: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.variants = variants
 
 
 DEFAULT_BOX = Box(*DEFAULT_BOX_MM)

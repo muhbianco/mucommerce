@@ -45,8 +45,25 @@ from app.pricing.quote import (
     Quote,
     line_subtotal,
 )
+from app.shipping import signing
 from app.tenancy.context import TenantContext
 from app.tenancy.service import Actor
+
+
+def cart_fingerprint(
+    tenant_id: str, lines: Sequence[LineInput], address: DeliveryAddress | None
+) -> str | None:
+    """Assinatura do que está sendo cotado, para conferir a cotação de frete escolhida.
+
+    `None` quando não há endereço: sem destino não existe cotação para conferir.
+    """
+    if address is None:
+        return None
+    return signing.cart_signature(
+        tenant_id=tenant_id,
+        destination_postal_code=address.postal_code,
+        lines=[(line.variant_id, line.quantity_milli) for line in lines],
+    )
 
 
 class PricingService:
@@ -184,6 +201,7 @@ class PricingService:
                 subtotal_cents=subtotal - discount,
                 address=address,
                 now=self.now,
+                cart_signature=cart_fingerprint(self.tenant.id, lines, address),
             )
         fee = fulfillment.fee_cents if fulfillment is not None else 0
         return Quote(

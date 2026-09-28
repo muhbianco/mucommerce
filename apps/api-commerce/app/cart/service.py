@@ -41,6 +41,7 @@ from app.media.models import MediaAsset, MediaOwner
 from app.media.repository import MediaRepository
 from app.pricing.quote import MILLI, LineInput, LineProblem, Quote
 from app.pricing.service import PricingService
+from app.shipping.selection import parse_selection
 from app.tenancy.context import TenantContext
 from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import fulfillment_settings
@@ -260,10 +261,10 @@ class CartService:
         return {v.id: (v, p) for v, p in (await self.session.execute(stmt)).tuples()}
 
     async def choice(self, cart: Cart | None) -> tuple[FulfillmentChoice | None, Any]:
-        """The cart's fulfillment choice and, for delivery, the (still owned) address."""
+        """The cart's fulfillment choice and, for delivery/shipping, the (still owned) address."""
         raw = (cart.fulfillment if cart is not None else None) or {}
         kind = raw.get("type")
-        if kind not in ("pickup", "delivery"):
+        if kind not in ("pickup", "delivery", "shipping"):
             return None, None
         slot_date = raw.get("slot_date")
         choice = FulfillmentChoice(
@@ -271,9 +272,10 @@ class CartService:
             pickup_location_id=raw.get("pickup_location_id"),
             slot_date=date.fromisoformat(slot_date) if slot_date else None,
             slot_start=raw.get("slot_start"),
+            shipping=parse_selection(raw.get("shipping")),
         )
         address = None
-        if kind == "delivery" and raw.get("address_id"):
+        if kind in ("delivery", "shipping") and raw.get("address_id"):
             try:
                 address = await AddressService(self.session).get_owned(
                     self.customer_id, raw["address_id"]
