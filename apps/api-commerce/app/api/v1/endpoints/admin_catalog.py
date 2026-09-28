@@ -84,6 +84,7 @@ def _product_read(view: ProductView) -> ProductRead:
         cover_url=_cover_url([m for m in view.media if m.status == "ready"]),
         short_description=product.short_description,
         description_md=product.description_md,
+        price_tiers=product.price_tiers,
         promo_price_cents=product.promo_price_cents,
         promo_starts_at=product.promo_starts_at,
         promo_ends_at=product.promo_ends_at,
