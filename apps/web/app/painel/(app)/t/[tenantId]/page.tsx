@@ -43,6 +43,7 @@ const MODULES: { key: string; label: string }[] = [
   { key: "pickup", label: "Retirada" },
   { key: "delivery", label: "Entrega" },
   { key: "coupons", label: "Cupons" },
+  { key: "shipping.melhorenvio", label: "Envio por transportadora" },
 ];
 
 interface Shortcut {
@@ -86,6 +87,8 @@ export default async function TenantOverview({ params }: { params: Promise<{ ten
   const status: StatusView = STORE_STATUS[context.status] ?? { label: context.status, state: "off", hint: "" };
   const access = ACCESS[accessMode] ?? { label: accessMode, hint: "" };
   const modulesOn = MODULES.filter((module) => f[module.key]).length;
+  // Quem pode mexer vê os cartões como atalho; quem não pode, como informação.
+  const settings = scopes.can("settings:write");
 
   // Mesmas condições das abas do menu (layout.tsx): atalho só para o que a pessoa pode abrir.
   const catalog = f.catalog && scopes.can("catalog:read");
@@ -200,8 +203,18 @@ export default async function TenantOverview({ params }: { params: Promise<{ ten
             ) : undefined
           }
         />
-        <Stat label="Acesso à vitrine" value={access.label} hint={access.hint || undefined} />
-        <Stat label="Módulos" value={`${modulesOn} de ${MODULES.length}`} hint="ligados nesta loja" />
+        <Stat
+          label="Acesso à vitrine"
+          value={access.label}
+          hint={settings ? "Trocar quem pode ver" : access.hint || undefined}
+          href={settings ? `${base}/modulos` : undefined}
+        />
+        <Stat
+          label="Módulos"
+          value={`${modulesOn} de ${MODULES.length}`}
+          hint={settings ? "Ligar e desligar" : "ligados nesta loja"}
+          href={settings ? `${base}/modulos` : undefined}
+        />
       </Stats>
 
       <div className={styles.split}>
@@ -227,7 +240,12 @@ export default async function TenantOverview({ params }: { params: Promise<{ ten
         </div>
 
         <aside>
-          <Section title="Módulos" description="O que está ligado" id="modulos">
+          <Section
+            title="Módulos"
+            description="O que está ligado"
+            id="modulos"
+            actions={settings ? <Link href={`${base}/modulos`}>Ligar e desligar</Link> : undefined}
+          >
             <KeyValues
               items={MODULES.map((module) => ({
                 label: module.label,
