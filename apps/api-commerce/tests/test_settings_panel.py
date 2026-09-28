@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.audit.models import AuditLog
 from app.core.scopes import TenantRole
+from app.landing.blocks import MAX_BLOCKS
 from app.media.models import MediaAsset, MediaStatus
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.models import Tenant
@@ -147,10 +148,20 @@ async def test_only_tenant_keys_and_the_right_role(
         client, tenant, owner, "landing", {"blocks": [{"type": "html", "body": "<script>"}]}
     )
     assert invalid.status_code == 422
+    # Uma a mais que o teto. O número mudou de 12 para 16 quando entraram os blocos novos;
+    # o teste pergunta ao esquema em vez de repetir o número aqui.
     too_many = await put(
-        client, tenant, owner, "landing", {"blocks": [{"type": "text", "body": "x"}] * 13}
+        client,
+        tenant,
+        owner,
+        "landing",
+        {"blocks": [{"type": "text", "body": "x"}] * (MAX_BLOCKS + 1)},
     )
     assert too_many.status_code == 422
+    no_limite = await put(
+        client, tenant, owner, "landing", {"blocks": [{"type": "text", "body": "x"}] * MAX_BLOCKS}
+    )
+    assert no_limite.status_code == 200
 
 
 async def test_large_landing_is_summarised_in_the_audit_log(

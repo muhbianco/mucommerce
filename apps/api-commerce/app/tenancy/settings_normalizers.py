@@ -52,4 +52,45 @@ def normalize_fulfillment(previous: dict[str, Any] | None, value: dict[str, Any]
     return value
 
 
-SETTING_NORMALIZERS: dict[str, Normalizer] = {"fulfillment": normalize_fulfillment}
+def normalize_landing(previous: dict[str, Any] | None, value: dict[str, Any]) -> dict[str, Any]:
+    """Dá id a bloco novo e deixa o id de bloco que já existia como está.
+
+    Sem isso o editor identificaria bloco por posição na lista, e mover o terceiro para cima
+    com outra aba aberta corromperia a página — a segunda aba gravaria "o terceiro" querendo
+    dizer outro bloco. Aqui, subir, duplicar e remover falam de um id.
+
+    Id desconhecido é recusado, e não silenciosamente trocado: um id que a loja nunca teve veio
+    de formulário adulterado ou de página velha, e os dois merecem erro em vez de um bloco
+    fantasma.
+    """
+    value = deepcopy(value)
+    blocks = value.get("blocks")
+    if not isinstance(blocks, list):
+        return value
+    stored = [b for b in ((previous or {}).get("blocks") or []) if isinstance(b, dict)]
+    known = {b["id"] for b in stored if b.get("id")}
+    seen: set[str] = set()
+    result: list[Any] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            result.append(block)  # o esquema recusa com mensagem decente
+            continue
+        block = dict(block)
+        given = block.get("id")
+        if given is not None:
+            if given not in known:
+                raise ValidationError("Bloco desconhecido.", fields=["id"], id=given)
+            # Duplicar manda o mesmo id duas vezes; a cópia ganha o dela.
+            block["id"] = new_id() if given in seen else given
+            seen.add(given)
+        else:
+            block["id"] = new_id()
+        result.append(block)
+    value["blocks"] = result
+    return value
+
+
+SETTING_NORMALIZERS: dict[str, Normalizer] = {
+    "fulfillment": normalize_fulfillment,
+    "landing": normalize_landing,
+}

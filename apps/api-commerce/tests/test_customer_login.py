@@ -482,10 +482,12 @@ async def test_landing_shows_catalog_blocks_only_to_who_may_see_them(
         await session.commit()
     approved = await client.get("/api/v1/storefront/landing", headers=store_headers(store, token))
     assert anonymous.status_code == approved.status_code == 200
-    # The outsider sees the section locked: the store's own title, and not one product.
-    assert anonymous.json() == [
-        {"type": "featured_products", "title": "Destaques", "products": [], "locked": True}
-    ]
+    # Quem não entrou vê a seção e o título que a loja escreveu, sem um produto sequer.
+    [travado] = anonymous.json()
+    assert travado["type"] == "featured_products"
+    assert travado["title"] == "Destaques"
+    assert travado["locked"] is True
+    assert travado["products"] == []
     assert [block["type"] for block in approved.json()] == ["featured_products"]
     assert [p["id"] for p in approved.json()[0]["products"]] == [product["id"]]
     assert "locked" not in approved.json()[0]

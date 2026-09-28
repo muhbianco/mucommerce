@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import ValidationError
+from app.landing.blocks import MAX_BLOCKS, LandingBlock
 
 AccessMode = Literal["public", "login_required", "whitelist"]
 HexColor = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -34,6 +35,9 @@ class StorefrontV1(_Setting):
 
 
 class BrandingV1(_Setting):
+    """A marca da loja. Campos novos entram opcionais e com padrão: o que está salvo continua
+    valendo, e nenhuma loja acorda com a vitrine diferente sem ter pedido."""
+
     primary_color: HexColor = "#111111"
     # Accent for links and highlights; None = the primary colour.
     secondary_color: HexColor | None = None
@@ -42,6 +46,19 @@ class BrandingV1(_Setting):
     logo_url: HttpsUrl | None = None
     # Uploaded logo (media owner `tenant_brand`); wins over `logo_url` once processed.
     logo_media_id: MediaId | None = None
+    #: Quina dos cartões e botões. Enum e não número: raio de 40px num cartão é defeito, e uma
+    #: lista de três não produz um.
+    radius: Literal["square", "soft", "round"] = "soft"
+    #: Quanto ar entre as seções. Loja com muita foto pede folga; catálogo grande pede aperto.
+    density: Literal["cozy", "normal", "airy"] = "normal"
+    #: Papel da vitrine. Três triplas auditadas em vez de um seletor de cor: escuro é o que mais
+    #: se pede e o que mais quebra contraste quando alguém escolhe à mão.
+    surface: Literal["light", "warm", "dark"] = "light"
+    #: Fonte dos títulos. `inherit` usa a do corpo — que é o que quase toda loja quer.
+    heading_font: Literal["inherit", "serif", "rounded"] = "inherit"
+    #: Altura do logotipo no cabeçalho. Marca horizontal precisa de mais que os 40px fixos de
+    #: antes; marca quadrada, de menos.
+    logo_height_px: Annotated[int, Field(ge=24, le=72)] = 40
 
 
 class SeoV1(_Setting):
@@ -54,67 +71,13 @@ class SeoV1(_Setting):
 
 
 # ------------------------------------------------------------------------------ landing
-# Structured blocks, plain text only: the storefront renders them with escaping, so a tenant
-# can never inject markup or scripts. Ids are checked against the tenant's rows on write
-# (app.tenancy.setting_refs); at render time only published products / ready images show.
-PlainText = Annotated[str, Field(max_length=2000)]
-Title = Annotated[str, Field(min_length=1, max_length=80)]
-
-
-class HeroBlock(_Setting):
-    type: Literal["hero"]
-    title: Title
-    subtitle: Annotated[str, Field(max_length=200)] | None = None
-    media_id: MediaId | None = None
-    cta_label: Annotated[str, Field(min_length=1, max_length=30)] | None = None
-    cta_target: Literal["catalog", "chat"] = "catalog"
-
-
-class FeaturedProductsBlock(_Setting):
-    type: Literal["featured_products"]
-    title: Title
-    product_ids: Annotated[list[MediaId], Field(min_length=1, max_length=12)]
-
-
-class CategoriesBlock(_Setting):
-    type: Literal["categories"]
-    title: Title
-    category_ids: Annotated[list[MediaId], Field(min_length=1, max_length=12)]
-
-
-class TextBlock(_Setting):
-    type: Literal["text"]
-    title: Title | None = None
-    body: PlainText
-    media_id: MediaId | None = None
-
-
-class GalleryBlock(_Setting):
-    type: Literal["gallery"]
-    title: Title | None = None
-    media_ids: Annotated[list[MediaId], Field(min_length=1, max_length=12)]
-
-
-class ContactBlock(_Setting):
-    type: Literal["contact"]
-    title: Title = "Contato"
-    whatsapp_e164: Annotated[str, Field(pattern=r"^\+[1-9][0-9]{7,14}$")] | None = None
-    instagram: Annotated[str, Field(pattern=r"^[A-Za-z0-9._]{1,30}$")] | None = None
-    email: Annotated[str, Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")] | None = (
-        None
-    )
-    address: Annotated[str, Field(max_length=300)] | None = None
-    hours: Annotated[str, Field(max_length=300)] | None = None
-
-
-LandingBlock = Annotated[
-    HeroBlock | FeaturedProductsBlock | CategoriesBlock | TextBlock | GalleryBlock | ContactBlock,
-    Field(discriminator="type"),
-]
+# Os blocos moram em `app.landing.blocks`: são doze tipos com arranjo e tom, e o arquivo tem
+# regras próprias sobre alargar sem quebrar dado salvo. Aqui fica só o invólucro que entra em
+# `SETTINGS_SCHEMAS`.
 
 
 class LandingV1(_Setting):
-    blocks: Annotated[list[LandingBlock], Field(max_length=12)] = []
+    blocks: Annotated[list[LandingBlock], Field(max_length=MAX_BLOCKS)] = []
 
 
 Cents = Annotated[int, Field(ge=0, le=100_000_000)]

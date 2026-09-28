@@ -264,12 +264,14 @@ async def test_landing_resolves_blocks_and_hides_catalog_blocks_when_closed(
     # The section stays, locked and empty: the visitor sees there is a catalog behind the login,
     # and no product name or id leaves the store.
     assert [b["type"] for b in closed] == ["hero", "featured_products", "contact"]
-    assert closed[1] == {
-        "type": "featured_products",
-        "title": "Destaques",
-        "products": [],
-        "locked": True,
-    }
+    travado = closed[1]
+    assert travado["type"] == "featured_products"
+    assert travado["title"] == "Destaques"
+    assert travado["products"] == []
+    assert travado["locked"] is True
+    # O bloco leva id e arranjo: o id é a chave estável da lista, e o arranjo diz ao front qual
+    # desenho usar. Nenhum dos dois conta nada sobre o catálogo que ficou escondido.
+    assert set(travado) == {"type", "title", "products", "locked", "id", "variant"}
 
     empty = await catalog_tenant(session_factory, "vazia")
     assert empty

@@ -43,10 +43,9 @@ from app.core.exceptions import (
 )
 from app.core.pagination import Page, decode_cursor, encode_cursor
 from app.customers.access import Viewer
-from app.media.service import ready_media_by_ids
+from app.landing.resolver import resolve_landing
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
-from app.tenancy.settings_schemas import LandingV1
 
 router = APIRouter(prefix="/storefront", tags=["Vitrine (público)"])
 
@@ -494,60 +493,11 @@ async def storefront_landing(
 ) -> list[dict[str, Any]]:
     if not tenant.feature("storefront"):
         raise NotFoundError("Recurso não encontrado.")
-    landing = LandingV1.model_validate(tenant.settings.get("landing") or {})
-    blocks = [block.model_dump() for block in landing.blocks]
-    show_catalog = _catalog_accessible(tenant, viewer)
-    catalog = StorefrontCatalog(session, utcnow())
-
-    media_ids = [
-        media_id
-        for block in blocks
-        for media_id in ([block["media_id"]] if block.get("media_id") else [])
-        + list(block.get("media_ids", []))
-    ]
-    media = await ready_media_by_ids(session, media_ids)
-    product_ids = [pid for b in blocks for pid in b.get("product_ids", [])] if show_catalog else []
-    cards = {
-        c.product.id: c
-        for c in (
-            await catalog.list_cards(limit=len(product_ids), product_ids=product_ids)
-            if product_ids
-            else []
-        )
-    }
-    categories = {c.id: c for c in (await catalog.categories() if show_catalog else [])}
-
-    catalog_on = tenant.feature("storefront") and tenant.feature("catalog")
-    resolved: list[dict[str, Any]] = []
-    for block in blocks:
-        kind = block["type"]
-        catalog_block = kind in {"featured_products", "categories"}
-        if catalog_block and not catalog_on:
-            continue  # the store has no catalog at all: the block exists for nobody
-        out = {k: v for k, v in block.items() if k not in {"media_id", "media_ids"}}
-        if block.get("media_id"):
-            image = media.get(block["media_id"])
-            out["image"] = image_payload(image) if image else None
-        if "media_ids" in block:
-            out["images"] = [image_payload(media[m]) for m in block["media_ids"] if m in media]
-        if kind == "featured_products":
-            out["products"] = [
-                _card(cards[pid], tenant.currency).model_dump(mode="json")
-                for pid in block["product_ids"]
-                if pid in cards
-            ]
-            del out["product_ids"]
-        if kind == "categories":
-            out["categories"] = [
-                _category(categories[cid]).model_dump()
-                for cid in block["category_ids"]
-                if cid in categories
-            ]
-            del out["category_ids"]
-        if catalog_block and not show_catalog:
-            # Login or approval missing: keep the section and the store's own title, marked as
-            # locked, so the visitor sees there is more after signing in. The lists built above
-            # are empty here — no product or category ever leaves the store this way.
-            out["locked"] = True
-        resolved.append(out)
-    return resolved
+    return await resolve_landing(
+        session,
+        tenant,
+        show_catalog=_catalog_accessible(tenant, viewer),
+        card_payload=lambda card, currency: _card(card, currency).model_dump(mode="json"),
+        category_payload=lambda category: _category(category).model_dump(),
+        image_payload=image_payload,
+    )
