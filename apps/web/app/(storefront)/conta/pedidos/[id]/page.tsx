@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
@@ -11,7 +10,9 @@ import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice } from "@/lib/storefront";
 
 import { StoreShell } from "../../../_store/store-shell";
+import { Breadcrumb, Notice, PageHead, Pill, Section, Split } from "../../../_store/ui";
 import styles from "../../../_store/store.module.css";
+import { CUSTOMER_ORDER_STATE, stateOf } from "@/lib/store/states";
 import { cancelOrder } from "../../actions";
 import { PaymentSection } from "./payment-section";
 
@@ -58,67 +59,107 @@ export default async function OrderPage({
   const place = order.fulfillment ? String(order.fulfillment.name ?? "") : "";
   const instructions = order.fulfillment ? String(order.fulfillment.instructions ?? "") : "";
 
+  const cancelavel = ["awaiting_payment", "payment_confirmed", "accepted"].includes(order.status);
+
   return (
     <StoreShell context={context}>
-      <p>
-        <Link href="/conta">← Minha conta</Link>
-      </p>
-      <h1>Pedido #{order.number}</h1>
-      {ok === "pedido" ? <p role="status">Pedido recebido!</p> : null}
-      {ok === "cancelado" ? <p role="status">Pedido cancelado.</p> : null}
-      {ok === "trocar" ? <p role="status">Pagamento cancelado. Escolha outro jeito de pagar.</p> : null}
-      {ok === "retorno" ? <p role="status">Você voltou do pagamento. A confirmação aparece aqui.</p> : null}
+      <Breadcrumb
+        trail={[
+          { name: "Minha conta", href: "/conta" },
+          { name: "Meus pedidos", href: "/conta/pedidos" },
+          { name: `Pedido #${order.number}` },
+        ]}
+      />
+      {ok === "pedido" ? (
+        <Notice kind="ok">
+          <strong>Pedido recebido!</strong> A loja já foi avisada.
+        </Notice>
+      ) : null}
+      {ok === "cancelado" ? <Notice kind="info">Pedido cancelado.</Notice> : null}
+      {ok === "trocar" ? <Notice kind="info">Pagamento cancelado. Escolha outro jeito de pagar.</Notice> : null}
+      {ok === "retorno" ? <Notice kind="info">Você voltou do pagamento. A confirmação aparece aqui.</Notice> : null}
       {erro && isPaymentErrorCode(erro) ? (
-        <p role="alert">{paymentError(erro)}</p>
+        <Notice kind="error">{paymentError(erro)}</Notice>
       ) : erro === "cancel_window_closed" ? (
-        <p role="alert">Este pedido não pode mais ser cancelado por aqui. Fale com a loja.</p>
+        <Notice kind="error">Este pedido não pode mais ser cancelado por aqui. Fale com a loja.</Notice>
       ) : erro ? (
-        <p role="alert">Não foi possível cancelar. Tente de novo.</p>
+        <Notice kind="error">Não foi possível cancelar. Tente de novo.</Notice>
       ) : null}
-      <p>
-        <strong>{orderStatusLabel(order.status)}</strong>
-        {order.status === "awaiting_payment" && order.expires_at ? ` — pague até ${when(order.expires_at)}` : ""}
-      </p>
-      <table className={styles.lots}>
-        <tbody>
-          {order.items.map((item) => (
-            <tr key={item.line_no}>
-              <th scope="row">
-                {item.quantity} × {item.name}
-                {item.modifiers.length ? <div className="muted">{item.modifiers.map((m) => m.name).join(", ")}</div> : null}
-                {item.event?.lot_name ? <div className="muted">Ingresso: {item.event.lot_name}</div> : null}
-              </th>
-              <td>{money(item.total_cents, order.currency)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {order.delivery_fee_cents ? <p>Entrega: {money(order.delivery_fee_cents, order.currency)}</p> : null}
-      {order.discount_cents ? <p>Desconto: −{money(order.discount_cents, order.currency)}</p> : null}
-      <p>
-        <strong>Total: {money(order.total_cents, order.currency)}</strong>
-      </p>
-      {order.fulfillment_type === "pickup" ? <p>Retirada: {place}</p> : null}
-      {instructions ? <p className="muted">{instructions}</p> : null}
-      {order.fulfillment_type === "delivery" ? <p>Entrega: {place}</p> : null}
-      {order.scheduled_start ? <p>Horário: {when(order.scheduled_start)}</p> : null}
-      {payment ? <PaymentSection state={payment} when={when} /> : null}
-      {["awaiting_payment", "payment_confirmed", "accepted"].includes(order.status) ? (
-        <form action={cancelOrder}>
-          <input type="hidden" name="order_id" value={order.id} />
-          <button type="submit" className="muted">
-            Cancelar pedido
-          </button>
-        </form>
-      ) : null}
-      <h2>Andamento</h2>
-      <ul>
-        {order.timeline.map((event, i) => (
-          <li key={i}>
-            {when(event.at)} — {orderStatusLabel(event.status)}
-          </li>
-        ))}
-      </ul>
+
+      <PageHead
+        title={`Pedido #${order.number}`}
+        actions={<Pill state={stateOf(CUSTOMER_ORDER_STATE, order.status)}>{orderStatusLabel(order.status)}</Pill>}
+        lead={
+          order.status === "awaiting_payment" && order.expires_at
+            ? `Pague até ${when(order.expires_at)} para a loja separar o seu pedido.`
+            : undefined
+        }
+      />
+
+      <Split
+        aside={
+          <div className={styles.summary} aria-label="Resumo do pedido">
+            <h2>Resumo</h2>
+            <ul className={styles.reviewItems}>
+              {order.items.map((item) => (
+                <li key={item.line_no}>
+                  <span>
+                    {item.quantity} × {item.name}
+                    {item.modifiers.length ? (
+                      <span className="muted"> ({item.modifiers.map((m) => m.name).join(", ")})</span>
+                    ) : null}
+                    {item.event?.lot_name ? <span className="muted"> (ingresso: {item.event.lot_name})</span> : null}
+                  </span>
+                  <span className={styles.cartSubtotal}>{money(item.total_cents, order.currency)}</span>
+                </li>
+              ))}
+            </ul>
+            <dl className={styles.totals}>
+              {order.delivery_fee_cents ? (
+                <div>
+                  <dt>Entrega</dt>
+                  <dd>{money(order.delivery_fee_cents, order.currency)}</dd>
+                </div>
+              ) : null}
+              {order.discount_cents ? (
+                <div>
+                  <dt>Desconto</dt>
+                  <dd className={styles.discount}>−{money(order.discount_cents, order.currency)}</dd>
+                </div>
+              ) : null}
+              <div className={styles.totalRow}>
+                <dt>Total</dt>
+                <dd>{money(order.total_cents, order.currency)}</dd>
+              </div>
+            </dl>
+            {order.fulfillment_type === "pickup" ? <p className={styles.where}>Retirada: {place}</p> : null}
+            {order.fulfillment_type === "delivery" ? <p className={styles.where}>Entrega: {place}</p> : null}
+            {order.scheduled_start ? <p className={styles.where}>Horário: {when(order.scheduled_start)}</p> : null}
+            {instructions ? <p className="muted">{instructions}</p> : null}
+          </div>
+        }
+      >
+        {payment ? <PaymentSection state={payment} when={when} /> : null}
+
+        <Section title="Andamento" variant="card">
+          <ol className={styles.timeline}>
+            {order.timeline.map((event, i) => (
+              <li key={i} data-current={i === order.timeline.length - 1 ? "true" : undefined}>
+                <strong>{orderStatusLabel(event.status)}</strong>
+                <span className="muted">{when(event.at)}</span>
+              </li>
+            ))}
+          </ol>
+          {cancelavel ? (
+            <form action={cancelOrder} className={styles.cancelRow}>
+              <input type="hidden" name="order_id" value={order.id} />
+              <button type="submit" className={styles.linkButton}>
+                Cancelar pedido
+              </button>
+            </form>
+          ) : null}
+        </Section>
+      </Split>
     </StoreShell>
   );
 }

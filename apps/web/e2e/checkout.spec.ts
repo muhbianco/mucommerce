@@ -59,7 +59,7 @@ test("checkout: revisa, aceita os termos quando houver e faz o pedido", async ({
   await page.getByRole("link", { name: "Finalizar compra" }).click();
   await expect(page).toHaveURL(`${STORE}/checkout`);
   await expect(page.getByText(/Retirada em Loja MuhBianco/)).toBeVisible();
-  await expect(page.getByText(/Total: R\$\s*79,00/)).toBeVisible();
+  await expect(page.getByRole("complementary")).toContainText(/Total\s*R\$\s*79,00/);
   const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
   if (await accept.count()) await accept.check();
   await page.getByRole("button", { name: "Fazer pedido" }).click();
@@ -67,8 +67,8 @@ test("checkout: revisa, aceita os termos quando houver e faz o pedido", async ({
   await expect(page).toHaveURL(/\/conta\/pedidos\/[0-9a-f-]{36}\?ok=pedido$/);
   await expect(page.getByRole("heading", { name: /Pedido #\d+/ })).toBeVisible();
   await expect(page.getByText("Pedido recebido!")).toBeVisible();
-  await expect(page.getByText(/Aguardando pagamento — pague até/)).toBeVisible();
-  await expect(page.getByText(/Total: R\$\s*79,00/)).toBeVisible();
+  await expect(page.getByText(/Pague até/)).toBeVisible();
+  await expect(page.getByRole("complementary")).toContainText(/Total\s*R\$\s*79,00/);
 
   // The cart became the order: a new, empty cart.
   await page.goto(`${STORE}/carrinho`);
