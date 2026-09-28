@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     admin_domains,
     admin_events,
     admin_inventory,
+    admin_landing,
     admin_media,
     admin_modules,
     admin_orders,
@@ -43,6 +44,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     },
     {"name": "Ops — Outbox / DLQ", "description": "Eventos de domínio e reprocessamento."},
     {"name": "Painel do tenant", "description": "Tenant vem do path e é validado por membership."},
+    {
+        "name": "Painel — Vitrine",
+        "description": "Página inicial da loja: a prévia usa o mesmo resolver da vitrine.",
+    },
     {
         "name": "Painel — Catálogo",
         "description": "Produtos, variantes e categorias do tenant (flag `catalog`).",
@@ -128,6 +133,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     ops_outbox.router,
     ops_outbox.payments_router,
     admin_tenants.router,
+    admin_landing.router,
     admin_catalog.router,
     admin_coupons.router,
     admin_events.router,

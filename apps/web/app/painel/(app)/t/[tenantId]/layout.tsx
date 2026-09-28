@@ -61,6 +61,7 @@ export default async function TenantLayout({
     scopes.can("shipping:config") && f.checkout && { href: `${base}/envio`, label: "Envio" },
     scopes.can("domains:write") && { href: `${base}/dominios`, label: "Endereços" },
     scopes.can("settings:write") && { href: `${base}/modulos`, label: "Módulos" },
+    scopes.can("settings:write") && { href: `${base}/vitrine`, label: "Página inicial" },
     scopes.can("settings:write") && { href: `${base}/configuracoes`, label: "Configurações" },
   ];
   const items = entries.filter((item): item is NavItem => Boolean(item));

@@ -4,33 +4,16 @@ import { notFound } from "next/navigation";
 import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
-import type { Media, Page, ProductSummary } from "@/lib/panel/types";
+import type { Media } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
-import { deleteMedia, publishLegalDocument, saveBranding, saveLanding, saveSeo } from "../actions";
+import { deleteMedia, publishLegalDocument, saveBranding, saveSeo } from "../actions";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
 import { PageHeader, Pill, Section } from "../ui";
 import local from "./configuracoes.module.css";
 
 export const metadata: Metadata = { title: "Configurações" };
-
-type Block = Record<string, unknown> & { type: string };
-
-const ACCESS_LABEL: Record<string, string> = {
-  public: "aberta a qualquer pessoa",
-  login_required: "só com login",
-  whitelist: "só para clientes aprovados",
-};
-
-const BLOCK_LABEL: Record<string, string> = {
-  hero: "Destaque principal",
-  featured_products: "Produtos em destaque",
-  text: "Texto",
-  contact: "Contato",
-  categories: "Categorias",
-  gallery: "Galeria",
-};
 
 /** Imagem ainda sem miniatura: a situação em palavras de lojista. */
 const MEDIA_STATUS: Record<Media["status"], string> = {
@@ -67,24 +50,16 @@ export default async function Settings({
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   if (!tenantScopes(me, context.tenant_id).can("settings:write")) notFound();
   const path = `/admin/tenants/${context.tenant_id}`;
-  const [brandMedia, landingMedia, products, legal] = await Promise.all([
+  // As imagens da página inicial e os produtos saíram daqui: quem cuida deles é a tela da
+  // página inicial, que tem prévia.
+  const [brandMedia, legal] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
-    api<Media[]>(`${path}/media?owner_type=landing`),
-    context.features.catalog
-      ? api<Page<ProductSummary>>(`${path}/products?status=active&limit=100`)
-      : Promise.resolve({ items: [], next_cursor: null }),
     api<LegalOverview>(`${path}/legal-documents`),
   ]);
   const branding = context.settings.branding ?? {};
   // Mesmo padrão da API (storefront_context): sem configuração, só clientes aprovados.
-  const accessMode = String(context.settings.storefront?.access_mode ?? "whitelist");
   const seo = context.settings.seo ?? {};
-  const blocks = ((context.settings.landing?.blocks as Block[] | undefined) ?? []).filter(
-    // The editor handles these types; others (made elsewhere) are kept out of the form.
-    (block) => ["hero", "featured_products", "text", "contact"].includes(block.type),
-  );
   const readyBrand = brandMedia.filter((m) => m.status === "ready");
-  const readyLanding = landingMedia.filter((m) => m.status === "ready");
   const tenantField = <input type="hidden" name="tenant_id" value={context.tenant_id} />;
   const published = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone: context.timezone }).format(new Date(iso));
@@ -195,177 +170,11 @@ export default async function Settings({
         </form>
       </Section>
 
-      <Section id="pagina-inicial" title="Página inicial" description="O que o cliente vê ao abrir a loja, bloco por bloco">
-        {accessMode !== "public" &&
-        blocks.some((block) => block.type === "featured_products" || block.type === "categories") ? (
-          <p className={styles.note}>
-            A vitrine está {ACCESS_LABEL[accessMode] ?? accessMode}: quem ainda não tem acesso vê os blocos de
-            produtos como “entre para ver”, sem os produtos. Para abrir a loja, fale com o suporte.
-          </p>
-        ) : null}
-
-        <p className={local.subhead}>Imagens da página inicial</p>
-        {landingMedia.length ? (
-          <div className={local.gallery}>
-            {landingMedia.map((media, index) => (
-              <div key={media.id} className={local.tile}>
-                <Thumb media={media} />
-                <span>Imagem {index + 1}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        <div className={local.uploader}>
-          <ImageUploader tenantId={context.tenant_id} ownerType="landing" label="Enviar imagens para a página inicial" />
-        </div>
-
-        <form action={saveLanding} className={local.part}>
-          {tenantField}
-          <input type="hidden" name="block_count" value={blocks.length} />
-          <p className={local.subhead}>Blocos, na ordem em que aparecem</p>
-          {blocks.length === 0 ? (
-            <p className={styles.hint}>A página inicial ainda não tem blocos. Adicione o primeiro abaixo.</p>
-          ) : null}
-          {blocks.map((block, i) => (
-            <fieldset key={i} className={local.block}>
-              <legend>
-                {i + 1}. {BLOCK_LABEL[block.type] ?? block.type}
-              </legend>
-              <input type="hidden" name={`b${i}.type`} value={block.type} />
-              <div className={styles.fields}>
-                {block.type !== "contact" ? (
-                  <label className={styles.field}>
-                    Título
-                    <input name={`b${i}.title`} maxLength={80} defaultValue={String(block.title ?? "")} />
-                  </label>
-                ) : null}
-                {block.type === "hero" ? (
-                  <>
-                    <label className={styles.field}>
-                      Subtítulo
-                      <input name={`b${i}.subtitle`} maxLength={200} defaultValue={String(block.subtitle ?? "")} />
-                    </label>
-                    <label className={styles.field}>
-                      Botão
-                      <input name={`b${i}.cta_label`} maxLength={30} defaultValue={String(block.cta_label ?? "")} />
-                      <span className={styles.fieldHint}>O texto do botão, como “Ver produtos”.</span>
-                    </label>
-                    <label className={styles.field}>
-                      Botão leva para
-                      <select name={`b${i}.cta_target`} defaultValue={String(block.cta_target ?? "catalog")}>
-                        <option value="catalog">catálogo</option>
-                        <option value="chat">atendimento</option>
-                      </select>
-                    </label>
-                  </>
-                ) : null}
-                {block.type === "hero" || block.type === "text" ? (
-                  <label className={styles.field}>
-                    Imagem
-                    {mediaSelect(`b${i}.media_id`, readyLanding, block.media_id)}
-                  </label>
-                ) : null}
-                {block.type === "text" ? (
-                  <label className={`${styles.field} ${styles.fieldWide}`}>
-                    Texto
-                    <textarea name={`b${i}.body`} rows={4} maxLength={2000} defaultValue={String(block.body ?? "")} />
-                  </label>
-                ) : null}
-                {block.type === "featured_products" ? (
-                  <fieldset className={`${styles.fieldWide} ${local.group}`}>
-                    <legend>Produtos</legend>
-                    <div className={styles.flags}>
-                      {products.items.map((product) => (
-                        <label key={product.id} className={styles.check}>
-                          <input
-                            type="checkbox"
-                            name={`b${i}.product_ids`}
-                            value={product.id}
-                            defaultChecked={((block.product_ids as string[] | undefined) ?? []).includes(product.id)}
-                          />
-                          {product.name}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : null}
-                {block.type === "contact" ? (
-                  <>
-                    <label className={styles.field}>
-                      WhatsApp
-                      <input
-                        name={`b${i}.whatsapp_e164`}
-                        inputMode="tel"
-                        defaultValue={String(block.whatsapp_e164 ?? "")}
-                        placeholder="11 99999-9999"
-                      />
-                      <span className={styles.fieldHint}>DDD + número.</span>
-                    </label>
-                    <label className={styles.field}>
-                      Instagram
-                      <input name={`b${i}.instagram`} defaultValue={String(block.instagram ?? "")} placeholder="nomedaloja" />
-                      <span className={styles.fieldHint}>Só o nome do perfil.</span>
-                    </label>
-                    <label className={styles.field}>
-                      E-mail
-                      <input
-                        name={`b${i}.email`}
-                        inputMode="email"
-                        defaultValue={String(block.email ?? "")}
-                        placeholder="contato@sualoja.com.br"
-                      />
-                    </label>
-                    <label className={`${styles.field} ${styles.fieldWide}`}>
-                      Endereço
-                      <input name={`b${i}.address`} maxLength={300} defaultValue={String(block.address ?? "")} />
-                    </label>
-                    <label className={`${styles.field} ${styles.fieldWide}`}>
-                      Horário
-                      <input name={`b${i}.hours`} maxLength={300} defaultValue={String(block.hours ?? "")} />
-                    </label>
-                  </>
-                ) : null}
-              </div>
-              <div className={local.blockFoot}>
-                <label className={styles.check}>
-                  <input type="checkbox" name={`b${i}.remove`} /> Remover este bloco ao salvar
-                </label>
-              </div>
-            </fieldset>
-          ))}
-
-          <div className={styles.fields}>
-            <label className={styles.field}>
-              Adicionar bloco
-              <select name="add_block" defaultValue="">
-                <option value="">(nenhum)</option>
-                <option value="hero">{BLOCK_LABEL.hero}</option>
-                <option value="text">{BLOCK_LABEL.text}</option>
-                <option value="contact">{BLOCK_LABEL.contact}</option>
-                {products.items.length ? <option value="featured_products">{BLOCK_LABEL.featured_products}</option> : null}
-              </select>
-              <span className={styles.fieldHint}>O bloco novo entra no fim da página quando você salvar.</span>
-            </label>
-          </div>
-          {products.items.length ? (
-            <details className={local.part}>
-              <summary>Produtos para um novo bloco de destaques</summary>
-              <div className={`${styles.flags} ${local.detailsBody}`}>
-                {products.items.map((product) => (
-                  <label key={product.id} className={styles.check}>
-                    <input type="checkbox" name="add_product_ids" value={product.id} />
-                    {product.name}
-                  </label>
-                ))}
-              </div>
-            </details>
-          ) : null}
-          <div className={styles.formActions}>
-            <button type="submit" className={styles.button}>
-              Salvar página inicial
-            </button>
-          </div>
-        </form>
+      <Section id="pagina-inicial" title="Página inicial" description="Os blocos que o cliente vê ao abrir a loja">
+        <p className={styles.hint}>
+          A página inicial agora tem tela própria, com prévia:{" "}
+          <a href={`/t/${context.tenant_id}/vitrine`}>abrir a página inicial</a>.
+        </p>
       </Section>
 
       <Section id="google" title="Google e compartilhamento" description="Como a loja aparece nas buscas e nos links enviados">

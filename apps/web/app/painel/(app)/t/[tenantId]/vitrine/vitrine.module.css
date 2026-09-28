@@ -1,0 +1,184 @@
+/* Editor da página inicial. Usa as variáveis de `.shell`; nada de cor literal aqui. */
+
+/* ------------------------------------------------------------------ prévia */
+
+.canvas {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+  /* Alta o bastante para caber um destaque inteiro, sem tomar a tela do editor. */
+  max-height: 32rem;
+  overflow-y: auto;
+}
+
+/* A largura de um celular, para o lojista conferir onde a maioria vai olhar. */
+.canvasPhone {
+  max-width: 24rem;
+  margin: 0 auto;
+}
+
+/*
+ * O painel define os próprios tamanhos de h1/h2/h3 em `.shell`, e eles venceriam aqui dentro:
+ * a prévia sairia com títulos menores que os da loja de verdade. Estas regras devolvem a escala
+ * da vitrine — é o único lugar do painel que precisa desfazer o painel.
+ */
+.canvasInner {
+  min-height: 0;
+  padding: 1.25rem;
+}
+
+.canvasInner :where(h1) {
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  margin: 0 0 0.75rem;
+}
+
+.canvasInner :where(h2) {
+  font-size: clamp(1.2rem, 3.5vw, 1.45rem);
+  margin: 0 0 0.6rem;
+}
+
+.canvasInner :where(h3) {
+  font-size: 1.05rem;
+}
+
+/* ------------------------------------------------------------------ lista de blocos */
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.block > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  background: var(--paper);
+}
+
+.blockName {
+  font-weight: 700;
+}
+
+.blockActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--mist);
+}
+
+.blockActions form {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.blockForm {
+  padding: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.group {
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  padding: 0.85rem;
+  margin: 0;
+}
+
+.group > legend {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 0.4rem;
+}
+
+/* Linha de três campos (ícone + título + detalhe; dia + abre + fecha). */
+.row3 {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(0, 1.4fr) minmax(0, 1.4fr);
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.row3 input,
+.row3 select {
+  width: 100%;
+}
+
+.dayName {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .row3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------ acrescentar bloco */
+
+.addForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.addLabel {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ imagens */
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.tile {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--mist);
+}
+
+.tile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.tilePending {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.tile figcaption {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: #fff;
+}
