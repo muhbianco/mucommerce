@@ -137,6 +137,31 @@ class CredentialVaultUnavailableError(IntegrationUnavailableError):
     )
 
 
+class ShippingUnavailableError(IntegrationUnavailableError):
+    """A transportadora não respondeu. Nada foi comprado."""
+
+    error_code = "shipping_unavailable"
+    message = "A transportadora não respondeu agora. Nada foi comprado; tente de novo."
+
+
+class ShippingBalanceError(DomainError):
+    """Carteira do frete sem saldo: operação da loja, não defeito do pedido."""
+
+    status_code = 422
+    error_code = "shipping_insufficient_balance"
+    message = (
+        "Saldo insuficiente na carteira do frete. Recarregue e despache de novo — "
+        "o pedido continua como estava."
+    )
+
+
+class ShipmentInProgressError(ConflictError):
+    """Já existe um despacho em curso para este pedido (clique duplo, duas abas)."""
+
+    error_code = "shipment_in_progress"
+    message = "O despacho deste pedido já está em andamento."
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"

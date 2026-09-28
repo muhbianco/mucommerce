@@ -39,6 +39,7 @@ from app.payments.models import (
     Refund,
     TenantPaymentConfig,
 )
+from app.shipping.models import OrderShipment, ShipmentEvent
 from app.tenancy.models import (
     Tenant,
     TenantDomain,
@@ -75,6 +76,7 @@ __all__ = [
     "NotificationDelivery",
     "Order",
     "OrderItem",
+    "OrderShipment",
     "OrderStatusHistory",
     "OutboxDelivery",
     "OutboxEvent",
@@ -86,6 +88,7 @@ __all__ = [
     "ProductCategory",
     "ProductVariant",
     "Refund",
+    "ShipmentEvent",
     "StockAdjustment",
     "Tenant",
     "TenantDomain",

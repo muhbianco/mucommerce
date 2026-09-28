@@ -147,45 +147,7 @@ class ShippingQuoteService:
     async def _parcels(
         self, lines: Sequence[QuoteLine], cfg: ShippingSettings
     ) -> tuple[Parcel, ...]:
-        if not lines:
-            return ()
-        variantes = await self._variants([line.variant_id for line in lines])
-        itens: list[PackItem] = []
-        faltando: list[str] = []
-        for line in lines:
-            par = variantes.get(line.variant_id)
-            if par is None:
-                continue
-            variante, produto = par
-            unidades = max(1, round(line.quantity_milli / 1000))
-            try:
-                itens.extend(
-                    item_from_variant(
-                        # Peso e medidas são do produto: hoje o catálogo não guarda medida por
-                        # variante, então P e GG pesam igual para a transportadora.
-                        weight_grams=produto.weight_grams,
-                        width_mm=produto.width_mm,
-                        height_mm=produto.height_mm,
-                        depth_mm=produto.depth_mm,
-                        value_cents=_unit_price(variante, produto) * unidades,
-                        quantity=unidades,
-                    )
-                )
-            except MissingDimensions:
-                faltando.append(variante.id)
-        if faltando:
-            raise MissingDimensions("variantes sem medida", tuple(faltando))
-        return pack(itens, _box(cfg))
-
-    async def _variants(self, ids: Sequence[str]) -> dict[str, tuple[ProductVariant, Product]]:
-        if not ids:
-            return {}
-        stmt = (
-            select(ProductVariant, Product)
-            .join(Product, Product.id == ProductVariant.product_id)
-            .where(ProductVariant.id.in_(list(dict.fromkeys(ids))))
-        )
-        return {v.id: (v, p) for v, p in (await self.session.execute(stmt)).tuples()}
+        return await parcels_for(self.session, lines, cfg)
 
     async def _ask(
         self,
@@ -247,6 +209,57 @@ class ShippingQuoteService:
                 quoted_at=quoted_at,
             ),
         )
+
+
+async def parcels_for(
+    session: AsyncSession, lines: Sequence[QuoteLine], cfg: ShippingSettings
+) -> tuple[Parcel, ...]:
+    """Volumes de um conjunto de linhas (carrinho ou pedido).
+
+    Mesma conta na cotação e no despacho: se divergir, a loja cobra um frete e paga outro.
+    """
+    if not lines:
+        return ()
+    variantes = await variants_for(session, [line.variant_id for line in lines])
+    itens: list[PackItem] = []
+    faltando: list[str] = []
+    for line in lines:
+        par = variantes.get(line.variant_id)
+        if par is None:
+            continue
+        variante, produto = par
+        unidades = max(1, round(line.quantity_milli / 1000))
+        try:
+            itens.extend(
+                item_from_variant(
+                    # Peso e medidas são do produto: hoje o catálogo não guarda medida por
+                    # variante, então P e GG pesam igual para a transportadora.
+                    weight_grams=produto.weight_grams,
+                    width_mm=produto.width_mm,
+                    height_mm=produto.height_mm,
+                    depth_mm=produto.depth_mm,
+                    value_cents=_unit_price(variante, produto) * unidades,
+                    quantity=unidades,
+                )
+            )
+        except MissingDimensions:
+            faltando.append(variante.id)
+    if faltando:
+        raise MissingDimensions("variantes sem medida", tuple(faltando))
+    return pack(itens, _box(cfg))
+
+
+async def variants_for(
+    session: AsyncSession, ids: Sequence[str]
+) -> dict[str, tuple[ProductVariant, Product]]:
+    if not ids:
+        return {}
+    stmt = (
+        select(ProductVariant, Product)
+        .join(Product, Product.id == ProductVariant.product_id)
+        .where(ProductVariant.id.in_(list(dict.fromkeys(ids))))
+    )
+    return {v.id: (v, p) for v, p in (await session.execute(stmt)).tuples()}
 
 
 def _unit_price(variant: ProductVariant, product: Product) -> int:
