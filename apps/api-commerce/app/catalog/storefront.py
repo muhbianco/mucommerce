@@ -32,6 +32,9 @@ from app.media.repository import MediaRepository
 from app.media.service import rendition_urls
 
 Availability = Literal["available", "sold_out", "made_to_order", "unavailable"]
+#: "Últimas unidades" a partir daqui. Escassez que existe de verdade, e que só aparece para
+#: quem controla estoque — quem não controla nunca está acabando.
+LOW_STOCK_AT = 5
 STOREFRONT_PAGE_MAX = 48
 SITEMAP_MAX = 5000
 
@@ -49,6 +52,22 @@ def variant_availability(
     if balance is not None and balance.on_hand_milli - balance.reserved_milli > 0:
         return "available"
     return "sold_out"
+
+
+def variant_low_stock(
+    variant: ProductVariant, product: Product, balance: InventoryBalance | None
+) -> bool:
+    """Resta pouco desta variante.
+
+    Só para estoque controlado: produto sob encomenda ou sem controle nunca está acabando.
+    A vitrine mostra "últimas unidades", nunca o número — o cliente decide igual, e o
+    concorrente não raspa o estoque da loja de graça.
+    """
+    policy = variant.stock_policy or product.stock_policy
+    if policy != StockPolicy.TRACKED or balance is None:
+        return False
+    livre = balance.on_hand_milli - balance.reserved_milli
+    return 0 < livre <= LOW_STOCK_AT * 1000
 
 
 def product_availability(labels: Sequence[Availability], *, paused: bool = False) -> Availability:
@@ -69,6 +88,7 @@ class CardData:
     price: EffectivePrice
     availability: Availability
     image: MediaAsset | None
+    low_stock: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +96,7 @@ class VariantData:
     variant: ProductVariant
     price: EffectivePrice
     availability: Availability
+    low_stock: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +215,7 @@ class StorefrontCatalog:
                     now=self.now,
                 ),
                 variant_availability(v, product, balances.get(v.id)),
+                variant_low_stock(v, product, balances.get(v.id)),
             )
             for v in variants.get(product.id, [])
         ]
@@ -223,6 +245,8 @@ class StorefrontCatalog:
                 paused=product.status == ProductStatus.PAUSED,
             ),
             images[0] if images else None,
+            # O produto está acabando quando o que ainda dá para comprar está acabando.
+            any(v.low_stock for v in variant_data if v.availability == "available"),
         )
         return ProductData(card, variant_data, images, categories, tags)
 
@@ -285,10 +309,11 @@ class StorefrontCatalog:
         images = await MediaRepository(self.session).ready_for_owners(MediaOwner.PRODUCT, ids)
         cards: list[CardData] = []
         for product in products:
-            labels = [
-                variant_availability(v, product, balances.get(v.id))
+            rotulos = [
+                (v, variant_availability(v, product, balances.get(v.id)))
                 for v in variants.get(product.id, [])
             ]
+            labels = [rotulo for _, rotulo in rotulos]
             first_images = images.get(product.id, [])
             cards.append(
                 CardData(
@@ -296,6 +321,11 @@ class StorefrontCatalog:
                     self._price(product),
                     product_availability(labels, paused=product.status == ProductStatus.PAUSED),
                     first_images[0] if first_images else None,
+                    any(
+                        variant_low_stock(v, product, balances.get(v.id))
+                        for v, rotulo in rotulos
+                        if rotulo == "available"
+                    ),
                 )
             )
         return cards

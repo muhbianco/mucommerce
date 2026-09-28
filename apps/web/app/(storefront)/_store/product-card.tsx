@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AVAILABILITY_LABEL, formatPrice, offSale, type ProductCard as Card } from "@/lib/storefront";
 
 import { StoreImage } from "./store-image";
+import { DiscountBadge, LowStockPill } from "./ui";
 import styles from "./store.module.css";
 
 export function ProductCard({ product }: { product: Card }) {
@@ -19,6 +20,7 @@ export function ProductCard({ product }: { product: Card }) {
       )}
       <strong className={styles.cardName}>{product.name}</strong>
       <span className={styles.price}>
+        <DiscountBadge price={product.price} />
         {formatPrice(product.price)}
         {product.price.compare_at_cents ? (
           <span className={styles.compare}>
@@ -30,7 +32,9 @@ export function ProductCard({ product }: { product: Card }) {
         <span className={offSale(product.availability) ? styles.soldOut : styles.tag}>
           {AVAILABILITY_LABEL[product.availability]}
         </span>
-      ) : null}
+      ) : (
+        <LowStockPill low={product.low_stock} />
+      )}
     </Link>
   );
 }

@@ -1560,3 +1560,16 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* Parcelamento: informação de apoio, logo abaixo do preço. Nunca compete com ele. */
+.installments {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--store-ink-soft);
+}
+
+.buyboxPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}

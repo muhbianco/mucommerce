@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.fulfillment.service import public_fulfillment
 from app.media.service import pick_rendition, ready_media_by_ids
+from app.payments.public_view import load_public_payments
 from app.schemas.internal import StorefrontContext, StorefrontTenant
 from app.tenancy.context import TenantContext
 from app.tenancy.models import DomainPurpose
@@ -64,6 +65,7 @@ async def build_storefront_context(
         branding=branding,
         seo=seo,
         fulfillment=public_fulfillment(tenant),
+        payments=await load_public_payments(session, tenant),
         chatwoot_url=(
             settings.chatwoot_public_url if internal and tenant.feature("chatwoot") else None
         ),

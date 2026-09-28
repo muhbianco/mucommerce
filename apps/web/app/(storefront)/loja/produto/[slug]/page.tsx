@@ -22,7 +22,17 @@ import { AddToCart, CART_ERRORS } from "../../../_store/add-to-cart";
 import { StoreImage } from "../../../_store/store-image";
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
-import { AvailabilityPill, Breadcrumb, DiscountBadge, Notice, Price, Section, Split } from "../../../_store/ui";
+import {
+  AvailabilityPill,
+  Breadcrumb,
+  DiscountBadge,
+  Installments,
+  LowStockPill,
+  Notice,
+  Price,
+  Section,
+  Split,
+} from "../../../_store/ui";
 import { VariantPicker } from "../../../_store/variant-picker";
 
 // Metadata and page share one API call per request. `cache` compares arguments by identity,
@@ -129,7 +139,15 @@ export default async function ProductPage({
               <Price price={product.price} size="lg" unitLabel={product.sold_by === "weight" ? product.unit_label : null} />
               <DiscountBadge price={product.price} />
             </div>
-            <AvailabilityPill availability={product.availability} />
+            <Installments
+              payments={context.payments}
+              amountCents={product.price.amount_cents}
+              currency={product.price.currency}
+            />
+            <div className={styles.buyboxPills}>
+              <AvailabilityPill availability={product.availability} />
+              {product.availability === "available" ? <LowStockPill low={product.low_stock} /> : null}
+            </div>
             {product.price_tiers?.length ? (
               <ul className={styles.tiers} aria-label="Desconto por quantidade">
                 {product.price_tiers.map((tier) => (

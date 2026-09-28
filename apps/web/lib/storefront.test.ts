@@ -85,7 +85,7 @@ describe("availability", () => {
 
 function variant(values: Record<string, string>, cents: number, availability: StoreVariant["availability"] = "available"): StoreVariant {
   const price = { amount_cents: cents, compare_at_cents: null, promo_active: false, promo_ends_at: null, currency: "BRL" };
-  return { id: Object.values(values).join("-"), sku: "S", name: "n", option_values: values, price, availability };
+  return { id: Object.values(values).join("-"), sku: "S", name: "n", option_values: values, price, availability, low_stock: false };
 }
 
 describe("variants", () => {

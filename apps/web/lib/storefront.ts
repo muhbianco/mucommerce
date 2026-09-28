@@ -38,6 +38,8 @@ export interface ProductCard {
   price: StorePrice;
   availability: Availability;
   image: StoreImage | null;
+  /** Resta pouco. Nunca vem o número: o cliente decide igual e ninguém raspa o estoque. */
+  low_stock: boolean;
 }
 
 export interface CategoryRef {
@@ -73,6 +75,7 @@ export interface StoreVariant {
   option_values: Record<string, string> | null;
   price: StorePrice;
   availability: Availability;
+  low_stock: boolean;
 }
 
 export interface ProductDetail extends ProductCard {

@@ -14,6 +14,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { type StorePillState } from "@/lib/store/states";
+import { bestPlan, type PublicPayments } from "@/lib/store/installments";
 import { discountPercent, freeShippingGap, money } from "@/lib/store/pricing";
 import { AVAILABILITY_LABEL, type Availability, formatPrice, type StorePrice } from "@/lib/storefront";
 import { AVAILABILITY_STATE, stateOf } from "@/lib/store/states";
@@ -135,6 +136,38 @@ export function DiscountBadge({ price }: { price: StorePrice }) {
       {percent}% OFF
     </span>
   );
+}
+
+/**
+ * "em até 12x de R$ 24,90 sem juros".
+ *
+ * Não escreve nada quando não há o que dizer — loja sem cartão, sem parcelamento, preço baixo
+ * demais, ou o bloco de pagamento faltando (API mais velha, meio de um deploy). Silêncio aqui
+ * é melhor do que uma parcela que o checkout não vai oferecer.
+ */
+export function Installments({
+  payments,
+  amountCents,
+  currency,
+}: {
+  payments: PublicPayments | null | undefined;
+  amountCents: number;
+  currency: string;
+}) {
+  const plan = bestPlan(payments, amountCents);
+  if (!plan) return null;
+  return (
+    <p className={styles.installments}>
+      em até <strong>{plan.count}x</strong> de <strong>{money(plan.perInstallmentCents, currency)}</strong>{" "}
+      {plan.interestFree ? "sem juros" : `com juros (${money(plan.totalCents, currency)} no total)`}
+    </p>
+  );
+}
+
+/** "Últimas unidades": escassez só quando é verdade, e sem entregar o número do estoque. */
+export function LowStockPill({ low }: { low: boolean }) {
+  if (!low) return null;
+  return <Pill state="warn">Últimas unidades</Pill>;
 }
 
 /** Selo de situação. A cor ajuda; quem informa é o texto. */

@@ -1,3 +1,5 @@
+import type { PublicPayments } from "./store/installments";
+
 /**
  * Host classification shared by the middleware and tests. Pure functions only.
  *
@@ -38,6 +40,8 @@ export interface StorefrontContext {
     min_order_cents?: number;
     shipping?: { free_above_cents?: number | null };
   } & Record<string, unknown>;
+  /** Meios aceitos e teto de parcelamento, para a vitrine anunciar antes do carrinho. */
+  payments?: PublicPayments;
   chatwoot_url?: string | null;
 }
 

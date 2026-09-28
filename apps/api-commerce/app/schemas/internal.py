@@ -35,4 +35,6 @@ class StorefrontContext(BaseModel):
     branding: dict[str, Any]
     seo: dict[str, Any]
     fulfillment: dict[str, Any]
+    #: Meios aceitos e teto de parcelamento — a vitrine anuncia "em até 12x" antes do carrinho.
+    payments: dict[str, Any] = {}
     chatwoot_url: str | None = None

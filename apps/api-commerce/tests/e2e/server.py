@@ -276,8 +276,13 @@ async def seed() -> None:
         await _variant_product(session, store.id)
         await _event_product(session, store.id)
         context = await TenantResolver(session).resolve_by_id(store.id)
+        # Pix e cartão em 12x: é o arranjo comum de loja pequena, e é o que faz a vitrine
+        # anunciar "em até 12x" — o parcelamento na página do produto sai daqui.
         await PaymentConfigService(session, context, ACTOR).save(
-            "fake", PaymentConfigIn(enabled=True, is_default=True, methods=["pix"])
+            "fake",
+            PaymentConfigIn(
+                enabled=True, is_default=True, methods=["pix", "card"], installments_max=12
+            ),
         )
         await CouponService(session, context, ACTOR).create(
             "E2E10", {"kind": "percent", "percent_bps": 1000, "status": "active"}

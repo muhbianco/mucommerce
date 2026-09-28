@@ -82,6 +82,9 @@ class ProductCard(BaseModel):
     price: Price
     availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
     image: Image | None
+    #: Resta pouco. Nunca o número: o cliente decide igual, e o concorrente não raspa o
+    #: estoque da loja de graça.
+    low_stock: bool = False
 
 
 class CategoryRef(BaseModel):
@@ -105,6 +108,7 @@ class VariantOption(BaseModel):
     option_values: dict[str, str] | None
     price: Price
     availability: Literal["available", "sold_out", "made_to_order", "unavailable"]
+    low_stock: bool = False
 
 
 class ProductSeo(BaseModel):
@@ -247,6 +251,7 @@ def _card(card: CardData, currency: str) -> ProductCard:
         price=_price(card.price, currency),
         availability=card.availability,
         image=Image(**image_payload(card.image)) if card.image else None,
+        low_stock=card.low_stock,
     )
 
 
@@ -374,6 +379,7 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
                 option_values=v.variant.option_values,
                 price=_price(v.price, tenant.currency),
                 availability=v.availability,
+                low_stock=v.low_stock,
             )
             for v in data.variants
         ],
