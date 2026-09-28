@@ -287,6 +287,101 @@ async def seed() -> None:
         await CouponService(session, context, ACTOR).create(
             "E2E10", {"kind": "percent", "percent_bps": 1000, "status": "active"}
         )
+        # Página inicial montada, com um bloco de cada tipo. Serve de olhada para quem está
+        # mexendo no visual e de rede para o E2E: um bloco que para de renderizar aparece aqui.
+        await TenantService(session).set_setting(
+            await TenantService(session).get_or_404(store.id),
+            "landing",
+            {
+                "blocks": [
+                    {
+                        "type": "announcement",
+                        "text": "Frete grátis acima de R$ 150",
+                        "tone": "soft",
+                        "link_target": "catalog",
+                    },
+                    {
+                        "type": "hero",
+                        "title": "Doces que a gente faz no dia",
+                        "subtitle": "Encomende pelo site e retire na loja.",
+                        "cta_label": "Ver produtos",
+                        "cta_target": "catalog",
+                        "variant": "text_only",
+                    },
+                    {
+                        "type": "benefits",
+                        "title": "Por que comprar aqui",
+                        "items": [
+                            {
+                                "icon": "clock",
+                                "title": "Feito no dia",
+                                "text": "Nada fica de véspera.",
+                            },
+                            {"icon": "pix", "title": "Aceita Pix", "text": "Sem taxa nenhuma."},
+                            {
+                                "icon": "store",
+                                "title": "Retire na loja",
+                                "text": "Pronto em duas horas.",
+                            },
+                        ],
+                        "variant": "icons_row",
+                    },
+                    {
+                        "type": "testimonials",
+                        "title": "Quem já comprou",
+                        "items": [
+                            {
+                                "text": "Brownie muito bom, chegou quentinho.",
+                                "author": "Ana",
+                                "source": "instagram",
+                            },
+                            {
+                                "text": "Atendimento nota dez.",
+                                "author": "Bruno",
+                                "source": "google",
+                            },
+                        ],
+                        "variant": "cards",
+                    },
+                    {
+                        "type": "faq",
+                        "title": "Perguntas frequentes",
+                        "items": [
+                            {
+                                "question": "Vocês entregam?",
+                                "answer": "Só retirada na loja, por enquanto.",
+                            },
+                            {
+                                "question": "Aceita encomenda grande?",
+                                "answer": "Aceita, com dois dias de antecedência.",
+                            },
+                        ],
+                        "variant": "accordion",
+                    },
+                    {
+                        "type": "hours",
+                        "title": "Onde e quando",
+                        "address": "Rua E2E, 100",
+                        "city": "São Paulo",
+                        "state": "SP",
+                        "days": [
+                            {"weekday": 0, "opens": "09:00", "closes": "18:00"},
+                            {"weekday": 5, "opens": "09:00", "closes": "13:00"},
+                        ],
+                        "note": "Fechado aos domingos.",
+                    },
+                    {
+                        "type": "cta",
+                        "title": "Bateu a vontade?",
+                        "subtitle": "Escolha o seu e retire hoje mesmo.",
+                        "cta_label": "Ver produtos",
+                        "cta_target": "catalog",
+                        "tone": "brand",
+                    },
+                ]
+            },
+            ACTOR,
+        )
         await session.commit()
 
     async with factory() as session:

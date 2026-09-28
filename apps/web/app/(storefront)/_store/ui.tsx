@@ -53,6 +53,7 @@ export function Section({
   children,
   id,
   variant = "plain",
+  tone,
 }: {
   title?: string;
   description?: ReactNode;
@@ -60,9 +61,15 @@ export function Section({
   children: ReactNode;
   id?: string;
   variant?: "plain" | "card";
+  /** Fundo da faixa, quando o bloco pede um. `brand` usa o par que `onColor` garante legível. */
+  tone?: string;
 }) {
   return (
-    <section className={variant === "card" ? styles.card : styles.section} id={id}>
+    <section
+      className={variant === "card" ? styles.card : styles.section}
+      id={id}
+      data-tone={tone && tone !== "plain" ? tone : undefined}
+    >
       {title || actions ? (
         <div className={styles.sectionHead}>
           {title ? <h2>{title}</h2> : null}

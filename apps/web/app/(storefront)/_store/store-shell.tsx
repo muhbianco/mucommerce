@@ -40,8 +40,10 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
   const jar = await cookies();
   const signedIn = Boolean(jar.get(CUSTOMER_SESSION_COOKIE));
   const cartCount = parseCartCount(jar.get(CART_COUNT_COOKIE)?.value);
-  const branding = context.branding as { logo?: Logo | null };
+  const branding = context.branding as { logo?: Logo | null; logo_height_px?: number };
   const logo = branding.logo;
+  // Marca horizontal precisa de mais que os 40px de antes; marca quadrada, de menos.
+  const logoHeight = Math.min(72, Math.max(24, branding.logo_height_px ?? 40));
   const catalogOn = Boolean(context.features.catalog);
 
   const categories = catalogOn ? await storefrontApi<CategoryRef[]>(context, "/catalog/categories") : null;
@@ -60,8 +62,12 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
             <img
               src={logo.url}
               alt={context.tenant.name}
-              height={40}
-              width={logo.width && logo.height ? Math.round((40 * logo.width) / logo.height) : undefined}
+              height={logoHeight}
+              width={
+                logo.width && logo.height
+                  ? Math.round((logoHeight * logo.width) / logo.height)
+                  : undefined
+              }
             />
           ) : (
             context.tenant.name

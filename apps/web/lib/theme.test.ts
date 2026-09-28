@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contrast } from "./color";
+import { contrast, luminance } from "./color";
 import { onColor, storeTheme, themeVariables } from "./theme";
 
 describe("store theme", () => {
@@ -45,6 +45,16 @@ function* sweep(count: number): Generator<string> {
   }
 }
 
+/** O que sai de `themeVariables` sem ser cor: pilha de fonte, medida e número. */
+const NAO_SAO_COR = new Set([
+  "--brand-font",
+  "--brand-font-display",
+  "--brand-radius",
+  "--brand-radius-lg",
+  "--brand-space",
+  "--brand-logo-height",
+]);
+
 describe("a paleta se defende da cor que o lojista escolheu", () => {
   const colours = [...HOSTILE, ...sweep(512)];
 
@@ -76,7 +86,8 @@ describe("a paleta se defende da cor que o lojista escolheu", () => {
       for (const [key, value] of Object.entries(themeVariables({ primary_color: primary }))) {
         expect(value, `${key} com a marca ${primary}`).not.toMatch(/NaN|undefined/);
         if (key.endsWith("-rgb")) expect(value).toMatch(/^\d{1,3} \d{1,3} \d{1,3}$/);
-        else if (key !== "--brand-font") expect(value).toMatch(/^#[0-9a-f]{6}$/);
+        else if (NAO_SAO_COR.has(key)) expect(value.length, key).toBeGreaterThan(0);
+        else expect(value, key).toMatch(/^#[0-9a-f]{6}$/);
       }
     }
   });
@@ -131,5 +142,62 @@ describe("fontes", () => {
     const fonte = themeVariables({ font: "rounded" })["--brand-font"]!;
     expect(fonte).toContain("--store-font-rounded");
     expect(fonte).toContain("sans-serif");
+  });
+});
+
+describe("papel da vitrine", () => {
+  const superficies = ["light", "warm", "dark"] as const;
+
+  it("mantém o contraste em qualquer papel, com qualquer marca", () => {
+    // Escuro é o que mais se pede e o que mais quebra quando alguém escolhe a cor à mão.
+    // Aqui a claridade de cada camada é fixa e o texto continua saindo de `towardContrast`.
+    for (const surface of superficies) {
+      for (const primary of [...HOSTILE, ...sweep(128)]) {
+        const t = storeTheme({ primary_color: primary, surface });
+        const onde = `${surface} com a marca ${primary}`;
+        expect(contrast(t.ink, t.paper), `corpo em ${onde}`).toBeGreaterThanOrEqual(7);
+        expect(contrast(t.muted, t.paper), `apagado em ${onde}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t.brandInk, t.surface), `marca como texto em ${onde}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t.onBrandTint, t.brandTint), `selo em ${onde}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(t.dangerInk, t.dangerTint), `erro em ${onde}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("no escuro o papel fica escuro e a tinta clara", () => {
+    const claro = storeTheme({ primary_color: "#2e7d32", surface: "light" });
+    const escuro = storeTheme({ primary_color: "#2e7d32", surface: "dark" });
+    expect(luminance(escuro.paper)).toBeLessThan(luminance(claro.paper));
+    expect(luminance(escuro.ink)).toBeGreaterThan(luminance(claro.ink));
+  });
+});
+
+describe("medidas do tema", () => {
+  it("traduz raio, densidade e altura do logotipo", () => {
+    const quadrado = themeVariables({ radius: "square", density: "cozy", logo_height_px: 64 });
+    expect(quadrado["--brand-radius"]).toBe("2px");
+    expect(quadrado["--brand-space"]).toBe("0.8");
+    expect(quadrado["--brand-logo-height"]).toBe("64px");
+  });
+
+  it("segura a altura do logotipo em valores que cabem no cabeçalho", () => {
+    expect(themeVariables({ logo_height_px: 500 })["--brand-logo-height"]).toBe("72px");
+    expect(themeVariables({ logo_height_px: 1 })["--brand-logo-height"]).toBe("24px");
+  });
+
+  it("título sem fonte própria herda a do corpo", () => {
+    const herdado = themeVariables({ font: "serif", heading_font: "inherit" });
+    expect(herdado["--brand-font-display"]).toBe(herdado["--brand-font"]);
+    const proprio = themeVariables({ font: "system", heading_font: "serif" });
+    expect(proprio["--brand-font-display"]).not.toBe(proprio["--brand-font"]);
+  });
+
+  it("os padrões reproduzem a loja de antes", () => {
+    // Nenhuma loja pode acordar diferente por causa de campo que ela não preencheu.
+    const padrao = themeVariables({});
+    expect(padrao["--brand-radius"]).toBe("8px");
+    expect(padrao["--brand-space"]).toBe("1");
+    expect(padrao["--brand-logo-height"]).toBe("40px");
+    expect(padrao["--brand-font-display"]).toBe(padrao["--brand-font"]);
   });
 });
