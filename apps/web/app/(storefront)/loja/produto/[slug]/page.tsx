@@ -18,7 +18,11 @@ import {
   storeOrigin,
 } from "@/lib/storefront";
 
+import { Suspense } from "react";
+
 import { AddToCart, CART_ERRORS } from "../../../_store/add-to-cart";
+import { Gallery } from "../../../_store/gallery";
+import { RelatedProducts } from "../../../_store/related-products";
 import { StoreImage } from "../../../_store/store-image";
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
@@ -119,7 +123,6 @@ export default async function ProductPage({
     },
   ];
 
-  const [cover, ...others] = product.images;
   return (
     <StoreShell context={context}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(structured) }} />
@@ -204,18 +207,22 @@ export default async function ProductPage({
       >
         <h1>{product.name}</h1>
         {product.short_description ? <p className={styles.lead}>{product.short_description}</p> : null}
-        {cover ? (
-          <StoreImage image={cover} alt={product.name} sizes="(min-width: 900px) 620px, 100vw" priority className={styles.photo} />
-        ) : (
-          <div className={styles.photo} aria-hidden="true" />
-        )}
-        {others.length ? (
-          <div className={styles.thumbs}>
-            {others.map((image, i) => (
-              <StoreImage key={i} image={image} alt={`${product.name} (${i + 2})`} sizes="160px" className={styles.photo} />
+        {/* Sem JavaScript, as fotos saem empilhadas com âncora e as miniaturas viram links para
+            elas; a ilha `Gallery` troca a foto no lugar, anda com o teclado e amplia. */}
+        <noscript>
+          <div className={styles.noscriptGallery}>
+            {product.images.map((image, i) => (
+              <StoreImage
+                key={i}
+                image={image}
+                alt={i === 0 ? product.name : `${product.name} (${i + 1})`}
+                sizes="(min-width: 900px) 620px, 100vw"
+                className={styles.photo}
+              />
             ))}
           </div>
-        ) : null}
+        </noscript>
+        <Gallery images={product.images} alt={product.name} />
         {product.description_md ? (
           <Section title="Sobre este produto">
             <div className={styles.description}>{product.description_md}</div>
@@ -231,6 +238,10 @@ export default async function ProductPage({
           </nav>
         ) : null}
       </Split>
+
+      <Suspense fallback={null}>
+        <RelatedProducts context={context} category={category ?? null} excludeId={product.id} />
+      </Suspense>
     </StoreShell>
   );
 }

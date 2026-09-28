@@ -1573,3 +1573,165 @@
   flex-wrap: wrap;
   gap: 0.4rem;
 }
+
+/* ------------------------------------------------------------------ galeria do produto */
+
+.gallery3 {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.storefront .galleryMain {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  overflow: hidden;
+  background: var(--store-mist);
+  cursor: zoom-in;
+}
+
+.galleryMain img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
+.storefront .thumbButton {
+  min-height: 0;
+  padding: 0;
+  border: 1.5px solid var(--store-line);
+  border-radius: var(--store-radius);
+  overflow: hidden;
+  background: var(--store-mist);
+  aspect-ratio: 1 / 1;
+}
+
+.storefront .thumbButton[aria-selected="true"] {
+  border-color: var(--brand-primary);
+}
+
+.thumbButton img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Ampliação: o navegador cuida da camada, do fundo, do foco e do Escape. */
+.zoom {
+  width: min(96vw, 1100px);
+  max-width: none;
+  max-height: 92vh;
+  padding: 0;
+  border: 0;
+  border-radius: var(--store-radius-lg);
+  background: var(--store-surface);
+  overflow: hidden;
+}
+
+.zoom::backdrop {
+  background: rgb(0 0 0 / 70%);
+}
+
+.zoom img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 82vh;
+  object-fit: contain;
+  background: var(--store-mist);
+}
+
+.zoom form {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.6rem;
+  border-top: 1px solid var(--store-line);
+}
+
+/* Sem JavaScript as fotos saem empilhadas: pior, mas completo. */
+.noscriptGallery {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* ------------------------------------------------------------------ sugestões de busca */
+
+.searchWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestions {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  background: var(--store-surface);
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  box-shadow: var(--store-shadow-lg);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.storefront .suggestion a {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem;
+  border-radius: var(--store-radius);
+  color: var(--store-ink);
+  text-decoration: none;
+}
+
+.suggestion[data-active] a,
+.storefront .suggestion a:hover {
+  background: var(--store-mist);
+}
+
+.suggestion img,
+.suggestionThumb {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: var(--store-radius);
+  object-fit: cover;
+  background: var(--store-mist);
+}
+
+.suggestionName {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestionPrice {
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .searchWrap {
+    order: 3;
+    flex-basis: 100%;
+  }
+}

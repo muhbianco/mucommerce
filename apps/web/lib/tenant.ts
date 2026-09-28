@@ -117,8 +117,22 @@ export function isPublicStorefrontPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => prefix !== "/" && (pathname === prefix || pathname.startsWith(prefix + "/")));
 }
 
+/**
+ * Rotas de dados da vitrine. Não são páginas: quem chama é `fetch`, e quem espera resposta é
+ * JavaScript, não uma pessoa.
+ */
+const STORE_API_PREFIX = "/api/loja/";
+
+export function isStoreApiPath(pathname: string): boolean {
+  return pathname.startsWith(STORE_API_PREFIX);
+}
+
 export function requiresSession(pathname: string, accessMode: StorefrontContext["access_mode"]): boolean {
   if (accessMode === "public") return false;
+  // Mandar `fetch` para a tela de login devolve HTML onde o navegador espera JSON. Estas rotas
+  // fazem o próprio controle e respondem 401/403 — nunca um resultado parcial, que é o que
+  // transformaria loja fechada em porta de raspagem.
+  if (isStoreApiPath(pathname)) return false;
   return !isPublicStorefrontPath(pathname);
 }
 

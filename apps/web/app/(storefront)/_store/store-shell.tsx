@@ -8,6 +8,7 @@ import { storefrontApi } from "@/lib/storefront-api";
 import type { CategoryRef } from "@/lib/storefront";
 import type { StorefrontContext } from "@/lib/tenant";
 
+import { SearchBox } from "./search-box";
 import styles from "./store.module.css";
 
 interface Logo {
@@ -67,23 +68,7 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
           )}
         </Link>
 
-        {catalogOn ? (
-          <form role="search" method="get" action="/loja" className={styles.search}>
-            <input
-              type="search"
-              name="q"
-              aria-label="Buscar produtos"
-              placeholder="O que você procura?"
-              minLength={2}
-              enterKeyHint="search"
-            />
-            <button type="submit" className={styles.searchGo}>
-              Buscar
-            </button>
-          </form>
-        ) : (
-          <span className={styles.spacer} />
-        )}
+        {catalogOn ? <SearchBox /> : <span className={styles.spacer} />}
 
         <nav className={styles.headerNav} aria-label="Sua conta">
           {signedIn ? <Link href="/conta">Minha conta</Link> : null}

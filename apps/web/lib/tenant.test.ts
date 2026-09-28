@@ -105,3 +105,19 @@ describe("panel routing", () => {
     expect(isPanelPath("/loja")).toBe(false);
   });
 });
+
+describe("rota de dados da vitrine", () => {
+  it("não manda `fetch` para a tela de login", () => {
+    // Redirecionar devolveria HTML onde o navegador espera JSON. Quem decide o acesso é o
+    // próprio handler, que responde 401/403 — e nunca um resultado parcial.
+    expect(requiresSession("/api/loja/busca", "whitelist")).toBe(false);
+    expect(requiresSession("/api/loja/busca", "login_required")).toBe(false);
+  });
+
+  it("e isso não abre a loja fechada para o resto", () => {
+    expect(requiresSession("/loja", "whitelist")).toBe(true);
+    expect(requiresSession("/carrinho", "whitelist")).toBe(true);
+    expect(requiresSession("/api/loja", "whitelist"), "sem a barra não é a rota de dados").toBe(true);
+    expect(requiresSession("/api/outra-coisa", "whitelist")).toBe(true);
+  });
+});
