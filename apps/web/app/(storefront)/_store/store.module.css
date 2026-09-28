@@ -691,3 +691,185 @@
     padding: 1rem;
   }
 }
+
+/* ------------------------------------------------------------------ kit das páginas (ui.tsx) */
+
+.pageHead {
+  margin-bottom: 1.5rem;
+}
+
+.pageHeadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.pageHeadRow h1,
+.pageHeadRow h2 {
+  margin: 0;
+}
+
+.pageActions,
+.sectionActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lead {
+  max-width: 62ch;
+  margin: 0.4rem 0 0;
+  color: var(--store-muted);
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.sectionHead h2 {
+  margin: 0;
+}
+
+.sectionHead p {
+  margin: 0;
+  color: var(--store-muted);
+  font-size: 0.92rem;
+}
+
+.sectionActions {
+  margin-left: auto;
+}
+
+/* Conteúdo + coluna lateral. No celular a lateral vai para baixo. */
+.split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(1.25rem, 3vw, 2.5rem);
+  align-items: start;
+}
+
+.splitMain {
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  .split {
+    grid-template-columns: minmax(0, 1.15fr) minmax(19rem, 0.85fr);
+  }
+
+  /* Só gruda no computador: no celular a lateral é conteúdo comum. */
+  .sticky {
+    position: sticky;
+    top: calc(var(--store-header-h) + 1rem);
+  }
+}
+
+/* ------------------------------------------------------------------ preço */
+
+.priceBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.compareLine {
+  color: var(--store-muted);
+  font-size: 0.9rem;
+  text-decoration: line-through;
+}
+
+.unit {
+  font-size: 0.6em;
+  font-weight: 500;
+  color: var(--store-muted);
+}
+
+/* ------------------------------------------------------------------ frete grátis */
+
+.freeShip {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface);
+  margin: 0 0 1rem;
+}
+
+.freeShip[data-reached] {
+  border-color: var(--store-ok);
+  background: var(--store-ok-tint);
+  color: var(--store-ok-ink);
+}
+
+.freeShipText {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.freeShipTrack {
+  display: block;
+  height: 0.35rem;
+  border-radius: var(--store-radius-pill);
+  background: var(--store-mist);
+  overflow: hidden;
+}
+
+.freeShipFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-primary);
+  transition: width 0.3s var(--store-ease);
+}
+
+.freeShip[data-reached] .freeShipFill {
+  background: var(--store-ok);
+}
+
+/* ------------------------------------------------------------------ miniatura e esqueleto */
+
+.thumb {
+  border-radius: var(--store-radius);
+  object-fit: cover;
+  background: var(--store-mist);
+  display: block;
+  flex: none;
+}
+
+.skeleton {
+  display: block;
+  border-radius: var(--store-radius);
+  background: linear-gradient(90deg, var(--store-mist) 25%, var(--store-surface) 50%, var(--store-mist) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.skeleton[data-kind="line"] {
+  height: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.skeleton[data-kind="photo"] {
+  aspect-ratio: 1 / 1;
+  width: 100%;
+}
+
+.skeleton[data-kind="card"] {
+  aspect-ratio: 3 / 4;
+  width: 100%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
