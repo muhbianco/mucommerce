@@ -22,6 +22,10 @@ from app.tenancy.settings_schemas import AccessMode
 
 router = APIRouter(prefix="/admin/tenants/{tenant_id}", tags=["Painel — Módulos"])
 
+# Ligar módulo é decisão de quem paga, então escrever é só para a equipe da loja. **Ler não**:
+# o suporte da MuhBianco precisa enxergar o que está ligado para responder "por que minha loja
+# não vende". Sem esta separação, a tela inteira morre para quem só queria olhar.
+ModulesReader = Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))]
 ModulesWriter = Annotated[
     TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE, members_only=True))
 ]
@@ -72,7 +76,7 @@ async def _enabled(session: DbSession, tenant_id: str) -> dict[str, bool]:
 
 
 @router.get("/modules", response_model=list[ModuleRead], summary="Módulos da loja")
-async def list_modules(session: DbSession, user: CurrentAdmin, tenant: ModulesWriter) -> Any:
+async def list_modules(session: DbSession, user: CurrentAdmin, tenant: ModulesReader) -> Any:
     return _view(await _enabled(session, tenant.id))
 
 

@@ -161,3 +161,31 @@ async def test_vitrine_publica_sem_login_e_estado_que_nao_vende(
     )
     assert agora.status_code == 200, agora.text
     assert by_key(agora.json())["checkout"]["enabled"] is True
+
+
+async def test_suporte_da_plataforma_enxerga_a_loja_mas_nao_liga_nada(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """O suporte precisa abrir a tela para responder "por que minha loja não vende".
+
+    Regressão do painel do Silvio: o GET estava atrás do mesmo guard do PUT, então a tela
+    inteira morria com 403 para quem não fosse da loja — e o admin ficava sem saber o motivo.
+    """
+    from app.core.scopes import PlatformRole
+    from tests.conftest import create_admin, login
+
+    tenant, _ = await loja(client, session_factory)
+    await create_admin(
+        session_factory, "suporte@muhbianco.test", platform_role=PlatformRole.OPERATOR
+    )
+    suporte = await login(client, "suporte@muhbianco.test")
+
+    leitura = await client.get(f"{base(tenant)}/modules", headers=suporte)
+    assert leitura.status_code == 200, leitura.text
+    assert by_key(leitura.json())["catalog"]["enabled"] is True
+
+    escrita = await client.put(
+        f"{base(tenant)}/modules", json={"flags": {"coupons": True}}, headers=suporte
+    )
+    assert escrita.status_code == 403
+    assert escrita.json()["error"]["code"] == "permission_denied"

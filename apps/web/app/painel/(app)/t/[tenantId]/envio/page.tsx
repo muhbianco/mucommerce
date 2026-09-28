@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { api, requireMe } from "@/lib/panel/api";
-import { tenantScopes } from "@/lib/panel/scopes";
+import { isStoreMember, tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import styles from "../../../../panel.module.css";
@@ -85,6 +85,9 @@ export default async function Shipping({
   const { ok, erro } = await searchParams;
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   if (!tenantScopes(me, context.tenant_id).can("shipping:config")) notFound();
+  // Etiqueta sai da carteira da loja, então conectar e gravar é só da equipe dela (o servidor
+  // recusa o resto). O staff da MuhBianco abre para conferir por que o frete não cota.
+  const readOnly = !isStoreMember(me, context.tenant_id);
 
   const status = await api<ShippingStatus>(`/admin/tenants/${tenantId}/shipping`);
   const cfg = ((context.settings.fulfillment ?? {}) as { shipping?: ShippingSettings }).shipping ?? {};
@@ -112,6 +115,13 @@ export default async function Shipping({
         }
       />
       <Flash ok={ok} erro={erro} />
+
+      {readOnly ? (
+        <p className={styles.note}>
+          Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a
+          configuração é da equipe da loja — aqui dá para conferir o estado.
+        </p>
+      ) : null}
 
       {status.missing.length > 0 ? (
         <Section title="Para começar a cotar" description="Enquanto faltar isto, a loja não mostra frete no checkout.">

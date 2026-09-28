@@ -33,6 +33,8 @@ router = APIRouter(prefix="/admin/tenants/{tenant_id}/shipping", tags=["Painel �
 ShippingOwner = Annotated[
     TenantContext, Depends(require_tenant_scopes(Scope.SHIPPING_CONFIG, members_only=True))
 ]
+# Quem compra etiqueta é a loja (o dinheiro é dela), mas ver como está o envio é suporte.
+ShippingReader = Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SHIPPING_CONFIG))]
 Dispatcher = Annotated[TenantContext, Depends(require_tenant_scopes(Scope.ORDERS_TRANSITION))]
 OrderId = Annotated[str, Path(min_length=36, max_length=36)]
 
@@ -99,7 +101,7 @@ def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
 
 
 @router.get("", response_model=ShippingStatusRead, summary="Como está o envio da loja")
-async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingOwner) -> Any:
+async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingReader) -> Any:
     cfg = fulfillment_settings(tenant.settings).shipping
     token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
     return _status(tenant, connected=bool(token))

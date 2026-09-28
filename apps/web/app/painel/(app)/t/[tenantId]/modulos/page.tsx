@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { api, requireMe } from "@/lib/panel/api";
-import { tenantScopes } from "@/lib/panel/scopes";
+import { isStoreMember, tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import styles from "../../../../panel.module.css";
@@ -43,10 +43,12 @@ function ModuleRow({
   module: item,
   tenantId,
   labels,
+  readOnly,
 }: {
   module: Module;
   tenantId: string;
   labels: Record<string, string>;
+  readOnly: boolean;
 }) {
   const blocked = item.requires.filter((key) => !labels[`on:${key}`]);
   const held = item.dependents;
@@ -78,6 +80,7 @@ function ModuleRow({
       </div>
       <div className={styles.rowActions}>
         <Pill state={item.enabled ? "live" : "off"}>{item.enabled ? "Ligado" : "Desligado"}</Pill>
+        {readOnly ? null : (
         <form action={toggleModule}>
           <input type="hidden" name="tenant_id" value={tenantId} />
           <input type="hidden" name="key" value={item.key} />
@@ -90,6 +93,7 @@ function ModuleRow({
             {item.enabled ? "Desligar" : "Ligar"}
           </button>
         </form>
+        )}
       </div>
     </div>
   );
@@ -106,6 +110,9 @@ export default async function Modules({
   const { ok, erro } = await searchParams;
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   if (!tenantScopes(me, context.tenant_id).can("settings:write")) notFound();
+  // Ligar módulo é decisão de quem paga: o servidor só aceita da equipe da loja. O staff da
+  // MuhBianco abre a tela para enxergar, sem botão que daria 403.
+  const readOnly = !isStoreMember(me, context.tenant_id);
 
   const modules = await api<Module[]>(`/admin/tenants/${tenantId}/modules`);
   const free = modules.filter((m) => m.self_service);
@@ -132,6 +139,13 @@ export default async function Modules({
         lead="Ligue só o que a sua loja usa. O que está ligado aparece no menu e na vitrine; o que está desligado some sem apagar nada."
       />
       <Flash ok={ok} erro={erro} />
+
+      {readOnly ? (
+        <p className={styles.note}>
+          Você está vendo esta loja como equipe MuhBianco. Quem liga e desliga módulo é a equipe
+          da loja — aqui dá para conferir o estado, não para mudar.
+        </p>
+      ) : null}
 
       {broken.length ? (
         <Section
@@ -162,7 +176,13 @@ export default async function Modules({
       >
         <div className={styles.rows}>
           {free.map((item) => (
-            <ModuleRow key={item.key} module={item} tenantId={tenantId} labels={labels} />
+            <ModuleRow
+              key={item.key}
+              module={item}
+              tenantId={tenantId}
+              labels={labels}
+              readOnly={readOnly}
+            />
           ))}
         </div>
       </Section>
@@ -181,6 +201,7 @@ export default async function Modules({
                   name="access_mode"
                   value={option.value}
                   defaultChecked={accessMode === option.value}
+                  disabled={readOnly}
                 />
                 <span>
                   {option.label}
@@ -189,11 +210,13 @@ export default async function Modules({
               </label>
             ))}
           </div>
-          <div className={styles.formActions}>
-            <button type="submit" className={styles.button}>
-              Salvar
-            </button>
-          </div>
+          {readOnly ? null : (
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.button}>
+                Salvar
+              </button>
+            </div>
+          )}
         </form>
       </Section>
 
