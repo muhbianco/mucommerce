@@ -1,9 +1,16 @@
+import { cache } from "react";
+
 import { headers } from "next/headers";
 
 import type { StorefrontContext } from "./tenant";
 
-/** Read the tenant context the middleware attached to the request. Server components only. */
-export async function getStorefrontContext(): Promise<StorefrontContext | null> {
+/**
+ * Read the tenant context the middleware attached to the request. Server components only.
+ *
+ * `cache` deduplicates the parse: the storefront layout and the page inside it both ask for the
+ * context on the same request.
+ */
+export const getStorefrontContext = cache(async (): Promise<StorefrontContext | null> => {
   const encoded = (await headers()).get("x-tenant-context");
   if (!encoded) return null;
   try {
@@ -11,4 +18,4 @@ export async function getStorefrontContext(): Promise<StorefrontContext | null> 
   } catch {
     return null;
   }
-}
+});
