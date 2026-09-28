@@ -12,7 +12,7 @@ import styles from "../../../../panel.module.css";
 import { CopyButton } from "../copy-button";
 import { Flash } from "../flash";
 import { EmptyState, KeyValues, PageHeader, Pill, Section } from "../ui";
-import { savePaymentProvider, testPaymentProvider } from "./actions";
+import { savePaymentProvider, saveSurcharge, testPaymentProvider } from "./actions";
 import local from "./pagamentos.module.css";
 
 export const metadata: Metadata = { title: "Pagamentos" };
@@ -48,6 +48,19 @@ export default async function Payments({
   // (platform staff see the status, never the form — the API refuses them as well).
   const member = me.memberships.some((m) => m.tenant_id === context.tenant_id);
   const canConfigure = member && scopes.can("payments:config");
+  interface Surcharge {
+    enabled?: boolean;
+    surcharge?: Record<string, { percent_bps?: number; fixed_cents?: number }>;
+    card_installments?: { up_to: number; percent_bps: number }[];
+  }
+  const surcharge = (context.settings.payments ?? {}) as Surcharge;
+  const card = surcharge.surcharge?.card ?? {};
+  const pix = surcharge.surcharge?.pix ?? {};
+  const tier = (upTo: number): number =>
+    surcharge.card_installments?.find((t) => t.up_to === upTo)?.percent_bps ?? 0;
+  const percent = (bps?: number): string => (bps ? String(bps / 100).replace(".", ",") : "");
+  const reais = (cents?: number): string => (cents ? (cents / 100).toFixed(2).replace(".", ",") : "");
+
   const providers = await api<PaymentProviderRead[]>(`/admin/tenants/${context.tenant_id}/payments/providers`);
   const dateTime = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: context.timezone }).format(
@@ -64,6 +77,63 @@ export default async function Payments({
         lead="O dinheiro das vendas cai direto na conta da loja no meio de pagamento escolhido. As chaves ficam guardadas cifradas e nunca aparecem de novo nesta tela."
       />
       <Flash ok={ok} erro={erro} />
+
+      <Section
+        title="Repasse da taxa ao cliente"
+        description="A lei permite preço diferente por meio de pagamento, desde que o cliente saiba antes de escolher — e é assim que aparece no checkout."
+      >
+        <form action={saveSurcharge}>
+          <input type="hidden" name="tenant_id" value={tenantId} />
+          <label className={styles.check}>
+            <input type="checkbox" name="surcharge_enabled" defaultChecked={surcharge.enabled ?? false} />
+            <span>
+              Repassar a taxa para quem compra
+              <span className={styles.fieldHint}>
+                Desligado, a loja absorve a taxa e o preço é o mesmo em qualquer meio.
+              </span>
+            </span>
+          </label>
+          <div className={styles.fields}>
+            <label className={styles.field}>
+              Cartão — taxa (%)
+              <input name="card_percent" inputMode="decimal" defaultValue={percent(card.percent_bps)} placeholder="3,5" />
+            </label>
+            <label className={styles.field}>
+              Cartão — valor fixo (R$)
+              <input name="card_fixed" inputMode="decimal" defaultValue={reais(card.fixed_cents)} placeholder="0,49" />
+            </label>
+            <label className={styles.field}>
+              Pix — taxa (%)
+              <input name="pix_percent" inputMode="decimal" defaultValue={percent(pix.percent_bps)} placeholder="0" />
+            </label>
+            <label className={styles.field}>
+              Pix — valor fixo (R$)
+              <input name="pix_fixed" inputMode="decimal" defaultValue={reais(pix.fixed_cents)} placeholder="0,00" />
+            </label>
+            <label className={styles.field}>
+              Cartão à vista (%)
+              <input name="card_1" inputMode="decimal" defaultValue={percent(tier(1))} placeholder="3,5" />
+            </label>
+            <label className={styles.field}>
+              Cartão até 6x (%)
+              <input name="card_6" inputMode="decimal" defaultValue={percent(tier(6))} placeholder="9" />
+            </label>
+            <label className={styles.field}>
+              Cartão até 12x (%)
+              <input name="card_12" inputMode="decimal" defaultValue={percent(tier(12))} placeholder="15" />
+              <span className={styles.fieldHint}>
+                Deixe as três vazias para cobrar a mesma taxa em qualquer parcelamento.
+              </span>
+            </label>
+          </div>
+          <div className={styles.formActions}>
+            <button type="submit" className={styles.button}>
+              Salvar repasse
+            </button>
+          </div>
+        </form>
+      </Section>
+
       {!canConfigure && known.length ? (
         <p className={styles.note}>Só o dono da loja altera os meios de pagamento. Aqui você vê como cada um está.</p>
       ) : null}

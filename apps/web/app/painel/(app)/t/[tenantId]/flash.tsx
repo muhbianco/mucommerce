@@ -54,6 +54,7 @@ const OK: Record<string, string> = {
   modulo_ligado: "Módulo ligado.",
   modulo_desligado: "Módulo desligado. Nada foi apagado.",
   vitrine: "Quem vê a vitrine foi atualizado.",
+  taxa: "Repasse da taxa salvo.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -84,7 +85,7 @@ const ERRORS: Record<string, string> = {
   four_eyes: "Quem pediu a devolução não pode aprová-la; peça a outra pessoa da loja.",
   motivo_obrigatorio: "Escreva o motivo (mínimo 3 caracteres).",
   codigo_invalido: "Código inválido: use letras, números, hífen ou _ (3 a 40).",
-  percentual_invalido: "Porcentagem inválida (de 0,01 a 100).",
+  percentual_invalido: "Porcentagem inválida (de 0 a 30).",
   coupon_code_taken: "Já existe um cupom com esse código.",
   evidencia_obrigatoria: "Descreva como a devolução foi feita (mínimo 10 caracteres).",
   rate_limited: "Muitas tentativas seguidas. Espere um minuto e tente de novo.",

@@ -61,6 +61,9 @@ class Order(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, 
     subtotal_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     discount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     delivery_fee_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Repasse da taxa do meio de pagamento escolhido. Já está dentro de `total_cents`:
+    # a coluna existe para saber quanto do total é acréscimo (linha na tela, relatório).
+    payment_surcharge_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     coupon_code: Mapped[str | None] = mapped_column(String(40))
     # pickup | delivery | none (tickets, services, digital goods)

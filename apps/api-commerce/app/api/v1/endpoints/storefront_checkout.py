@@ -32,6 +32,7 @@ from app.payments.schemas import (
 )
 from app.payments.service import GAVE_UP, PaymentService
 from app.tenancy.service import Actor
+from app.tenancy.settings_schemas import payments_settings
 
 router = APIRouter(tags=["Carrinho e checkout"])
 
@@ -131,7 +132,14 @@ async def _order_payment(service: PaymentService, order: Order) -> OrderPaymentR
     if any("card" in o.methods for o in options):
         customer = await service.session.get(Customer, order.customer_id)
         email = customer.email_normalized if customer else None
-    return order_payment_read(order, payment, options, awaiting=awaiting, payer_email=email)
+    return order_payment_read(
+        order,
+        payment,
+        options,
+        awaiting=awaiting,
+        payer_email=email,
+        surcharge_cfg=payments_settings(service.tenant.settings),
+    )
 
 
 @router.get(

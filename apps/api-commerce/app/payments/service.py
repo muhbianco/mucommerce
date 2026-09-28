@@ -48,7 +48,7 @@ from app.models.base import utcnow
 from app.orders.models import Order
 from app.orders.service import OrderService
 from app.orders.state_machine import OrderStatus
-from app.payments import registry
+from app.payments import registry, surcharge
 from app.payments.closing import close_active_payment
 from app.payments.config_service import PaymentConfigService
 from app.payments.events import emit_payment, record_event
@@ -64,8 +64,10 @@ from app.payments.provider import (
 )
 from app.payments.refunds import RefundService
 from app.payments.status import CLOSED, can_transition
+from app.payments.surcharge import set_order_surcharge
 from app.tenancy.context import CROSS_TENANT_OPTION, TenantContext
 from app.tenancy.service import Actor
+from app.tenancy.settings_schemas import payments_settings
 
 logger = get_logger(__name__)
 # Reconciliation cadence for a payment waiting on the customer: soon, then less often.
@@ -217,6 +219,18 @@ class PaymentService:
         if data.method == "card" and data.card is None:
             raise ProviderNotEnabledError(provider=data.provider, method=data.method)
         provider = self._provider_named(data.provider)
+        # Repasse da taxa: entra no total **antes** de o pagamento nascer, para o valor
+        # cobrado e o total do pedido serem o mesmo numero. A tela ja mostrou quanto seria.
+        set_order_surcharge(
+            order,
+            surcharge.compute(
+                payments_settings(self.tenant.settings),
+                method=data.method,
+                installments=data.card.installments if data.card else 1,
+                base_cents=order.total_cents - order.payment_surcharge_cents,
+            ),
+        )
+        await self.session.flush()
         now = utcnow()
         # The id is made here so the reference is right on the INSERT: a placeholder would put
         # the same value in the global unique key for every payment of every store, and two
@@ -340,6 +354,10 @@ class PaymentService:
             payment.active_order_id = None
             payment.closed_at = payment.closed_at or utcnow()
             payment.next_check_at = None
+            if target != PaymentStatus.APPROVED:
+                # Tentativa morta: o acrescimo daquele meio sai do total, senao a proxima
+                # tentativa (Pix, por exemplo) cobraria a taxa do cartao que nao passou.
+                await self._clear_surcharge(order or await self._lock_order(payment.order_id))
         if target == PaymentStatus.REJECTED:
             payment.failure_code = (result.failure_code or "")[:64] or None
             payment.failure_message = (result.failure_message or "")[:300] or None
@@ -352,6 +370,14 @@ class PaymentService:
         elif target == PaymentStatus.CHARGEBACK:
             await self._chargeback(payment, order)
         return True
+
+    async def _clear_surcharge(self, order: Order | None) -> None:
+        """Tira o acrescimo do total enquanto o pedido ainda espera pagamento."""
+        if order is None or order.status != OrderStatus.AWAITING_PAYMENT:
+            return
+        if order.payment_surcharge_cents:
+            set_order_surcharge(order, 0)
+            await self.session.flush()
 
     async def _chargeback(self, payment: Payment, order: Order | None) -> None:
         """The cardholder disputed the charge and the bank took the money back. The stock is not

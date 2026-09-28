@@ -12,6 +12,10 @@ import {
 } from "@/lib/payments";
 
 import { cancelPayment, checkPayment, startPayment } from "../../actions";
+
+/** Reais, para a linha do acréscimo. A moeda das lojas é sempre BRL hoje. */
+const money = (cents: number): string =>
+  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 import { CardBrick } from "./card-brick";
 import { CopyButton } from "./copy-button";
 import { PaymentPoller } from "./payment-poller";
@@ -26,7 +30,11 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
     ? state.options.flatMap((option) =>
         option.methods
           .filter((method): method is (typeof WEB_METHODS)[number] => (WEB_METHODS as readonly string[]).includes(method))
-          .map((method) => ({ provider: option.provider, method })),
+          .map((method) => ({
+            provider: option.provider,
+            method,
+            surcharge: option.surcharge_cents?.[method] ?? 0,
+          })),
       )
     : [];
   const card = cardOption(state);
@@ -92,13 +100,16 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
 
       {choices.length ? (
         <div>
-          {choices.map(({ provider, method }) => (
+          {choices.map(({ provider, method, surcharge }) => (
             <form key={`${provider}:${method}`} action={startPayment}>
               <input type="hidden" name="order_id" value={state.order_id} />
               <input type="hidden" name="provider" value={provider} />
               <input type="hidden" name="method" value={method} />
               <input type="hidden" name="idempotency_key" value={randomUUID()} />
-              <button type="submit">{METHOD_LABEL[method] ?? method}</button>
+              <button type="submit">
+                {METHOD_LABEL[method] ?? method}
+                {surcharge > 0 ? ` (+ ${money(surcharge)})` : ""}
+              </button>
             </form>
           ))}
         </div>

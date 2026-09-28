@@ -274,6 +274,49 @@ class FulfillmentV2(_Setting):
         return self
 
 
+class MethodSurcharge(_Setting):
+    """Quanto a mais custa pagar por este meio. Percentual em pontos-base (350 = 3,5%)."""
+
+    percent_bps: Annotated[int, Field(ge=0, le=3000)] = 0
+    fixed_cents: Annotated[int, Field(ge=0, le=100_000)] = 0
+
+    @property
+    def zero(self) -> bool:
+        return self.percent_bps == 0 and self.fixed_cents == 0
+
+
+class InstallmentSurcharge(_Setting):
+    """Faixa de parcelas do cartão: até `up_to` parcelas, cobra isto.
+
+    A taxa da maquininha cresce com o parcelamento; uma taxa única de cartão devolve menos do
+    que o lojista paga em 12x. As faixas são lidas da menor para a maior.
+    """
+
+    up_to: Annotated[int, Field(ge=1, le=12)]
+    percent_bps: Annotated[int, Field(ge=0, le=3000)] = 0
+    fixed_cents: Annotated[int, Field(ge=0, le=100_000)] = 0
+
+
+class PaymentsV1(_Setting):
+    """Repasse da taxa ao cliente (Lei 13.455/2017: pode, desde que informado).
+
+    Por isso a linha aparece no checkout **antes** de confirmar, e não só na fatura.
+    """
+
+    enabled: bool = False
+    #: Por meio: `pix`, `card`, `link`. Pix costuma ficar em zero — é o barato.
+    surcharge: dict[Literal["pix", "card", "link"], MethodSurcharge] = {}
+    #: Faixas de parcela do cartão; vazio = usa `surcharge["card"]` para qualquer parcela.
+    card_installments: Annotated[list[InstallmentSurcharge], Field(max_length=12)] = []
+
+    @model_validator(mode="after")
+    def _ordered(self) -> PaymentsV1:
+        limites = [faixa.up_to for faixa in self.card_installments]
+        if len(set(limites)) != len(limites):
+            raise ValueError("faixa de parcelas repetida")
+        return self
+
+
 class CheckoutV1(_Setting):
     # Only `reserve_on_place` is implemented (ADR 0011); the other value is ignored.
     reservation_mode: Literal["reserve_on_place", "decrement_on_payment"] = "reserve_on_place"
@@ -296,6 +339,7 @@ SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
     "landing": (1, LandingV1),
     "fulfillment": (2, FulfillmentV2),
     "checkout": (1, CheckoutV1),
+    "payments": (1, PaymentsV1),
 }
 
 
@@ -328,3 +372,7 @@ def checkout_settings(settings: Mapping[str, Any]) -> CheckoutV1:
 
 def fulfillment_settings(settings: Mapping[str, Any]) -> FulfillmentV2:
     return FulfillmentV2.model_validate(settings.get("fulfillment") or {})
+
+
+def payments_settings(settings: Mapping[str, Any]) -> PaymentsV1:
+    return PaymentsV1.model_validate(settings.get("payments") or {})

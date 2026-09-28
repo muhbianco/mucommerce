@@ -67,6 +67,8 @@ class OrderRead(BaseModel):
     subtotal_cents: int
     discount_cents: int
     delivery_fee_cents: int
+    # Quanto do total é repasse da taxa do meio escolhido (0 antes de escolher).
+    payment_surcharge_cents: int = 0
     total_cents: int
     fulfillment_type: str
     fulfillment_status: str

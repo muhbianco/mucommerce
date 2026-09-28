@@ -13,11 +13,13 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from app.orders.models import Order
+from app.payments import surcharge
 from app.payments.models import Payment, PaymentStatus
 from app.payments.provider import CardInput
 from app.payments.registry import PaymentOption
 from app.payments.service import PaymentCreate
 from app.schemas.common import StrictModel
+from app.tenancy.settings_schemas import PaymentsV1
 
 
 class CardIn(StrictModel):
@@ -78,6 +80,11 @@ class PaymentOptionRead(BaseModel):
     is_default: bool
     public_config: dict[str, Any]
     installments_max: int
+    #: Quanto entra a mais por meio ({"pix": 0, "card": 350}). A lei pede que o cliente saiba
+    #: disso **antes** de escolher, não na fatura.
+    surcharge_cents: dict[str, int] = {}
+    #: Por parcela, para o cartão: {"1": 0, "2": 900, ...}. Vazio = mesmo valor para todas.
+    surcharge_by_installment: dict[str, int] = {}
 
 
 class PaymentRead(BaseModel):
@@ -148,9 +155,19 @@ def order_payment_read(
     *,
     awaiting: bool,
     payer_email: str | None = None,
+    surcharge_cfg: PaymentsV1 | None = None,
 ) -> OrderPaymentRead:
     active = payment is not None and payment.active_order_id == order.id
     can_pay = awaiting and not active
+    # Base = o pedido sem acrescimo nenhum: se uma tentativa anterior deixou taxa no total,
+    # cotar por cima dela cobraria taxa sobre taxa.
+    base = order.total_cents - order.payment_surcharge_cents
+    cfg = surcharge_cfg or PaymentsV1()
+    por_meio = surcharge.preview(cfg, base_cents=base)
+    por_parcela = {
+        str(n): surcharge.compute(cfg, method="card", installments=n, base_cents=base)
+        for n in range(1, 13)
+    }
     return OrderPaymentRead(
         order_id=order.id,
         order_number=order.number,
@@ -168,6 +185,12 @@ def order_payment_read(
                 is_default=o.is_default,
                 public_config=dict(o.public_config),
                 installments_max=o.installments_max,
+                surcharge_cents={m: por_meio.get(m, 0) for m in o.methods},
+                surcharge_by_installment=(
+                    {k: v for k, v in por_parcela.items() if int(k) <= o.installments_max}
+                    if "card" in o.methods
+                    else {}
+                ),
             )
             for o in options
         ]
