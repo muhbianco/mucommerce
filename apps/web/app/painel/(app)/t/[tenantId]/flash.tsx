@@ -51,6 +51,9 @@ const OK: Record<string, string> = {
   envio_regras: "Configuração de envio salva.",
   envio_conectado: "Conta da transportadora conectada.",
   envio_testado: "Teste feito: veja o resultado acima.",
+  modulo_ligado: "Módulo ligado.",
+  modulo_desligado: "Módulo desligado. Nada foi apagado.",
+  vitrine: "Quem vê a vitrine foi atualizado.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -89,6 +92,9 @@ const ERRORS: Record<string, string> = {
   integration_unavailable: "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos.",
   dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",
   dns_sem_txt: "Ainda não encontrei o registro TXT. Depois de criar, o DNS pode levar alguns minutos.",
+  module_not_self_service: "Este módulo é um serviço à parte: contrate na sua conta MuhBianco.",
+  module_requires: "Ligue antes os módulos de que este depende.",
+  module_in_use: "Outro módulo ligado depende deste; desligue aquele primeiro.",
   cep_origem_invalido: "CEP de origem inválido: informe os 8 dígitos.",
   token_invalido: "Token muito curto — confira se copiou inteiro.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",

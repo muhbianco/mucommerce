@@ -162,6 +162,27 @@ class ShipmentInProgressError(ConflictError):
     message = "O despacho deste pedido já está em andamento."
 
 
+class ModuleNotSelfServiceError(PermissionDeniedError):
+    """Módulo que o painel não liga: ou cobra, ou é chave da plataforma."""
+
+    error_code = "module_not_self_service"
+    message = "Este módulo não é ligado por aqui."
+
+
+class ModuleRequiresError(ValidationError):
+    """Faltou ligar um módulo do qual este depende."""
+
+    error_code = "module_requires"
+    message = "Ligue antes os módulos de que este depende."
+
+
+class ModuleInUseError(ConflictError):
+    """Desligar quebraria outro módulo que está ligado."""
+
+    error_code = "module_in_use"
+    message = "Outro módulo depende deste; desligue-o primeiro."
+
+
 class RateLimitedError(DomainError):
     status_code = 429
     error_code = "rate_limited"

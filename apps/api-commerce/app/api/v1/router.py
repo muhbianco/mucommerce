@@ -10,6 +10,7 @@ from app.api.v1.endpoints import (
     admin_events,
     admin_inventory,
     admin_media,
+    admin_modules,
     admin_orders,
     admin_payments,
     admin_refunds,
@@ -60,6 +61,13 @@ TAGS_METADATA: list[dict[str, object]] = [
     {
         "name": "Painel — Pagamentos",
         "description": "Meios de pagamento da loja: leitura pela equipe, configuração só do dono.",
+    },
+    {
+        "name": "Painel — Módulos",
+        "description": (
+            "Módulos da loja: o lojista liga os que não cobram; os pagos aparecem travados "
+            "com o motivo. Inclui quem vê a vitrine."
+        ),
     },
     {
         "name": "Painel — Envio",
@@ -117,6 +125,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_events.router,
     admin_media.router,
     admin_orders.router,
+    admin_modules.router,
     admin_payments.router,
     admin_shipping.router,
     admin_shipping.orders_router,
