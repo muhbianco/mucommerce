@@ -14,6 +14,7 @@ from app.api.middleware import RequestContextMiddleware
 from app.api.v1 import router as v1
 from app.api.versioning import ApiVersion, create_version_app
 from app.core.config import settings
+from app.core.crypto import vault_ready
 from app.core.database import dispose_engine
 from app.core.logging import configure_logging, get_logger
 from app.core.observability import setup_metrics, setup_sentry
@@ -44,6 +45,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         "Starting api-commerce",
         extra={"version": __version__, "environment": settings.environment},
     )
+    vault_ready()
     if settings.run_migrations_on_startup:
         from app.core.bootstrap import run_migrations
 

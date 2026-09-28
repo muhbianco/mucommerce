@@ -4,8 +4,18 @@ import base64
 import os
 
 import pytest
+from pydantic import SecretStr
 
-from app.core.crypto import CredentialCipher, CredentialCipherError, mask_secret
+from app.core.config import settings
+from app.core.crypto import (
+    CredentialCipher,
+    CredentialCipherError,
+    get_cipher,
+    mask_secret,
+    reset_cipher,
+    vault_ready,
+)
+from app.core.exceptions import CredentialVaultUnavailableError
 
 
 def _key() -> str:
@@ -44,6 +54,45 @@ def test_invalid_master_key_rejected() -> None:
         CredentialCipher("not-base64-32-bytes", key_version=1)
     with pytest.raises(CredentialCipherError):
         CredentialCipher("", key_version=1)
+
+
+def test_cofre_sem_chave_vira_erro_de_plataforma(monkeypatch) -> None:
+    """Chave ausente/inválida não pode virar 500: é 503 com recado e nada gravado."""
+    reset_cipher()
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr("chave-torta"))
+    with pytest.raises(CredentialVaultUnavailableError) as erro:
+        get_cipher()
+    assert erro.value.status_code == 503
+    assert erro.value.error_code == "credential_vault_unavailable"
+    reset_cipher()
+
+
+def test_cofre_nao_fica_envenenado_apos_a_correcao(monkeypatch) -> None:
+    """Primeira chamada falha, configuração corrigida, próxima chamada funciona."""
+    reset_cipher()
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr(""))
+    with pytest.raises(CredentialVaultUnavailableError):
+        get_cipher()
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr(_key()))
+    aad = CredentialCipher.aad("t", "mercadopago", "access_token")
+    cipher = get_cipher()
+    assert cipher.decrypt(cipher.encrypt("valor", aad), aad) == "valor"
+    reset_cipher()
+
+
+def test_chave_base64_urlsafe_tambem_vale() -> None:
+    reset_cipher()
+    urlsafe = base64.urlsafe_b64encode(os.urandom(32)).decode()
+    assert CredentialCipher(urlsafe, key_version=1) is not None
+    reset_cipher()
+
+
+def test_sonda_do_cofre_avisa_sem_levantar(monkeypatch) -> None:
+    """O boot avisa da chave torta, mas não derruba o serviço (loja no ar > credencial)."""
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr("chave-torta"))
+    assert vault_ready() is False
+    monkeypatch.setattr(settings, "credentials_master_key", SecretStr(_key()))
+    assert vault_ready() is True
 
 
 def test_mask_secret() -> None:
