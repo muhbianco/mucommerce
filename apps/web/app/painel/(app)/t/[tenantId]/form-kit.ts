@@ -3,6 +3,7 @@ import "server-only";
 import { redirect } from "next/navigation";
 
 import { ApiError } from "@/lib/panel/api";
+import { normalizeEmail, normalizeInstagram, normalizeWhatsapp } from "@/lib/panel/contact";
 import { parseMoney } from "@/lib/panel/format";
 
 // Shared by the panel's Server Action files: Server Actions only accept same-origin POSTs
@@ -43,6 +44,35 @@ export function money(form: FormData, name: string, { required = false } = {}): 
   if (cents === null && required) throw new FormError("preco_obrigatorio");
   if (Number.isNaN(cents)) throw new FormError("preco_invalido");
   return cents;
+}
+
+const CONTACT_FIELDS = [
+  ["whatsapp_e164", normalizeWhatsapp, "whatsapp_invalido"],
+  ["instagram", normalizeInstagram, "instagram_invalido"],
+  ["email", normalizeEmail, "email_invalido"],
+] as const;
+
+/**
+ * Contato como a pessoa digita, guardado como o esquema exige (E.164, perfil sem "@", e-mail
+ * minúsculo — ver `lib/panel/contact`).
+ *
+ * O campo que não dá para ler nomeia o próprio erro, em vez de devolver a página com "algum campo
+ * está inválido", que obriga a lojista a caçar qual. Campo vazio vira `null`: é assim que ela
+ * apaga um contato que não usa mais.
+ */
+export function contactFields(form: FormData): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const [name, normalize, code] of CONTACT_FIELDS) {
+    const raw = optional(form, name);
+    if (raw === null) {
+      out[name] = null;
+      continue;
+    }
+    const value = normalize(raw);
+    if (value === null) throw new FormError(code);
+    out[name] = value;
+  }
+  return out;
 }
 
 function outcome(error: unknown): string {

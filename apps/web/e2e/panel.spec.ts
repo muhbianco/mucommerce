@@ -24,9 +24,12 @@ test("login com a conta MuhBianco, lojas visíveis para admin da plataforma", as
   }
 });
 
-test("código de login falso volta para a tela de entrar", async ({ page }) => {
+test("código de login falso volta para a tela de entrar, no mesmo endereço", async ({ page }) => {
   await page.goto(`${PANEL}/sso/callback?code=forjado&state=qualquer`);
-  await expect(page).toHaveURL(/\/entrar\?erro=sso/);
+  // O host importa: a middleware reescreve para /painel/..., e o redirecionamento absoluto
+  // levava para um endereço sem o `painel.` — 404 em vez do aviso de login.
+  await expect(page).toHaveURL(`${PANEL}/entrar?erro=sso`);
+  await expect(page.getByRole("link", { name: "Entrar com Google" })).toBeVisible();
 });
 
 test("criar produto; publicar sem imagem é recusado; vitrine não mostra", async ({ page }) => {
@@ -92,4 +95,58 @@ test("evento: o painel cria um lote dentro da capacidade", async ({ page }) => {
   await form.getByRole("button", { name: "Criar lote" }).click();
   await expect(page.getByText("Lote criado; o estoque de ingressos foi contado.")).toBeVisible();
   await expect(page.getByText("Ingressos nos lotes: 35 de 40")).toBeVisible();
+});
+
+test("brief da vitrine: cada passo salva sozinho e o passo seguinte não apaga o anterior", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Página inicial" }).first().click();
+
+  // A tela da vitrine oferece o questionário antes de qualquer coisa: quem abre aqui sem saber o
+  // que preencher precisa achar essa porta.
+  await expect(page.getByRole("heading", { name: "Deixe a gente montar para você" })).toBeVisible();
+  await page.getByRole("link", { name: "Começar" }).click();
+
+  await expect(page).toHaveURL(/\/vitrine\/brief\/negocio/);
+  await page.getByLabel("O que a sua loja é").selectOption("padaria_confeitaria");
+  await page.getByLabel("O que você vende").fill("bolo de pote e brownie por encomenda");
+  await page.getByRole("button", { name: "Salvar e continuar" }).click();
+
+  // O passo 2 manda só os campos dele. Se mandasse o brief inteiro, o que está acima sumiria.
+  await expect(page).toHaveURL(/\/vitrine\/brief\/publico/);
+  await expect(page.getByText("Respostas salvas.")).toBeVisible();
+  await page.getByLabel("Por que de você, e não de outro (opcional)").fill("feito no dia\nentrego de bicicleta");
+  await page.getByRole("button", { name: "Salvar e continuar" }).click();
+
+  await expect(page).toHaveURL(/\/vitrine\/brief\/onde/);
+  // O WhatsApp é guardado em E.164, mas ninguém digita assim: o painel traduz.
+  await page.getByLabel("WhatsApp (opcional)").fill("31 98888-7777");
+  await page.getByLabel("Cidade (opcional)").fill("Contagem");
+  await page.getByRole("button", { name: "Salvar e continuar" }).click();
+
+  await expect(page).toHaveURL(/\/vitrine\/brief\/jeito/);
+  await expect(page.getByText("3 de 4")).toBeVisible();
+
+  // Voltar ao primeiro passo mostra o que foi gravado lá, não um formulário em branco.
+  // O passo respondido diz isso em palavras, não só com o visto: é o que o leitor de tela lê.
+  await page.getByRole("link", { name: "O seu negócio — respondido" }).click();
+  await expect(page.getByLabel("O que você vende")).toHaveValue("bolo de pote e brownie por encomenda");
+
+  await page.getByRole("link", { name: "Onde te achar — respondido" }).click();
+  await expect(page.getByLabel("WhatsApp (opcional)")).toHaveValue("+5531988887777");
+  await expect(page.getByLabel("Cidade (opcional)")).toHaveValue("Contagem");
+});
+
+test("brief: WhatsApp impossível nomeia o campo, em vez de recusar a página inteira", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.goto(`${page.url().split("?")[0]}/vitrine/brief/onde`);
+
+  await page.getByLabel("WhatsApp (opcional)").fill("123");
+  await page.getByRole("button", { name: /Salvar e/ }).click();
+  await expect(page.getByText(/WhatsApp inválido/)).toBeVisible();
 });

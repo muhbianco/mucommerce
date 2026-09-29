@@ -3,7 +3,7 @@
 import { api } from "@/lib/panel/api";
 import type { TenantPanelContext } from "@/lib/panel/types";
 
-import { id, optional, run, tenantBase, text } from "../form-kit";
+import { contactFields, id, optional, run, tenantBase, text } from "../form-kit";
 
 /**
  * O editor da página inicial.
@@ -281,9 +281,10 @@ function fieldsFor(type: string, form: FormData): Record<string, unknown> {
       return {
         ...comum,
         title: text(form, "title") || "Contato",
-        whatsapp_e164: optional(form, "whatsapp_e164"),
-        instagram: optional(form, "instagram"),
-        email: optional(form, "email"),
+        // O esquema exige E.164, perfil sem "@" e e-mail minúsculo; ninguém digita assim. Mandar
+        // cru devolvia 422 com "algum campo está inválido" e sem dizer qual — ver
+        // `lib/panel/contact`.
+        ...contactFields(form),
         address: optional(form, "address"),
         hours: optional(form, "hours"),
       };

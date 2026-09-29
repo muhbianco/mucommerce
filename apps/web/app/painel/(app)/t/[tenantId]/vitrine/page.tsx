@@ -28,6 +28,14 @@ interface CategorySummary {
 /** Blocos resolvidos, como a vitrine os recebe. */
 type Resolved = Record<string, unknown> & { type: string };
 
+/** O questionário e a torneira, como `GET /landing/brief` devolve. */
+interface BriefState {
+  steps: string[];
+  all_steps: string[];
+  usable: boolean;
+  quota: { used: number; limit: number; left: number; paid: boolean };
+}
+
 export default async function VitrinePage({
   params,
   searchParams,
@@ -43,19 +51,22 @@ export default async function VitrinePage({
   if (!tenantScopes(me, tenantId).can("settings:write")) notFound();
 
   const path = `/admin/tenants/${tenantId}`;
-  const [landingMedia, brandMedia, products, categories, preview] = await Promise.all([
+  const base = `/t/${tenantId}`;
+  const [landingMedia, brandMedia, products, categories, preview, brief] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=landing`),
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
     api<Page<ProductSummary>>(`${path}/products?limit=100`),
     api<CategorySummary[]>(`${path}/categories`).catch(() => [] as CategorySummary[]),
     // A prévia vem do mesmo resolver da vitrine: é isto que impede esta tela de mentir.
     api<Resolved[]>(`${path}/landing/preview`).catch(() => [] as Resolved[]),
+    api<BriefState>(`${path}/landing/brief`),
   ]);
 
   const blocks = ((context.settings.landing?.blocks as Block[] | undefined) ?? []).filter(Boolean);
   const branding = (context.settings.branding ?? {}) as Branding;
   const { ok, erro, tela } = await searchParams;
   const celular = tela === "celular";
+  const nextStep = brief.all_steps.find((key) => !brief.steps.includes(key)) ?? brief.all_steps[0];
 
   return (
     <>
@@ -65,6 +76,26 @@ export default async function VitrinePage({
         lead="Os blocos abaixo são, de cima para baixo, o que o cliente vê ao abrir a sua loja."
       />
       <Flash ok={ok} erro={erro} />
+
+      <Section
+        title="Deixe a gente montar para você"
+        description={`${brief.steps.length} de ${brief.all_steps.length} respondidos`}
+        actions={
+          <a className={styles.button} href={`${base}/vitrine/brief/${nextStep}`}>
+            {brief.steps.length ? "Continuar respondendo" : "Começar"}
+          </a>
+        }
+      >
+        <p className={styles.hint}>
+          Conte sobre a sua loja em quatro perguntas curtas e a gente monta uma proposta de página
+          inicial para você aprovar. Nada vai para o ar sem o seu OK.
+        </p>
+        <p className={styles.hint}>
+          {brief.quota.paid
+            ? `Você tem ${brief.quota.left} de ${brief.quota.limit} propostas neste mês.`
+            : `Estão incluídas ${brief.quota.limit} propostas por mês; você já usou ${brief.quota.used}.`}
+        </p>
+      </Section>
 
       <Section
         title="Prévia"

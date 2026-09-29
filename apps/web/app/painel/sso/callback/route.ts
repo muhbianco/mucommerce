@@ -12,8 +12,20 @@ import {
 
 const EXPIRED_SSO = { httpOnly: true, secure: true, sameSite: "lax" as const, path: "/", maxAge: 0 };
 
-function fail(request: NextRequest, reason: string): NextResponse {
-  const response = NextResponse.redirect(new URL(`/entrar?erro=${reason}`, request.url), 302);
+/**
+ * Volta para a tela de entrar com o motivo.
+ *
+ * O `Location` é **relativo**, e isto não é estilo: a middleware reescreve `painel.<domínio>/x`
+ * para `/painel/x`, e aqui dentro `request.url` já é a URL interna — o host vira o do servidor e
+ * perde o `painel.`. `new URL("/entrar", request.url)` mandava o navegador para um endereço que
+ * não é loja nem painel, ou seja, 404 em vez do aviso de login. Endereço relativo o navegador
+ * resolve contra a URL que ele realmente pediu, que é a certa.
+ */
+function fail(_request: NextRequest, reason: string): NextResponse {
+  const response = new NextResponse(null, {
+    status: 302,
+    headers: { Location: `/entrar?erro=${reason}`, "Cache-Control": "no-store" },
+  });
   response.cookies.set(SSO_COOKIE, "", EXPIRED_SSO);
   return response;
 }

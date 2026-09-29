@@ -1,0 +1,204 @@
+/*
+ * O questionário da loja. Usa as variáveis de `.shell`; nada de cor literal aqui.
+ *
+ * A trilha de passos é `<a>` de verdade, não um indicador decorativo: a lojista tem de poder
+ * voltar ao passo 2 sem refazer o 3, e um "stepper" que só avança obriga a isso. Por isso o
+ * passo concluído também é clicável.
+ */
+
+.trail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+}
+
+.trailStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem 0.45rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.trailStep:hover {
+  background: var(--paper);
+}
+
+/* O passo em que a pessoa está. `aria-current` é o que o leitor de tela anuncia; a cor só
+   acompanha — não é o único canal. */
+.trailStep[aria-current="step"] {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+}
+
+.trailNumber {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--mist);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Passo já respondido. A cor e o visto acompanham; quem diz o estado em palavras é o `.done`
+   abaixo, que o leitor de tela lê e ninguém vê. */
+.trailStep[data-done] .trailNumber {
+  background: var(--teal-deep);
+  color: #fff;
+}
+
+.done {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ formulário */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.field,
+.fieldShort {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.field > span,
+.fieldShort > span,
+.choices > legend {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* "(opcional)" precisa ser visível sem competir com o rótulo: é a informação que tira o peso do
+   formulário, e escondê-la faria a lojista achar que tudo é obrigatório. */
+.field > span em,
+.fieldShort > span em {
+  font-style: normal;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.field input,
+.field select,
+.field textarea,
+.fieldShort input {
+  width: 100%;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 3.2rem;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  /* Pela base, não pelo topo: rótulo que quebra em duas linhas empurrava só o campo dele para
+     baixo, e a linha ficava torta. */
+  align-items: end;
+}
+
+/* Linha de três campos iguais (contatos). */
+.row:has(.field:nth-child(3)):not(:has(.fieldShort)) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .row:has(.field:nth-child(3)):not(:has(.fieldShort)) {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ------------------------------------------------------------------ escolhas */
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.5rem;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 0.85rem;
+  margin: 0;
+}
+
+.choices > legend {
+  padding: 0 0.4rem;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.choice:hover {
+  background: var(--paper);
+}
+
+/* O alvo de toque é o rótulo inteiro, e ele tem 44px de altura mínima: no celular ninguém acerta
+   um radio de 16px. */
+.choice {
+  min-height: 44px;
+}
+
+.choice input {
+  margin-top: 0.15rem;
+  flex: none;
+}
+
+.choice > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.88rem;
+}
+
+.choice small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------------ rodapé do passo */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 0.25rem;
+}

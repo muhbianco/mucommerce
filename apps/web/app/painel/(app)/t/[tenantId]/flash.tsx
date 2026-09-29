@@ -38,6 +38,7 @@ const OK: Record<string, string> = {
   marca: "Marca salva.",
   seo: "SEO salvo.",
   landing: "Página inicial salva.",
+  brief: "Respostas salvas.",
   legal: "Documento publicado.",
   acesso_approved: "Acesso liberado.",
   acesso_blocked: "Cliente bloqueado nesta loja.",

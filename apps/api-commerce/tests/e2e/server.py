@@ -79,6 +79,11 @@ E2E_ENV = {
     "PAYMENTS_ALLOWED_PROVIDERS": "fake",
     "PAYMENTS_FAKE_WEBHOOK_SECRET": "e2e-" + "w" * 32,
     "CELERY_BROKER_URL": "",
+    # A suíte entra no painel uma vez por teste, tudo de 127.0.0.1. Com o número de produção
+    # (10 tentativas em 5 min por IP) acrescentar um teste estourava o limite no teste seguinte,
+    # que falhava no login sem nenhuma relação com o que ele testa. O limite em si tem teste
+    # próprio em `tests/test_auth.py`.
+    "LOGIN_RATE_LIMIT_ATTEMPTS": "200",
     "METRICS_ENABLED": "false",
     "DOCS_ENABLED": "false",
     "LOG_LEVEL": "WARNING",

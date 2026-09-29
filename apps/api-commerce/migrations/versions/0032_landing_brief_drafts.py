@@ -101,9 +101,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_landing_generation_usage_tenant_id", table_name="landing_generation_usage"
-    )
+    op.drop_index("ix_landing_generation_usage_tenant_id", table_name="landing_generation_usage")
     op.drop_table("landing_generation_usage")
     op.drop_index("ix_landing_drafts_status_updated", table_name="landing_drafts")
     op.drop_index("ix_landing_drafts_tenant_status", table_name="landing_drafts")
