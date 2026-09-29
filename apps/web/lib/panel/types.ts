@@ -363,7 +363,7 @@ export interface PaymentProviderSpec {
 export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
   mercadopago: {
     label: "Mercado Pago",
-    hint: "Pix e cartão dentro da loja: o cliente paga sem sair do site. A taxa do cartão é do lojista; o juro do parcelamento segue a configuração da sua conta no Mercado Pago.",
+    hint: "Pix e cartão dentro da loja: o cliente paga sem sair do site. No Mercado Pago, a aplicação precisa ser do tipo Checkout Transparente — é ela que dá a public key e o access token. A taxa do cartão é do lojista; o juro do parcelamento segue a configuração da sua conta.",
     methods: ["pix", "card"],
     public: [{ key: "public_key", label: "Public key" }],
     secrets: [

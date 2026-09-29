@@ -1,16 +1,28 @@
-"""Mercado Pago (Checkout Transparente, `/v1/payments`): Pix and cards tokenized by the Card Payment
-Brick, charged with the store's own access token (the money goes to the store's account).
+"""Mercado Pago pela **Orders API** (`/v1/orders`): Pix e cartão tokenizado pelo Card Payment
+Brick, cobrados com o access token da própria loja — o dinheiro cai na conta dela.
 
-Contract checked against the official docs on 2026-09-22 (ADR 0011). MP's webhook page labels
-`/v1/payments` as legacy next to its Orders API; it remains documented and is what the Brick's
-submission guide uses. Only this module knows MP's shapes.
+Migrado de `/v1/payments` em 29/09/2026: o Mercado Pago está desativando a API de Pagamentos, e
+uma aplicação nova já nasce sem ela. O contrato foi conferido contra a referência oficial
+(create, refund e os formatos de id) e contra o adaptador do mu-tower, que já roda em produção
+sobre a mesma API — inclusive o susto que ele tomou e que está no `map_status` abaixo.
 
-- Every create carries `X-Idempotency-Key` = our payment id: a retry never charges twice.
-- Webhooks: `x-signature` is `ts=…,v1=…`, HMAC-SHA256 of
-  `id:<data.id from the query, lowercased>;request-id:<x-request-id>;ts:<ts>;` (missing parts
-  omitted) keyed by the store's webhook secret. A bad signature is refused; a delivery without
-  one is only a hint — like every webhook here, it just makes us fetch the payment.
-- Amounts are cents on our side and decimal reais on MP's.
+O que muda em relação à API antiga, e que sangra se passar batido:
+
+- **O id não é mais número.** Vem `ORD01J…` para a order e `PAY01J…` para o pagamento dentro
+  dela. Um validador de dígitos recusaria tudo.
+- **`processed` não é aprovação.** A order conclui com `status: processed` e o dinheiro é
+  afirmado pelo `status_detail: accredited`. No mu-tower um mapeamento que só conhecia
+  `approved` devolveu *pendente para um Pix já pago*: dinheiro dentro, produto não entregue.
+- **O que importa está dentro da transação.** `transactions.payments[0]` carrega status, QR do
+  Pix e valor; a order por fora é rede de segurança.
+- **Estorno é da order**, `POST /v1/orders/{id}/refund`, e o parcial identifica o pagamento de
+  dentro (`transactions: [{id, amount}]`). Total manda a lista vazia.
+
+O que **não** muda: todo create leva `X-Idempotency-Key` = o id do nosso pagamento, então
+tentativa repetida não cobra duas vezes; e o webhook continua sendo só uma dica — quem diz o que
+aconteceu é a consulta. A assinatura segue o mesmo manifesto `ts`/`v1`.
+
+Dinheiro: centavo inteiro do nosso lado, string decimal ("19.90") do lado deles.
 """
 
 from __future__ import annotations
@@ -20,7 +32,7 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -46,15 +58,15 @@ from app.payments.provider import (
 
 logger = get_logger(__name__)
 
-MP_ID = re.compile(r"^[0-9]{1,24}$")
-# Pix expiry window accepted by MP: 30 minutes to 30 days from now.
-PIX_MIN_TTL = timedelta(minutes=31)
-NOTIFICATION_URL_MAX = 248
+#: Id da Orders API (`ORD01J…`, `PAY01J…`) e também o id numérico da API antiga, que ainda
+#: aparece em pagamento criado antes da migração e em notificação de tópico `payment`.
+MP_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _WAITING_METHODS = frozenset({"pix", "bank_transfer", "ticket"})
 
 
-def to_amount(cents: int) -> float:
-    return float(Decimal(cents) / 100)
+def to_amount_str(cents: int) -> str:
+    """Dinheiro como a Orders API quer: string decimal, duas casas, sem float no caminho."""
+    return str((Decimal(cents) / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 def to_cents(value: Any) -> int | None:
@@ -76,15 +88,19 @@ def _parse_dt(value: Any) -> datetime | None:
     return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _mp_datetime(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000+00:00")
-
-
 def map_status(status: str | None, detail: str | None, payment_type: str | None) -> str:
-    """MP status → ours. `in_mediation` is a dispute on a paid payment: still approved here."""
+    """MP status → ours. `in_mediation` is a dispute on a paid payment: still approved here.
+
+    `accredited` entra como aprovação ao lado de `approved` porque é assim que a Orders API
+    afirma que o dinheiro entrou: ela conclui com `status: processed`, que sozinho só diz que a
+    order foi processada. No mu-tower, um mapeamento que só conhecia `approved` devolveu
+    pendente para um Pix já pago — o pior desfecho possível, e por isso está no topo aqui.
+    """
+    if detail == "partially_refunded":
+        return PaymentStatus.PARTIALLY_REFUNDED
+    if detail == "accredited":
+        return PaymentStatus.APPROVED
     match status:
-        case "approved" if detail == "partially_refunded":
-            return PaymentStatus.PARTIALLY_REFUNDED
         case "approved" | "in_mediation":
             return PaymentStatus.APPROVED
         case "pending":
@@ -106,54 +122,125 @@ def map_status(status: str | None, detail: str | None, payment_type: str | None)
     return PaymentStatus.PENDING
 
 
-def result_from(data: Mapping[str, Any], http_status: int | None = None) -> ChargeResult:
-    status = str(data.get("status") or "")
-    detail = str(data.get("status_detail") or "") or None
-    payment_type = str(data.get("payment_type_id") or "") or None
-    ours = map_status(status, detail, payment_type)
-    poi = (data.get("point_of_interaction") or {}).get("transaction_data") or {}
-    pix = None
-    if poi.get("qr_code"):
-        pix = PixData(
-            copy_paste=str(poi["qr_code"]),
-            qr_base64=str(poi["qr_code_base64"]) if poi.get("qr_code_base64") else None,
-            ticket_url=str(poi["ticket_url"]) if poi.get("ticket_url") else None,
-        )
-    card = data.get("card") or {}
-    payer = (
-        {
-            "brand": str(data.get("payment_method_id") or ""),
-            "last_four": str(card["last_four_digits"]),
-        }
-        if card.get("last_four_digits")
-        else None
+def first_payment(order: Mapping[str, Any]) -> Mapping[str, Any]:
+    """O pagamento de dentro da order. Vazio quando ainda não há nenhum."""
+    transactions = order.get("transactions")
+    payments = transactions.get("payments") if isinstance(transactions, Mapping) else None
+    if isinstance(payments, list):
+        for item in payments:
+            if isinstance(item, Mapping):
+                return item
+    return {}
+
+
+def _refunded_cents(order: Mapping[str, Any], payment: Mapping[str, Any]) -> int | None:
+    """Quanto já voltou, somando os estornos da order.
+
+    A order lista cada estorno em `transactions.refunds`; o pagamento também carrega o
+    acumulado. Somar a lista é o que permite distinguir devolução parcial de total sem
+    depender de um único campo.
+    """
+    transactions = order.get("transactions")
+    refunds = transactions.get("refunds") if isinstance(transactions, Mapping) else None
+    if isinstance(refunds, list) and refunds:
+        total = 0
+        for item in refunds:
+            if isinstance(item, Mapping):
+                total += to_cents(item.get("amount")) or 0
+        return total or None
+    return to_cents(payment.get("refunded_amount"))
+
+
+def order_status(order: Mapping[str, Any]) -> tuple[str, str | None, str | None, str | None]:
+    """Estado da order do ponto de vista do dinheiro.
+
+    Ordem importa, e cada passo custou um erro de alguém:
+
+    1. **Estorno e chargeback mandam.** Quem devolveu dinheiro não está aprovado, por mais que o
+       pagamento de dentro ainda diga que sim.
+    2. **O pagamento de dentro manda sobre a order.** É ele que usa o vocabulário conhecido; o
+       `processed` de fora não afirma que entrou dinheiro.
+    3. **A order é a rede de segurança.** Já apareceu resposta em que o status de dentro ainda
+       não tinha virado e o de fora já dizia `accredited`.
+    """
+    payment = first_payment(order)
+    raw_status = str(payment.get("status") or order.get("status") or "") or None
+    raw_detail = str(payment.get("status_detail") or order.get("status_detail") or "") or None
+    method = payment.get("payment_method")
+    payment_type = (
+        str((method or {}).get("type") or "") or None if isinstance(method, Mapping) else None
     )
+
+    transactions = order.get("transactions")
+    chargebacks = transactions.get("chargebacks") if isinstance(transactions, Mapping) else None
+    if isinstance(chargebacks, list) and chargebacks:
+        return PaymentStatus.CHARGEBACK, raw_status, raw_detail, payment_type
+
+    devolvido = _refunded_cents(order, payment) or 0
+    pago = to_cents(payment.get("amount") or order.get("total_amount")) or 0
+    if devolvido > 0:
+        virou = PaymentStatus.PARTIALLY_REFUNDED if 0 < devolvido < pago else PaymentStatus.REFUNDED
+        return virou, raw_status, raw_detail, payment_type
+
+    ours = map_status(
+        str(payment.get("status") or "") or None,
+        str(payment.get("status_detail") or "") or None,
+        payment_type,
+    )
+    if ours == PaymentStatus.PENDING:
+        ours = map_status(
+            str(order.get("status") or "") or None,
+            str(order.get("status_detail") or "") or None,
+            payment_type,
+        )
+    return ours, raw_status, raw_detail, payment_type
+
+
+def result_from(data: Mapping[str, Any], http_status: int | None = None) -> ChargeResult:
+    """Uma order do Mercado Pago vira o nosso resultado de cobrança."""
+    payment = first_payment(data)
+    ours, raw_status, raw_detail, _ = order_status(data)
+    method = payment.get("payment_method")
+    method = method if isinstance(method, Mapping) else {}
+
+    pix = None
+    if method.get("qr_code"):
+        pix = PixData(
+            copy_paste=str(method["qr_code"]),
+            qr_base64=str(method["qr_code_base64"]) if method.get("qr_code_base64") else None,
+            ticket_url=str(method["ticket_url"]) if method.get("ticket_url") else None,
+        )
     approved = ours in (PaymentStatus.APPROVED, PaymentStatus.PARTIALLY_REFUNDED)
     return ChargeResult(
         status=ours,
         provider_payment_id=str(data["id"]) if data.get("id") is not None else None,
-        provider_status=status or None,
-        provider_status_detail=detail,
+        provider_status=raw_status,
+        provider_status_detail=raw_detail,
         provider_reference=str(data.get("external_reference") or "") or None,
-        paid_amount_cents=to_cents(data.get("transaction_amount")) if approved else None,
+        paid_amount_cents=(
+            to_cents(payment.get("amount") or data.get("total_amount")) if approved else None
+        ),
         pix=pix,
-        expires_at=_parse_dt(data.get("date_of_expiration")),
-        failure_code=detail if ours == PaymentStatus.REJECTED else None,
+        expires_at=_parse_dt(payment.get("date_of_expiration") or data.get("expiration_time")),
+        failure_code=raw_detail if ours == PaymentStatus.REJECTED else None,
         failure_message=None,
-        payer=payer,
+        # A marca e os quatro últimos do cartão ainda não foram vistos numa resposta real da
+        # Orders API. Em vez de adivinhar nome de campo, o resumo abaixo guarda o método e o
+        # primeiro cartão de verdade conta a forma — igual ao que o mu-tower fez com o tópico.
+        payer=None,
         raw_summary={
             "id": data.get("id"),
-            "status": status,
-            "status_detail": detail,
-            "live_mode": data.get("live_mode"),
-            "payment_method_id": data.get("payment_method_id"),
-            "payment_type_id": payment_type,
-            "transaction_amount": data.get("transaction_amount"),
-            "currency_id": data.get("currency_id"),
-            "date_approved": data.get("date_approved"),
+            "order_status": data.get("status"),
+            "order_status_detail": data.get("status_detail"),
+            "payment_id": payment.get("id"),
+            "payment_status": payment.get("status"),
+            "payment_status_detail": payment.get("status_detail"),
+            "payment_method": {"id": method.get("id"), "type": method.get("type")},
+            "total_amount": data.get("total_amount"),
+            "country_id": data.get("country_id"),
         },
         http_status=http_status,
-        refunded_cents=to_cents(data.get("transaction_amount_refunded")),
+        refunded_cents=_refunded_cents(data, payment),
     )
 
 
@@ -165,6 +252,17 @@ def _split_name(name: str | None) -> dict[str, str]:
 
 
 def charge_body(req: ChargeRequest, now: datetime) -> dict[str, Any]:
+    """O corpo do `POST /v1/orders`.
+
+    `processing_mode: automatic` porque quem decide aprovar é o Mercado Pago, não nós: no modo
+    manual a order fica esperando uma captura nossa, e um Pix pago ficaria parado.
+
+    **Sem URL de notificação no corpo, de propósito.** O campo da Orders API para isso não está
+    confirmado — `config.online.callback_url` é, na documentação de Checkout Pro, para onde o
+    comprador volta, e mandar uma URL de API para lá jogaria o cliente numa resposta JSON. O
+    aviso vem do webhook da conta, configurado no painel do Mercado Pago, e a conciliação por
+    varredura cobre a ausência dele. Confirmado o nome do campo, ele entra aqui.
+    """
     if not req.payer_email:
         raise ProviderError("payer e-mail missing", code="payer_email_missing", definitive=True)
     payer: dict[str, Any] = {"email": req.payer_email, **_split_name(req.payer_name)}
@@ -173,33 +271,31 @@ def charge_body(req: ChargeRequest, now: datetime) -> dict[str, Any]:
             "type": req.payer_identification.get("type"),
             "number": req.payer_identification.get("number"),
         }
-    body: dict[str, Any] = {
-        "transaction_amount": to_amount(req.amount_cents),
-        "description": req.description[:120],
-        "external_reference": req.provider_reference[:64],
-        "payer": payer,
-        "metadata": {"order_number": req.order_number},
-    }
-    url = req.notification_url or ""
-    if url.startswith("https://") and len(url) <= NOTIFICATION_URL_MAX:
-        body["notification_url"] = url
+
     if req.method == "pix":
-        body["payment_method_id"] = "pix"
-        expires = max(req.expires_at or now + timedelta(minutes=30), now + PIX_MIN_TTL)
-        body["date_of_expiration"] = _mp_datetime(expires)
+        method: dict[str, Any] = {"id": "pix", "type": "bank_transfer"}
     elif req.method == "card":
         if req.card is None:
             raise ProviderError("card token missing", code="card_missing", definitive=True)
-        body.update(
-            token=req.card.token,
-            payment_method_id=req.card.payment_method_id,
-            installments=req.card.installments,
-        )
-        if req.card.issuer_id:
-            body["issuer_id"] = str(req.card.issuer_id)
+        method = {
+            "id": req.card.payment_method_id,
+            "type": "credit_card",
+            "token": req.card.token,
+            "installments": req.card.installments,
+        }
     else:
         raise ProviderError("method not offered", code="method_not_offered", definitive=True)
-    return body
+
+    valor = to_amount_str(req.amount_cents)
+    return {
+        "type": "online",
+        "processing_mode": "automatic",
+        "external_reference": req.provider_reference[:64],
+        "total_amount": valor,
+        "description": req.description[:120],
+        "payer": payer,
+        "transactions": {"payments": [{"amount": valor, "payment_method": method}]},
+    }
 
 
 def _signature_parts(header: str) -> dict[str, str]:
@@ -293,18 +389,18 @@ class MercadoPagoProvider:
             )
         return status, data
 
-    # ------------------------------------------------------------------ payments
+    # ------------------------------------------------------------------- orders
     async def create_charge(self, creds: ProviderCredentials, req: ChargeRequest) -> ChargeResult:
         body = charge_body(req, datetime.now(UTC))
         status, data = await self._request(
-            creds, "POST", "/v1/payments", body=body, idempotency=req.payment_id
+            creds, "POST", "/v1/orders", body=body, idempotency=req.payment_id
         )
         return result_from(data, status)
 
     async def fetch_status(self, creds: ProviderCredentials, ref: ProviderRef) -> ChargeResult:
         if ref.provider_payment_id:
-            payment_id = _checked_id(ref.provider_payment_id)
-            status, data = await self._request(creds, "GET", f"/v1/payments/{payment_id}")
+            order_id = _checked_id(ref.provider_payment_id)
+            status, data = await self._request(creds, "GET", f"/v1/orders/{order_id}")
             return result_from(data, status)
         found = await self._by_reference(creds, ref.provider_reference)
         if found is None:
@@ -315,59 +411,78 @@ class MercadoPagoProvider:
     async def _by_reference(
         self, creds: ProviderCredentials, reference: str
     ) -> Mapping[str, Any] | None:
+        """A order que carrega a nossa referência, quando perdemos o id dela.
+
+        Caminho de exceção: o id da order é guardado na criação, então isto só roda se aquela
+        gravação se perdeu. A busca da Orders API **não** está confirmada contra uma resposta
+        real, e por isso qualquer recusa aqui vira "não achei" em vez de derrubar a
+        conciliação — com o corpo no log, para a primeira chamada de verdade contar a forma.
+        """
         if not reference:
             return None
-        _, data = await self._request(
-            creds,
-            "GET",
-            "/v1/payments/search",
-            params={
-                "external_reference": reference,
-                "sort": "date_created",
-                "criteria": "desc",
-                "limit": 1,
-            },
-        )
-        results = data.get("results") or []
-        return results[0] if results and isinstance(results[0], dict) else None
+        try:
+            _, data = await self._request(
+                creds, "GET", "/v1/orders/search", params={"external_reference": reference}
+            )
+        except ProviderError as exc:
+            logger.warning(
+                "Busca de order por referência não respondeu como esperado",
+                extra={"mp_code": exc.code, "mp_status": exc.http_status},
+            )
+            return None
+        results = data.get("results") or data.get("elements") or []
+        if isinstance(results, list) and results and isinstance(results[0], dict):
+            return results[0]
+        return None
 
     async def cancel(self, creds: ProviderCredentials, ref: ProviderRef) -> ChargeResult | None:
-        payment_id = ref.provider_payment_id
-        if not payment_id:
+        order_id = ref.provider_payment_id
+        if not order_id:
             found = await self._by_reference(creds, ref.provider_reference)
             if found is None:
                 return None  # never created there
-            payment_id = str(found.get("id"))
-        payment_id = _checked_id(payment_id)
+            order_id = str(found.get("id"))
+        order_id = _checked_id(order_id)
         try:
             status, data = await self._request(
-                creds, "PUT", f"/v1/payments/{payment_id}", body={"status": "cancelled"}
+                creds, "POST", f"/v1/orders/{order_id}/cancel", idempotency=f"cancel-{order_id}"
             )
         except ProviderError as exc:
-            if exc.http_status != 400:
+            if exc.http_status not in (400, 409):
                 raise
             # Not cancellable any more (approved meanwhile, already expired): report its state.
-            status, data = await self._request(creds, "GET", f"/v1/payments/{payment_id}")
+            status, data = await self._request(creds, "GET", f"/v1/orders/{order_id}")
         return result_from(data, status)
 
     async def refund(
         self, creds: ProviderCredentials, ref: ProviderRef, amount_cents: int, *, idempotency: str
     ) -> RefundResult:
-        """`POST /v1/payments/{id}/refunds` with our refund id as the idempotency key. The amount
-        always goes explicitly (MP reads no body as "everything"). The refund object's `status`
-        is not documented in detail: anything but a clear refusal or "in process" is taken as
-        done, and the payment's own status (refunded / partially refunded) confirms it later."""
-        payment_id = _checked_id(ref.provider_payment_id or "")
+        """`POST /v1/orders/{id}/refund`, com o nosso id de devolução como chave de idempotência.
+
+        Total manda a lista vazia; parcial identifica o pagamento de dentro da order e o valor.
+        Por isso o parcial lê a order antes: o `PAY…` não é o id que guardamos, é o de dentro.
+        """
+        order_id = _checked_id(ref.provider_payment_id or "")
+        body: dict[str, Any] = {"transactions": []}
+        _, order = await self._request(creds, "GET", f"/v1/orders/{order_id}")
+        payment = first_payment(order)
+        total = to_cents(payment.get("amount") or order.get("total_amount")) or 0
+        if 0 < amount_cents < total and payment.get("id"):
+            body = {
+                "transactions": [{"id": str(payment["id"]), "amount": to_amount_str(amount_cents)}]
+            }
         _, data = await self._request(
             creds,
             "POST",
-            f"/v1/payments/{payment_id}/refunds",
-            body={"amount": to_amount(amount_cents)},
+            f"/v1/orders/{order_id}/refund",
+            body=body,
             idempotency=idempotency,
         )
-        refund_id = str(data["id"]) if data.get("id") is not None else None
-        status = str(data.get("status") or "")
-        if status in ("rejected", "cancelled"):
+        devolucoes = (data.get("transactions") or {}).get("refunds") or []
+        primeira = devolucoes[0] if devolucoes and isinstance(devolucoes[0], dict) else {}
+        refund_id = str(primeira.get("id")) if primeira.get("id") is not None else None
+        status = str(primeira.get("status") or data.get("status") or "")
+        if status in ("rejected", "cancelled", "failed"):
             return RefundResult(status="failed", provider_refund_id=refund_id, detail=status)
         if status in ("in_process", "pending"):
             return RefundResult(status="pending", provider_refund_id=refund_id, detail=status)
@@ -403,8 +518,12 @@ class MercadoPagoProvider:
         resource = str(data.get("id") or inbound.query.get("data.id") or "") or None
         if resource is not None and not MP_ID.match(resource):
             resource = None
-        if kind != "payment":
-            resource = None  # other topics are not ours to act on
+        # `merchant_order` é outro recurso, com id que não é o da nossa order: agir nele daria
+        # 404 em toda notificação. Tópico de pagamento e de order passam; tópico vazio também,
+        # porque o nome da notificação de order ainda não foi visto numa entrega real e inventá-lo
+        # seria pior do que assumir que não se sabe. O id é conferido na consulta de todo jeito.
+        if kind and kind not in ("payment", "order", "orders"):
+            resource = None
         notification = str(body.get("id") or "")
         action = str(body.get("action") or "")
         dedupe = (
@@ -425,14 +544,26 @@ class MercadoPagoProvider:
             return CredentialTest(ok=False, detail="public key ausente")
         if not creds.secrets.get("webhook_secret"):
             return CredentialTest(ok=False, detail="assinatura secreta dos webhooks ausente")
+        # Sonda de leitura numa order que não existe: nada é criado na conta da loja. Cada
+        # resposta diz uma coisa diferente, e o que não distingue token de permissão é relatado
+        # como "não deu para testar" — reprovar sem ter testado manda procurar no lugar errado.
         try:
-            await self._request(
-                creds, "GET", "/v1/payments/search", params={"sort": "date_created", "limit": 1}
-            )
+            await self._request(creds, "GET", "/v1/orders/ORD00000000000000000000000")
         except ProviderError as exc:
-            if exc.http_status in (401, 403):
+            if exc.http_status == 401:
                 return CredentialTest(ok=False, detail="access token recusado pelo Mercado Pago")
-            return CredentialTest(ok=False, detail=f"Mercado Pago indisponível ({exc.code})")
+            if exc.http_status == 403:
+                return CredentialTest(
+                    ok=False,
+                    detail=(
+                        "O Mercado Pago leu o token mas não liberou a API de pedidos para esta "
+                        "conta. Confira se a aplicação é do tipo Checkout Transparente com a "
+                        "Orders API habilitada."
+                    ),
+                )
+            if exc.http_status == 404:
+                return CredentialTest(ok=True, detail="access token aceito")
+            return CredentialTest(ok=False, detail=f"Não deu para testar agora ({exc.code}).")
         return CredentialTest(ok=True, detail="access token aceito")
 
 

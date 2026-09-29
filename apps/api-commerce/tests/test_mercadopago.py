@@ -35,6 +35,7 @@ from app.payments.providers.mercadopago import (
     MercadoPagoProvider,
     charge_body,
     map_status,
+    result_from,
     signature_manifest,
     to_cents,
 )
@@ -50,6 +51,7 @@ CREDS = ProviderCredentials(
     sandbox=True,
 )
 NOW = datetime(2026, 9, 22, 15, 0, tzinfo=UTC)
+ORDER_ID = "ORD01JTESTE0000000000000001"
 CARD_TOKEN = "tok_" + "0" * 12  # built here: no token-shaped literal in the repo (gitleaks)
 
 
@@ -70,25 +72,48 @@ def request(**overrides: Any) -> ChargeRequest:
     return ChargeRequest(**(values | overrides))
 
 
-def pix_payment(pid: int = 123456, status: str = "pending", **extra: Any) -> dict[str, Any]:
-    return {
-        "id": pid,
+def pix_order(
+    oid: str = "ORD01JTESTE0000000000000001",
+    status: str = "pending",
+    *,
+    detail: str | None = None,
+    total: str = "30.50",
+    reference: str = "alpha-7-abc123",
+    expires: str = "2026-09-22T15:31:00.000-03:00",
+    payment: dict[str, Any] | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Uma order como a Orders API devolve: o que decide dinheiro mora dentro da transação."""
+    detalhe = (
+        detail
+        if detail is not None
+        else ("pending_waiting_transfer" if status == "pending" else "accredited")
+    )
+    dentro: dict[str, Any] = {
+        "id": "PAY01JTESTE0000000000000001",
         "status": status,
-        "status_detail": "pending_waiting_transfer" if status == "pending" else "accredited",
-        "payment_method_id": "pix",
-        "payment_type_id": "bank_transfer",
-        "transaction_amount": 30.5,
-        "currency_id": "BRL",
-        "external_reference": "alpha-7-abc123",
-        "date_of_expiration": "2026-09-22T15:31:00.000-03:00",
-        "live_mode": False,
-        "point_of_interaction": {
-            "transaction_data": {
-                "qr_code": "00020126mp",
-                "qr_code_base64": "iVBORw0KGgo=",
-                "ticket_url": "https://www.mercadopago.com.br/payments/123456/ticket",
-            }
+        "status_detail": detalhe,
+        "amount": total,
+        "date_of_expiration": expires,
+        "payment_method": {
+            "id": "pix",
+            "type": "bank_transfer",
+            "qr_code": "00020126mp",
+            "qr_code_base64": "iVBORw0KGgo=",
+            "ticket_url": "https://www.mercadopago.com.br/payments/x/ticket",
         },
+    }
+    dentro.update(payment or {})
+    return {
+        "id": oid,
+        "type": "online",
+        # A order conclui com `processed` e é o detalhe de dentro que afirma o dinheiro.
+        "status": "processed" if status == "approved" else "action_required",
+        "status_detail": detalhe,
+        "external_reference": reference,
+        "total_amount": total,
+        "country_id": "BRA",
+        "transactions": {"payments": [dentro]},
         **extra,
     }
 
@@ -112,36 +137,99 @@ class FakeMP:
 
 
 # ----------------------------------------------------------------------------------- unit
-def test_the_pix_body_uses_reais_our_reference_and_a_valid_expiry() -> None:
+def test_the_pix_body_is_an_online_order_with_our_reference() -> None:
     body = charge_body(request(), NOW)
-    assert body["transaction_amount"] == 30.5
-    assert body["payment_method_id"] == "pix"
+    assert body["type"] == "online"
+    # `automatic`: no manual a order espera uma captura nossa, e um Pix pago ficaria parado.
+    assert body["processing_mode"] == "automatic"
     assert body["external_reference"] == "alpha-7-abc123"
+    # String decimal, não float: dinheiro não anda solto em binário.
+    assert body["total_amount"] == "30.50"
     assert body["payer"] == {
         "email": "maria@cliente.test",
         "first_name": "Maria",
         "last_name": "da Silva",
     }
-    # 10 minutes left on the order, but MP takes at least 30: the Pix gets 31.
-    assert body["date_of_expiration"] == "2026-09-22T15:31:00.000+00:00"
-    assert "notification_url" in body
-    plain = charge_body(request(notification_url="http://api.test/x"), NOW)
-    assert "notification_url" not in plain  # https only
+    (pagamento,) = body["transactions"]["payments"]
+    assert pagamento["amount"] == "30.50"
+    assert pagamento["payment_method"] == {"id": "pix", "type": "bank_transfer"}
+    # A URL de aviso fica fora até o nome do campo estar confirmado (ver o módulo).
+    assert "notification_url" not in json.dumps(body)
     with pytest.raises(ProviderError) as missing:
         charge_body(request(payer_email=None), NOW)
     assert missing.value.definitive
 
 
-def test_the_card_body_carries_the_brick_token_and_issuer_as_text() -> None:
+def test_the_card_body_carries_the_brick_token_inside_the_transaction() -> None:
     card = CardInput(CARD_TOKEN, "visa", "310", 3)  # token, method, issuer, installments
     body = charge_body(request(method="card", card=card), NOW)
-    assert (body["token"], body["payment_method_id"], body["installments"], body["issuer_id"]) == (
-        CARD_TOKEN,
-        "visa",
-        3,
-        "310",
+    (pagamento,) = body["transactions"]["payments"]
+    assert pagamento["payment_method"] == {
+        "id": "visa",
+        "type": "credit_card",
+        "token": CARD_TOKEN,
+        "installments": 3,
+    }
+    with pytest.raises(ProviderError) as sem_token:
+        charge_body(request(method="card"), NOW)
+    assert sem_token.value.definitive
+
+
+def test_a_processed_order_is_only_money_when_the_detail_says_so() -> None:
+    """O susto que o mu-tower tomou, virado em teste.
+
+    `processed` sozinho diz que a order foi processada, não que entrou dinheiro. Um mapeamento
+    que só conhecesse `approved` devolveria pendente para um Pix já pago — dinheiro dentro,
+    produto não entregue.
+    """
+    # A palavra do status nem é `approved`: quem afirma o dinheiro é o detalhe.
+    pago = result_from(pix_order(status="processed", detail="accredited"))
+    assert pago.status == PaymentStatus.APPROVED
+    assert pago.paid_amount_cents == 3050
+
+    # Pix ainda não pago: o cliente tem o QR na mão e a loja não separa nada.
+    esperando = result_from(pix_order(status="pending"))
+    assert esperando.status == PaymentStatus.REQUIRES_ACTION
+    assert esperando.paid_amount_cents is None
+    assert esperando.pix is not None and esperando.pix.copy_paste == "00020126mp"
+
+
+def test_the_refund_collection_wins_over_the_payment() -> None:
+    devolvida = pix_order(
+        status="approved",
+        transactions={
+            "payments": [
+                {
+                    "id": "PAY01JTESTE0000000000000001",
+                    "status": "approved",
+                    "status_detail": "accredited",
+                    "amount": "30.50",
+                    "payment_method": {"id": "pix", "type": "bank_transfer"},
+                }
+            ],
+            "refunds": [{"id": "REF1", "amount": "30.50", "status": "processed"}],
+        },
     )
-    assert "date_of_expiration" not in body
+    assert result_from(devolvida).status == PaymentStatus.REFUNDED
+    assert result_from(devolvida).refunded_cents == 3050
+
+    parcial = pix_order(
+        status="approved",
+        transactions={
+            "payments": [
+                {
+                    "id": "PAY01JTESTE0000000000000001",
+                    "status": "approved",
+                    "status_detail": "accredited",
+                    "amount": "30.50",
+                    "payment_method": {"id": "pix", "type": "bank_transfer"},
+                }
+            ],
+            "refunds": [{"id": "REF1", "amount": "10.00", "status": "processed"}],
+        },
+    )
+    assert result_from(parcial).status == PaymentStatus.PARTIALLY_REFUNDED
+    assert result_from(parcial).refunded_cents == 1000
 
 
 @pytest.mark.parametrize(
@@ -169,14 +257,18 @@ def test_money_converts_exactly() -> None:
 
 async def test_create_sends_the_idempotency_key_and_reads_the_qr_code() -> None:
     mp = FakeMP()
-    mp.routes[("POST", "/v1/payments")] = lambda r: httpx.Response(201, json=pix_payment())
+    mp.routes[("POST", "/v1/orders")] = lambda r: httpx.Response(201, json=pix_order())
     req = request()
     result = await mp.provider().create_charge(CREDS, req)
     sent = mp.requests[0]
+    # A chave de idempotência é o id do nosso pagamento: repetir a tentativa não cobra duas vezes.
     assert sent.headers["X-Idempotency-Key"] == req.payment_id
     assert sent.headers["Authorization"] == f"Bearer {TOKEN}"
-    assert json.loads(sent.content)["transaction_amount"] == 30.5
-    assert (result.status, result.provider_payment_id) == (PaymentStatus.REQUIRES_ACTION, "123456")
+    assert json.loads(sent.content)["total_amount"] == "30.50"
+    assert (result.status, result.provider_payment_id) == (
+        PaymentStatus.REQUIRES_ACTION,
+        "ORD01JTESTE0000000000000001",
+    )
     assert result.pix is not None and result.pix.copy_paste == "00020126mp"
     assert result.provider_reference == "alpha-7-abc123"
     assert TOKEN not in json.dumps(result.raw_summary)
@@ -184,14 +276,14 @@ async def test_create_sends_the_idempotency_key_and_reads_the_qr_code() -> None:
 
 async def test_errors_say_whether_retrying_can_help() -> None:
     mp = FakeMP()
-    mp.routes[("POST", "/v1/payments")] = lambda r: httpx.Response(
+    mp.routes[("POST", "/v1/orders")] = lambda r: httpx.Response(
         400, json={"message": "invalid token", "cause": [{"code": 3003}]}
     )
     with pytest.raises(ProviderError) as refused:
         await mp.provider().create_charge(CREDS, request())
     assert (refused.value.definitive, refused.value.code) == (True, "mp_3003")
 
-    mp.routes[("POST", "/v1/payments")] = lambda r: httpx.Response(502, text="bad gateway")
+    mp.routes[("POST", "/v1/orders")] = lambda r: httpx.Response(502, text="bad gateway")
     with pytest.raises(ProviderError) as down:
         await mp.provider().create_charge(CREDS, request())
     assert not down.value.definitive
@@ -199,7 +291,7 @@ async def test_errors_say_whether_retrying_can_help() -> None:
     def timeout(r: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("slow", request=r)
 
-    mp.routes[("POST", "/v1/payments")] = timeout
+    mp.routes[("POST", "/v1/orders")] = timeout
     with pytest.raises(ProviderError) as slow:
         await mp.provider().create_charge(CREDS, request())
     assert (slow.value.code, slow.value.definitive) == ("timeout", False)
@@ -207,20 +299,25 @@ async def test_errors_say_whether_retrying_can_help() -> None:
 
 async def test_fetch_by_id_or_by_our_reference() -> None:
     mp = FakeMP()
-    mp.routes[("GET", "/v1/payments/123456")] = lambda r: httpx.Response(
-        200, json=pix_payment(status="approved")
+    mp.routes[("GET", "/v1/orders/ORD01JTESTE0000000000000001")] = lambda r: httpx.Response(
+        200, json=pix_order(status="approved")
     )
-    by_id = await mp.provider().fetch_status(CREDS, ProviderRef("123456", "alpha-7-abc123"))
+    by_id = await mp.provider().fetch_status(
+        CREDS, ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
+    )
     assert (by_id.status, by_id.paid_amount_cents) == (PaymentStatus.APPROVED, 3050)
 
-    mp.routes[("GET", "/v1/payments/search")] = lambda r: httpx.Response(
-        200, json={"paging": {"total": 1}, "results": [pix_payment()]}
+    mp.routes[("GET", "/v1/orders/search")] = lambda r: httpx.Response(
+        200, json={"paging": {"total": 1}, "results": [pix_order()]}
     )
     lost = await mp.provider().fetch_status(CREDS, ProviderRef(None, "alpha-7-abc123"))
-    assert (lost.status, lost.provider_payment_id) == (PaymentStatus.REQUIRES_ACTION, "123456")
+    assert (lost.status, lost.provider_payment_id) == (
+        PaymentStatus.REQUIRES_ACTION,
+        "ORD01JTESTE0000000000000001",
+    )
     assert mp.requests[-1].url.params["external_reference"] == "alpha-7-abc123"
 
-    mp.routes[("GET", "/v1/payments/search")] = lambda r: httpx.Response(
+    mp.routes[("GET", "/v1/orders/search")] = lambda r: httpx.Response(
         200, json={"paging": {"total": 0}, "results": []}
     )
     nothing = await mp.provider().fetch_status(CREDS, ProviderRef(None, "alpha-7-abc123"))
@@ -229,23 +326,71 @@ async def test_fetch_by_id_or_by_our_reference() -> None:
         await mp.provider().fetch_status(CREDS, ProviderRef("../users/me", ""))
 
 
+async def test_a_search_that_answers_in_an_unknown_shape_does_not_break_reconciliation() -> None:
+    """A busca de orders não foi vista contra uma resposta real.
+
+    Se ela recusar, a conciliação segue dizendo "ainda não achei" em vez de derrubar a varredura
+    de todas as lojas por causa de um formato que a gente supôs.
+    """
+    mp = FakeMP()
+    mp.routes[("GET", "/v1/orders/search")] = lambda r: httpx.Response(
+        400, json={"message": "unsupported"}
+    )
+    resultado = await mp.provider().fetch_status(CREDS, ProviderRef(None, "alpha-7-abc123"))
+    assert resultado.status == PaymentStatus.PENDING
+
+
 async def test_cancel_reports_an_approval_that_won_the_race() -> None:
     mp = FakeMP()
-    mp.routes[("PUT", "/v1/payments/123456")] = lambda r: httpx.Response(
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/cancel")] = lambda r: httpx.Response(
         400, json={"message": "not cancellable", "cause": [{"code": 2018}]}
     )
-    mp.routes[("GET", "/v1/payments/123456")] = lambda r: httpx.Response(
-        200, json=pix_payment(status="approved")
+    mp.routes[("GET", "/v1/orders/ORD01JTESTE0000000000000001")] = lambda r: httpx.Response(
+        200, json=pix_order(status="approved")
     )
-    result = await mp.provider().cancel(CREDS, ProviderRef("123456", "alpha-7-abc123"))
+    result = await mp.provider().cancel(
+        CREDS, ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
+    )
     assert result is not None and result.status == PaymentStatus.APPROVED
 
-    mp.routes[("PUT", "/v1/payments/123456")] = lambda r: httpx.Response(
-        200, json=pix_payment(status="cancelled", status_detail="by_collector")
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/cancel")] = lambda r: httpx.Response(
+        200, json=pix_order(status="cancelled", detail="by_collector")
     )
-    cancelled = await mp.provider().cancel(CREDS, ProviderRef("123456", "alpha-7-abc123"))
+    cancelled = await mp.provider().cancel(
+        CREDS, ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
+    )
     assert cancelled is not None and cancelled.status == PaymentStatus.CANCELLED
-    assert json.loads(mp.requests[-1].content) == {"status": "cancelled"}
+
+
+async def test_refund_sends_the_whole_order_or_the_payment_inside_it() -> None:
+    """Total manda a lista vazia; parcial precisa do `PAY…` de dentro, que não é o id que
+    guardamos — por isso o parcial lê a order antes de estornar."""
+    mp = FakeMP()
+    mp.routes[("GET", "/v1/orders/ORD01JTESTE0000000000000001")] = lambda r: httpx.Response(
+        200, json=pix_order(status="approved")
+    )
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/refund")] = lambda r: httpx.Response(
+        200,
+        json={
+            "id": "ORD01JTESTE0000000000000001",
+            "status": "processed",
+            "status_detail": "refunded",
+            "transactions": {
+                "refunds": [{"id": "REF01J", "amount": "30.50", "status": "processed"}]
+            },
+        },
+    )
+    ref = ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
+    total = await mp.provider().refund(CREDS, ref, 3050, idempotency="dev-1")
+    assert (total.status, total.provider_refund_id) == ("completed", "REF01J")
+    assert json.loads(mp.requests[-1].content) == {"transactions": []}
+    assert mp.requests[-1].headers["X-Idempotency-Key"] == "dev-1"
+
+    parcial = await mp.provider().refund(CREDS, ref, 1000, idempotency="dev-2")
+    assert parcial.status == "completed"
+    assert json.loads(mp.requests[-1].content) == {
+        "transactions": [{"id": "PAY01JTESTE0000000000000001", "amount": "10.00"}]
+    }
 
 
 def signed(data_id: str, request_id: str | None = "req-1", secret: str = SECRET) -> dict[str, str]:
@@ -285,15 +430,32 @@ def test_webhook_signatures_follow_the_manifest() -> None:
     assert provider.parse_webhook(inbound({}, data_id="../x")).resource_id is None
 
 
-async def test_the_credential_test_reports_a_refused_token() -> None:
+PROBE = "/v1/orders/ORD00000000000000000000000"
+
+
+async def test_the_credential_test_tells_token_from_permission() -> None:
+    """A sonda pergunta por uma order que não existe: nada é criado na conta da loja.
+
+    Cada resposta diz uma coisa diferente. Reprovar sem ter testado — foi o que o PagBank fez
+    hoje de manhã com um 406 — manda o lojista procurar no lugar errado.
+    """
     mp = FakeMP()
-    mp.routes[("GET", "/v1/payments/search")] = lambda r: httpx.Response(
-        401, json={"message": "invalid access token"}
-    )
-    refused = await mp.provider().test_credentials(CREDS)
-    assert not refused.ok and refused.detail == "access token recusado pelo Mercado Pago"
-    mp.routes[("GET", "/v1/payments/search")] = lambda r: httpx.Response(200, json={"results": []})
-    assert (await mp.provider().test_credentials(CREDS)).ok
+    mp.routes[("GET", PROBE)] = lambda r: httpx.Response(404, json={"message": "not found"})
+    aceito = await mp.provider().test_credentials(CREDS)
+    assert aceito.ok and aceito.detail == "access token aceito"
+
+    mp.routes[("GET", PROBE)] = lambda r: httpx.Response(401, json={"message": "invalid token"})
+    recusado = await mp.provider().test_credentials(CREDS)
+    assert not recusado.ok and recusado.detail == "access token recusado pelo Mercado Pago"
+
+    mp.routes[("GET", PROBE)] = lambda r: httpx.Response(403, json={"message": "forbidden"})
+    sem_permissao = await mp.provider().test_credentials(CREDS)
+    assert not sem_permissao.ok
+    assert "Checkout Transparente" in (sem_permissao.detail or "")
+
+    mp.routes[("GET", PROBE)] = lambda r: httpx.Response(418, json={"message": "?"})
+    inconclusivo = await mp.provider().test_credentials(CREDS)
+    assert not inconclusivo.ok and "Não deu para testar" in (inconclusivo.detail or "")
 
 
 # ---------------------------------------------------------------------------- through the API
@@ -336,13 +498,10 @@ async def test_a_pix_through_mercado_pago_is_confirmed_by_its_signed_webhook(
         body = json.loads(r.content)
         return httpx.Response(
             201,
-            json=pix_payment(
-                transaction_amount=body["transaction_amount"],
-                external_reference=body["external_reference"],
-            ),
+            json=pix_order(total=body["total_amount"], reference=body["external_reference"]),
         )
 
-    mp.routes[("POST", "/v1/payments")] = created
+    mp.routes[("POST", "/v1/orders")] = created
     paid = await client.post(
         f"/api/v1/checkout/orders/{order['id']}/payments",
         json={"provider": "mercadopago", "method": "pix"},
@@ -351,23 +510,19 @@ async def test_a_pix_through_mercado_pago_is_confirmed_by_its_signed_webhook(
     assert paid.status_code == 201, paid.text
     assert paid.json()["pix_copy_paste"] == "00020126mp"
     sent = json.loads(mp.requests[-1].content)
-    assert sent["transaction_amount"] == 30.0 and sent["payer"]["email"].endswith("@cliente.test")
-    assert sent["notification_url"].endswith(f"/webhooks/mercadopago/{tenant.public_key}")
+    assert sent["total_amount"] == "30.00" and sent["payer"]["email"].endswith("@cliente.test")
 
-    mp.routes[("GET", "/v1/payments/123456")] = lambda r: httpx.Response(
+    mp.routes[("GET", f"/v1/orders/{ORDER_ID}")] = lambda r: httpx.Response(
         200,
-        json=pix_payment(
-            status="approved",
-            transaction_amount=30.0,
-            external_reference=sent["external_reference"],
-        ),
+        json=pix_order(status="approved", total="30.00", reference=sent["external_reference"]),
     )
-    payload = {"id": 555, "type": "payment", "action": "payment.updated", "data": {"id": "123456"}}
+    # Notificação de order: o tópico ainda não foi visto numa entrega real, e o id é o da order.
+    payload = {"id": 555, "type": "order", "action": "order.updated", "data": {"id": ORDER_ID}}
     hook = await client.post(
-        f"/api/v1/webhooks/mercadopago/{tenant.public_key}?data.id=123456&type=payment",
+        f"/api/v1/webhooks/mercadopago/{tenant.public_key}?data.id={ORDER_ID}&type=order",
         content=json.dumps(payload).encode(),
         headers={"host": settings.api_public_host, "content-type": "application/json"}
-        | signed("123456"),
+        | signed(ORDER_ID),
     )
     assert hook.status_code == 200 and hook.json()["status"] == "received"
     state = (await client.get(f"/api/v1/checkout/orders/{order['id']}/payment", headers=me)).json()
@@ -417,14 +572,14 @@ async def test_the_order_waits_as_long_as_mercado_pago_takes_the_pix(
         body = json.loads(r.content)
         return httpx.Response(
             201,
-            json=pix_payment(
-                transaction_amount=body["transaction_amount"],
-                external_reference=body["external_reference"],
-                date_of_expiration=far.isoformat(),
+            json=pix_order(
+                total=body["total_amount"],
+                reference=body["external_reference"],
+                expires=far.isoformat(),
             ),
         )
 
-    mp.routes[("POST", "/v1/payments")] = created
+    mp.routes[("POST", "/v1/orders")] = created
     paid = await client.post(
         f"/api/v1/checkout/orders/{order['id']}/payments",
         json={"provider": "mercadopago", "method": "pix"},
