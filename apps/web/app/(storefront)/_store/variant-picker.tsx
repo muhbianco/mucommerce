@@ -130,8 +130,21 @@ export function VariantPicker({
           <label>
             Quantidade <input name="quantity" inputMode="numeric" defaultValue="1" size={4} />
           </label>{" "}
-          <button type="submit" className="button" disabled={!ready || !chosen || offSale(chosen.availability)}>
+          <button
+            type="submit"
+            className={styles.buyAdd}
+            disabled={!ready || !chosen || offSale(chosen.availability)}
+          >
             Adicionar ao carrinho
+          </button>
+          <button
+            type="submit"
+            name="intent"
+            value="buy_now"
+            className="button"
+            disabled={!ready || !chosen || offSale(chosen.availability)}
+          >
+            Comprar
           </button>
         </form>
       ) : null}

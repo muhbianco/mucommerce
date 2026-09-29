@@ -96,6 +96,9 @@ interface Cart {
   };
 }
 
+/** Cadastrar endereço sem perder a compra: o `next` traz a pessoa de volta ao carrinho. */
+const NOVO_ENDERECO = "/conta/enderecos?next=%2Fcarrinho";
+
 const PROBLEM: Record<string, string> = {
   unavailable: "Não está mais à venda. Tire do carrinho.",
   out_of_stock: "Sem estoque para essa quantidade.",
@@ -385,9 +388,16 @@ export default async function CartPage({
                     ))
                   ) : (
                     <p>
-                      Para entrega, <Link href="/conta/enderecos">cadastre um endereço</Link>.
+                      Para entrega, <Link href={NOVO_ENDERECO}>cadastre um endereço</Link>.
                     </p>
                   )
+                ) : null}
+                {options.modes.includes("delivery") && options.addresses.length ? (
+                  // Também com endereço cadastrado: quem entrega no trabalho hoje e em casa
+                  // amanhã não tinha por onde acrescentar sem sair da compra e se achar sozinha.
+                  <p className={styles.choice}>
+                    <Link href={NOVO_ENDERECO}>+ Entregar em outro endereço</Link>
+                  </p>
                 ) : null}
                 {slotChoices.length ? (
                   <p className={styles.choice}>
@@ -425,7 +435,7 @@ export default async function CartPage({
                   ) : null}
                   {options.addresses.length === 0 ? (
                     <p>
-                      Para calcular o frete, <Link href="/conta/enderecos">cadastre um endereço</Link>.
+                      Para calcular o frete, <Link href={NOVO_ENDERECO}>cadastre um endereço</Link>.
                     </p>
                   ) : (
                     <>
@@ -446,6 +456,9 @@ export default async function CartPage({
                         ))}
                         <button type="submit">Calcular frete</button>
                       </form>
+                      <p className={styles.choice}>
+                        <Link href={NOVO_ENDERECO}>+ Enviar para outro endereço</Link>
+                      </p>
                       {shippingQuote === null ? null : shippingQuote.problem ? (
                         <Notice kind="warn">
                           {SHIPPING_PROBLEM[shippingQuote.problem] ?? "Não foi possível calcular o frete agora."}

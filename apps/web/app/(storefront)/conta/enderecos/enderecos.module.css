@@ -1,0 +1,131 @@
+/* Meus endereços. Usa as variáveis de `.storefront`; nada de cor literal aqui. */
+
+.list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Cada endereço num cartão. Antes era uma lista corrida, e num endereço com complemento e
+   referência não dava para saber onde um terminava e o outro começava. */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface);
+}
+
+/* O que está sendo editado agora. A borda acompanha; quem diz em palavras é o título do
+   formulário logo abaixo ("Mexendo em …"). */
+.card[data-editing] {
+  border-color: var(--store-brand-ink);
+  box-shadow: inset 3px 0 0 var(--store-brand-ink);
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.badge {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--store-mist);
+  color: var(--store-ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cardBody {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--store-ink-soft);
+}
+
+.cardActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+/* Apagar é destrutivo, então não se veste de botão principal — mas tem alvo de toque inteiro,
+   porque no celular ninguém acerta um link de 12px. */
+.remove {
+  min-height: 44px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: none;
+  color: var(--store-danger-ink);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--store-mist);
+}
+
+/* ------------------------------------------------------------------ formulário */
+
+.row,
+.rowStreet,
+.rowCity {
+  display: grid;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.row {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* O número é estreito porque é curto; dar a ele a largura da rua faz a pessoa procurar onde
+   escrever. */
+.rowStreet {
+  grid-template-columns: minmax(0, 2fr) 6rem minmax(0, 1fr);
+}
+
+.rowCity {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 5rem;
+}
+
+/* O CEP é o campo que preenche os outros, então fica sozinho e estreito — e o recado da busca
+   cabe embaixo sem empurrar nada. */
+.cep {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 14rem;
+}
+
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .row,
+  .rowStreet,
+  .rowCity {
+    grid-template-columns: 1fr;
+  }
+
+  .cep {
+    max-width: none;
+  }
+}

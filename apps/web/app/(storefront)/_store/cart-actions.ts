@@ -59,7 +59,14 @@ export async function addToCart(form: FormData): Promise<void> {
   const modifierIds = form.getAll("modifier_ids").map(String).filter((value) => ID.test(value));
   const amount = quantity(form);
   if (!ID.test(variantId) || amount === "invalid") redirect(`${back}?erro=invalid_quantity`);
-  await attempt(back, "/carrinho?ok=adicionado", () =>
+  // Dois botões, dois destinos. "Adicionar" devolve a pessoa ao **produto**: quem está comprando
+  // rabiola preta costuma querer a vermelha em seguida, e mandá-la ao carrinho a cada item faz
+  // ela voltar sozinha toda vez. Quem clicou "Comprar" disse que terminou, e vai ao carrinho.
+  const comprar = field(form, "intent") === "buy_now";
+  const done = comprar
+    ? "/carrinho?ok=adicionado"
+    : `${back}${back.includes("?") ? "&" : "?"}ok=adicionado`;
+  await attempt(back, done, () =>
     customerApi("/cart/items", { json: { variant_id: variantId, quantity: amount, modifier_ids: modifierIds } }),
   );
 }

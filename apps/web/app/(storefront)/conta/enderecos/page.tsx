@@ -7,8 +7,12 @@ import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { getStorefrontContext } from "@/lib/server-context";
 
+import { Breadcrumb, EmptyState, Notice, PageHead, Section } from "../../_store/ui";
 import { StoreShell } from "../../_store/store-shell";
+import styles from "../../_store/store.module.css";
 import { deleteAddress, saveAddress } from "../actions";
+import { CepField } from "./cep-field";
+import local from "./enderecos.module.css";
 
 export const metadata: Metadata = { title: "Meus endereços", robots: { index: false, follow: false } };
 
@@ -40,6 +44,12 @@ const ERRORS: Record<string, string> = {
   access_pending: "Sua conta ainda aguarda liberação da loja.",
 };
 
+/** Para onde a pessoa volta depois de salvar. Só caminho interno: um `next` de fora daqui seria
+ *  um redirecionamento aberto de brinde. */
+function safeNext(value: string | undefined): string | null {
+  return value && /^\/[A-Za-z0-9\-/_]*$/.test(value) ? value : null;
+}
+
 function cep(value: string): string {
   return `${value.slice(0, 5)}-${value.slice(5)}`;
 }
@@ -47,106 +57,230 @@ function cep(value: string): string {
 export default async function AddressesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; erro?: string; editar?: string }>;
+  searchParams: Promise<{ ok?: string; erro?: string; editar?: string; next?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context || !context.features.checkout) notFound();
-  if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect("/entrar?next=%2Fconta%2Fenderecos");
+  const { ok, erro, editar, next } = await searchParams;
+  const volta = safeNext(next);
+  const here = `/conta/enderecos${volta ? `?next=${encodeURIComponent(volta)}` : ""}`;
+  if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect(`/entrar?next=${encodeURIComponent(here)}`);
+
   let addresses: Address[];
   try {
     addresses = await customerApi<Address[]>("/me/addresses");
   } catch (error) {
-    if (error instanceof CustomerApiError && error.status === 401) redirect("/entrar?next=%2Fconta%2Fenderecos");
-    if (error instanceof CustomerApiError && error.status === 403) redirect("/acesso-pendente?next=%2Fconta%2Fenderecos");
+    if (error instanceof CustomerApiError && error.status === 401) {
+      redirect(`/entrar?next=${encodeURIComponent(here)}`);
+    }
+    if (error instanceof CustomerApiError && error.status === 403) {
+      redirect(`/acesso-pendente?next=${encodeURIComponent(here)}`);
+    }
     throw error;
   }
-  const { ok, erro, editar } = await searchParams;
   const editing = addresses.find((address) => address.id === editar);
 
   return (
     <StoreShell context={context}>
-      <p>
-        <Link href="/conta">← Minha conta</Link>
-      </p>
-      <h1>Meus endereços</h1>
-      {ok && OK[ok] ? <p role="status">{OK[ok]}</p> : null}
-      {erro ? <p role="alert">{ERRORS[erro] ?? "Não foi possível salvar. Tente de novo."}</p> : null}
-      {addresses.length === 0 ? <p>Nenhum endereço ainda.</p> : null}
-      <ul>
-        {addresses.map((address) => (
-          <li key={address.id}>
-            <strong>{address.label ?? address.recipient_name}</strong>
-            {address.is_default ? " (padrão)" : ""} — {address.street}, {address.number}
-            {address.complement ? ` ${address.complement}` : ""} · {address.district} · {address.city}/{address.state} ·{" "}
-            {cep(address.postal_code)} <Link href={`/conta/enderecos?editar=${address.id}`}>editar</Link>{" "}
-            <form action={deleteAddress} style={{ display: "inline" }}>
-              <input type="hidden" name="address_id" value={address.id} />
-              <button type="submit" className="muted">
-                apagar
-              </button>
-            </form>
-          </li>
-        ))}
-      </ul>
+      <Breadcrumb trail={[{ name: "Minha conta", href: "/conta" }, { name: "Meus endereços" }]} />
+      <PageHead
+        title="Meus endereços"
+        lead="Onde a gente entrega. Você pode ter mais de um e escolher na hora da compra."
+        actions={
+          volta ? (
+            <Link className={styles.buttonGhost} href={volta}>
+              ← Voltar
+            </Link>
+          ) : null
+        }
+      />
+      {ok && OK[ok] ? (
+        <Notice kind="ok" role="status">
+          {OK[ok]}
+        </Notice>
+      ) : null}
+      {erro ? <Notice kind="warn" role="alert">{ERRORS[erro] ?? "Não foi possível salvar. Tente de novo."}</Notice> : null}
 
-      <h2>{editing ? "Editar endereço" : "Novo endereço"}</h2>
-      <form action={saveAddress} key={editing?.id ?? "novo"}>
-        {editing ? <input type="hidden" name="address_id" value={editing.id} /> : null}
-        <p>
-          <label>
-            Nome de quem recebe <input name="recipient_name" required maxLength={120} defaultValue={editing?.recipient_name ?? ""} />
+      {addresses.length === 0 ? (
+        <EmptyState title="Você ainda não cadastrou nenhum endereço.">
+          Preencha o formulário abaixo. Com o CEP, a gente completa quase tudo.
+        </EmptyState>
+      ) : (
+        <div className={local.list}>
+          {addresses.map((address) => (
+            <article
+              key={address.id}
+              className={local.card}
+              data-editing={address.id === editing?.id ? "" : undefined}
+            >
+              <div className={local.cardHead}>
+                <strong>{address.label ?? address.recipient_name}</strong>
+                {address.is_default ? <span className={local.badge}>padrão</span> : null}
+              </div>
+              <p className={local.cardBody}>
+                {address.street}, {address.number}
+                {address.complement ? ` — ${address.complement}` : ""}
+                <br />
+                {address.district} · {address.city}/{address.state}
+                <br />
+                CEP {cep(address.postal_code)}
+                {address.recipient_name !== address.label ? (
+                  <>
+                    <br />
+                    Recebe: {address.recipient_name}
+                    {address.phone ? ` · ${address.phone}` : ""}
+                  </>
+                ) : null}
+              </p>
+              <div className={local.cardActions}>
+                <Link
+                  className={styles.buttonGhost}
+                  href={`/conta/enderecos?editar=${address.id}${volta ? `&next=${encodeURIComponent(volta)}` : ""}`}
+                >
+                  Editar
+                </Link>
+                <form action={deleteAddress}>
+                  <input type="hidden" name="address_id" value={address.id} />
+                  <button type="submit" className={local.remove}>
+                    Apagar
+                  </button>
+                </form>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <Section
+        variant="card"
+        id="formulario"
+        title={editing ? "Editar endereço" : "Novo endereço"}
+        description={editing ? `Mexendo em “${editing.label ?? editing.recipient_name}”` : undefined}
+        actions={
+          // A saída da edição. Sem ela, quem clicou em "editar" ficava preso: o formulário virava
+          // o de edição e não havia caminho de volta para cadastrar outro.
+          editing ? (
+            <Link className={styles.buttonGhost} href={here}>
+              Cancelar e cadastrar outro
+            </Link>
+          ) : null
+        }
+      >
+        <form action={saveAddress} id="form-endereco" className={styles.checkoutForm} key={editing?.id ?? "novo"}>
+          {editing ? <input type="hidden" name="address_id" value={editing.id} /> : null}
+          {volta ? <input type="hidden" name="next" value={volta} /> : null}
+
+          <div className={local.row}>
+            <label className={styles.field}>
+              Nome de quem recebe
+              <input
+                name="recipient_name"
+                required
+                maxLength={120}
+                autoComplete="name"
+                defaultValue={editing?.recipient_name ?? ""}
+              />
+            </label>
+            <label className={styles.field}>
+              Telefone
+              <input
+                name="phone"
+                inputMode="tel"
+                maxLength={20}
+                autoComplete="tel"
+                placeholder="11 99999-9999"
+                defaultValue={editing?.phone ?? ""}
+              />
+            </label>
+            <label className={styles.field}>
+              Apelido
+              <input name="label" maxLength={40} placeholder="Casa, Trabalho" defaultValue={editing?.label ?? ""} />
+            </label>
+          </div>
+
+          <div className={local.cep}>
+            <CepField defaultValue={editing ? cep(editing.postal_code) : ""} />
+          </div>
+
+          <div className={local.rowStreet}>
+            <label className={styles.field}>
+              Rua
+              <input
+                name="street"
+                required
+                maxLength={160}
+                autoComplete="address-line1"
+                defaultValue={editing?.street ?? ""}
+              />
+            </label>
+            <label className={styles.field}>
+              Número
+              <input name="number" required maxLength={20} defaultValue={editing?.number ?? ""} />
+            </label>
+            <label className={styles.field}>
+              Complemento
+              <input
+                name="complement"
+                maxLength={80}
+                placeholder="apto, bloco"
+                defaultValue={editing?.complement ?? ""}
+              />
+            </label>
+          </div>
+
+          <div className={local.rowCity}>
+            <label className={styles.field}>
+              Bairro
+              <input name="district" required maxLength={80} defaultValue={editing?.district ?? ""} />
+            </label>
+            <label className={styles.field}>
+              Cidade
+              <input name="city" required maxLength={80} defaultValue={editing?.city ?? ""} />
+            </label>
+            <label className={styles.field}>
+              UF
+              <input
+                name="state"
+                required
+                maxLength={2}
+                size={3}
+                style={{ textTransform: "uppercase" }}
+                defaultValue={editing?.state ?? ""}
+              />
+            </label>
+          </div>
+
+          <label className={styles.field}>
+            Ponto de referência
+            <input
+              name="reference"
+              maxLength={160}
+              placeholder="perto da praça, portão azul"
+              defaultValue={editing?.reference ?? ""}
+            />
           </label>
-        </p>
-        <p>
-          <label>
-            Telefone <input name="phone" inputMode="tel" maxLength={20} defaultValue={editing?.phone ?? ""} />
-          </label>{" "}
-          <label>
-            Apelido (Casa, Trabalho) <input name="label" maxLength={40} defaultValue={editing?.label ?? ""} />
+
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              name="is_default"
+              defaultChecked={editing?.is_default ?? addresses.length === 0}
+            />
+            Usar como endereço padrão
           </label>
-        </p>
-        <p>
-          <label>
-            CEP <input name="postal_code" required inputMode="numeric" maxLength={9} defaultValue={editing ? cep(editing.postal_code) : ""} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Rua <input name="street" required maxLength={160} defaultValue={editing?.street ?? ""} />
-          </label>{" "}
-          <label>
-            Número <input name="number" required maxLength={20} defaultValue={editing?.number ?? ""} />
-          </label>{" "}
-          <label>
-            Complemento <input name="complement" maxLength={80} defaultValue={editing?.complement ?? ""} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Bairro <input name="district" required maxLength={80} defaultValue={editing?.district ?? ""} />
-          </label>{" "}
-          <label>
-            Cidade <input name="city" required maxLength={80} defaultValue={editing?.city ?? ""} />
-          </label>{" "}
-          <label>
-            UF <input name="state" required maxLength={2} size={3} defaultValue={editing?.state ?? ""} />
-          </label>
-        </p>
-        <p>
-          <label>
-            Referência <input name="reference" maxLength={160} defaultValue={editing?.reference ?? ""} />
-          </label>
-        </p>
-        <p>
-          <label>
-            <input type="checkbox" name="is_default" defaultChecked={editing?.is_default ?? addresses.length === 0} /> Usar
-            como padrão
-          </label>
-        </p>
-        <button type="submit" className="button">
-          Salvar endereço
-        </button>
-      </form>
+
+          <div className={local.formActions}>
+            <button type="submit" className="button">
+              {editing ? "Salvar alterações" : "Salvar endereço"}
+            </button>
+            {editing ? (
+              <Link className={styles.buttonGhost} href={here}>
+                Cancelar
+              </Link>
+            ) : null}
+          </div>
+        </form>
+      </Section>
     </StoreShell>
   );
 }

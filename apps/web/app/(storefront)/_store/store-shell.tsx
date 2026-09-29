@@ -9,6 +9,7 @@ import type { CategoryRef } from "@/lib/storefront";
 import type { StorefrontContext } from "@/lib/tenant";
 
 import { SearchBox } from "./search-box";
+import { CartFab } from "./cart-fab";
 import styles from "./store.module.css";
 
 interface Logo {
@@ -115,6 +116,10 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
       <main id="conteudo" className={styles.page}>
         {children}
       </main>
+
+      {/* Só aparece com carrinho, e depois do `<main>` para não entrar antes do conteúdo na
+          ordem de leitura e do Tab. */}
+      <CartFab />
 
       <footer className={styles.footer}>
         <nav className={styles.footerNav} aria-label="Sobre a loja">

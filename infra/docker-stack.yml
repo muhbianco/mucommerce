@@ -73,6 +73,10 @@ x-api-env: &api_env
   # Portainer nao derruba o checkout -- so mantem o que ja estava valendo.
   PAYMENTS_ALLOWED_PROVIDERS: ${PAYMENTS_ALLOWED_PROVIDERS:-mercadopago,infinitepay,pagbank}
   SHIPPING_ALLOWED_PROVIDERS: ${SHIPPING_ALLOWED_PROVIDERS:-melhorenvio}
+  # Montagem da vitrine com IA (ADR 0017). Mesma forma das duas de cima: com padrao no codigo,
+  # esquecer a chave no Env do Portainer nao derruba nada -- so mantem desligado. Ligar depende
+  # do gateway da api-agents estar no ar; com ele fora, todo pedido vira rascunho `failed`.
+  LANDING_LLM_ENABLED: ${LANDING_LLM_ENABLED:-false}
 
 services:
   commerce-api:

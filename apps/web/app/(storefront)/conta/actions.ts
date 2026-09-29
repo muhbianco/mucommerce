@@ -7,6 +7,8 @@ import { safeCheckoutUrl } from "@/lib/payments";
 
 const ID = /^[0-9a-f-]{36}$/;
 const BACK = "/conta/enderecos";
+/** Só caminho interno: um `next` de fora seria um redirecionamento aberto de brinde. */
+const INTERNAL_PATH = /^\/[A-Za-z0-9\-/_]*$/;
 
 function field(form: FormData, name: string): string {
   const value = form.get(name);
@@ -44,10 +46,17 @@ export async function saveAddress(form: FormData): Promise<void> {
     reference: field(form, "reference") || null,
     is_default: form.get("is_default") === "on",
   };
-  await attempt(addressId ? "salvo" : "criado", () =>
-    addressId
-      ? customerApi(`/me/addresses/${addressId}`, { method: "PATCH", json: body })
-      : customerApi("/me/addresses", { json: body }),
+  // Quem veio do carrinho cadastrar um endereço volta para o carrinho, não para a lista: o
+  // objetivo dela era comprar, e obrigá-la a achar o caminho de volta é onde a venda se perde.
+  const next = field(form, "next");
+  const back = INTERNAL_PATH.test(next) ? next : BACK;
+  await attempt(
+    addressId ? "salvo" : "criado",
+    () =>
+      addressId
+        ? customerApi(`/me/addresses/${addressId}`, { method: "PATCH", json: body })
+        : customerApi("/me/addresses", { json: body }),
+    back,
   );
 }
 

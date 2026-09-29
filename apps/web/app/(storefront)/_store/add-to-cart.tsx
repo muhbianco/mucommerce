@@ -30,8 +30,13 @@ export function AddToCart({
           disabled={disabled}
         />
       </label>{" "}
-      <button type="submit" className="button" disabled={disabled}>
+      {/* Dois botões no mesmo formulário: o `name`/`value` do que enviou entra no FormData, então
+          "Comprar" não precisa de uma segunda ação nem de JavaScript. */}
+      <button type="submit" className={styles.buyAdd} disabled={disabled}>
         {label}
+      </button>
+      <button type="submit" name="intent" value="buy_now" className="button" disabled={disabled}>
+        Comprar
       </button>
     </form>
   );

@@ -62,7 +62,7 @@ test("painel: cancelar um pedido pago devolve o dinheiro e o estoque", async ({ 
   await page.goto(`${STORE}/entrar?next=${encodeURIComponent("/loja/produto/camiseta-muhbianco")}`);
   await page.getByRole("link", { name: "Entrar com Google" }).click();
   await expect(page).toHaveURL(product);
-  const buy = page.getByRole("button", { name: "Adicionar ao carrinho" });
+  const buy = page.getByRole("button", { name: "Comprar", exact: true });
   await expect(buy).toBeEnabled();
   await page.getByRole("radio", { name: "G" }).check();
   await buy.click();

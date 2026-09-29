@@ -2173,3 +2173,87 @@
   flex: 0 0 min(15rem, 60%);
   scroll-snap-align: start;
 }
+
+/* ------------------------------------------------------------------ dois botões de compra */
+
+/* "Adicionar" é a ação secundária: quem já decidiu usa "Comprar". Os dois com o mesmo peso
+   fariam a pessoa parar para ler antes de clicar, que é o oposto do que um botão de compra
+   deve pedir. */
+.buyAdd {
+  background: var(--store-surface);
+  color: var(--store-ink);
+  border-color: var(--store-brand-ink);
+}
+
+.buyAdd:hover:not(:disabled) {
+  background: var(--store-mist);
+}
+
+/* ------------------------------------------------------------------ carrinho flutuante */
+
+.cartFab {
+  position: fixed;
+  right: 1rem;
+  /* Acima da barra do navegador no celular: sem isto o polegar acerta a barra, não o botão. */
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: var(--brand-primary);
+  color: var(--brand-on-primary);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18), 0 12px 28px -12px rgba(0, 0, 0, 0.35);
+  text-decoration: none;
+  transition: transform 0.2s var(--store-ease);
+}
+
+.cartFab:hover {
+  transform: translateY(-2px);
+  color: var(--brand-on-primary);
+}
+
+.cartFab svg {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+/* O número sobre a cor da marca precisaria de contraste próprio; num cartucho de papel ele é
+   legível em qualquer marca que a loja escolha. */
+.cartFabCount {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.2rem;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  border: 2px solid var(--store-paper);
+  background: var(--store-ink);
+  color: var(--store-paper);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* No celular o carrinho fica logo acima do rodapé; o rodapé ganha folga para o botão não tapar
+   os links de termos e privacidade, que são justamente os que a lei exige estarem alcançáveis. */
+@media (max-width: 720px) {
+  .footer {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cartFab {
+    transition: none;
+  }
+
+  .cartFab:hover {
+    transform: none;
+  }
+}

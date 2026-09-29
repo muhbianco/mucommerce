@@ -296,8 +296,23 @@ async def seed() -> None:
         )
         await service.set_setting(store, "storefront", {"access_mode": "public"}, ACTOR)
         pickup = {"name": "Loja MuhBianco", "address": "Rua E2E, 100"}
+        # Retirada **e** entrega por zona. A entrega existe aqui porque o carrinho só mostra a
+        # escolha de endereço quando ela está ligada — sem isto, o caminho de entrega (e o link
+        # de cadastrar outro endereço) não tinha nenhum teste olhando.
+        zona = {
+            "name": "Centro de São Paulo",
+            "kind": "cep_ranges",
+            "cep_ranges": [{"start": "01000000", "end": "01999999"}],
+            "fee_cents": 800,
+        }
         await service.set_setting(
-            store, "fulfillment", {"pickup": {"enabled": True, "locations": [pickup]}}, ACTOR
+            store,
+            "fulfillment",
+            {
+                "pickup": {"enabled": True, "locations": [pickup]},
+                "delivery": {"enabled": True, "zones": [zona]},
+            },
+            ACTOR,
         )
         # The MuhBianco admin owns the model store, as in production: the panel user who signs
         # in through fake-accounts is both platform staff and this store's owner.

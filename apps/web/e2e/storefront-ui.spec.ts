@@ -114,10 +114,15 @@ test.describe("sem JavaScript", () => {
 
     // Produto sem opções: o seletor de variante desliga o botão até hidratar, por desenho.
     await page.goto(`${STORE}/loja/produto/bolo-de-cenoura`);
-    const comprar = page.getByRole("button", { name: "Adicionar ao carrinho" });
-    if (await comprar.isEnabled()) {
-      await comprar.click();
-      await expect(page).toHaveURL(/\/carrinho\?ok=adicionado$/);
+    const adicionar = page.getByRole("button", { name: "Adicionar ao carrinho" });
+    if (await adicionar.isEnabled()) {
+      await adicionar.click();
+      // "Adicionar" deixa a pessoa no produto para ela continuar escolhendo aquele item; quem
+      // termina usa "Comprar". O carrinho flutuante é a saída, e só existe com item dentro.
+      await expect(page).toHaveURL(/\/loja\/produto\/bolo-de-cenoura\?ok=adicionado$/);
+      await expect(page.getByText("Adicionado ao carrinho")).toBeVisible();
+      await page.getByRole("link", { name: /^Carrinho, / }).click();
+      await expect(page).toHaveURL(/\/carrinho/);
     } else {
       await page.goto(`${STORE}/carrinho`);
     }

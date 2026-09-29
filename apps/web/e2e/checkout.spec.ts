@@ -10,7 +10,7 @@ const BIA = { sub: "e2e-bia", email: "bia.e2e@example.com", name: "Bia E2E" };
 test("carrinho: entra para comprar, escolhe tamanho e adicional, retira na loja", async ({ page }) => {
   await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
   const product = `${STORE}/loja/produto/camiseta-muhbianco`;
-  const buy = page.getByRole("button", { name: "Adicionar ao carrinho" });
+  const buy = page.getByRole("button", { name: "Comprar", exact: true });
   await page.goto(product);
   await expect(buy).toBeEnabled(); // enabled once the picker is live (hydrated)
   await page.getByRole("radio", { name: "G" }).check();
@@ -97,7 +97,7 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await page.goto(`${STORE}/entrar?next=${encodeURIComponent("/loja/produto/camiseta-muhbianco")}`);
   await page.getByRole("link", { name: "Entrar com Google" }).click();
   await expect(page).toHaveURL(product);
-  const buy = page.getByRole("button", { name: "Adicionar ao carrinho" });
+  const buy = page.getByRole("button", { name: "Comprar", exact: true });
   await expect(buy).toBeEnabled();
   await page.getByRole("radio", { name: "P" }).check();
   await expect(page.getByRole("status")).toContainText(/R\$\s*59,00/);

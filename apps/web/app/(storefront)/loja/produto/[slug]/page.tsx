@@ -84,12 +84,12 @@ export default async function ProductPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ erro?: string }>;
+  searchParams: Promise<{ erro?: string; ok?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context) notFound();
   const { slug } = await params;
-  const { erro } = await searchParams;
+  const { erro, ok } = await searchParams;
   const result = await loadProduct(slug);
   const product = requireCatalog(result, `/loja/produto/${encodeURIComponent(slug)}`);
   // A ticket's page is its event page (when the store runs events).
@@ -165,6 +165,13 @@ export default async function ProductPage({
               </ul>
             ) : null}
             {erro ? <Notice kind="error">{CART_ERRORS[erro] ?? "Não foi possível adicionar. Tente de novo."}</Notice> : null}
+            {ok === "adicionado" ? (
+              // Quem clicou "Adicionar" ficou aqui de propósito: o recado precisa dizer o que
+              // aconteceu e oferecer a saída, senão parece que o clique não fez nada.
+              <Notice kind="ok" role="status">
+                Adicionado ao carrinho. <Link href="/carrinho">Ver carrinho</Link>
+              </Notice>
+            ) : null}
             {product.options.length || product.modifier_groups.length ? (
               <VariantPicker
                 options={product.options}
