@@ -81,9 +81,16 @@ export default async function VitrinePage({
         title="Deixe a gente montar para você"
         description={`${brief.steps.length} de ${brief.all_steps.length} respondidos`}
         actions={
-          <a className={styles.button} href={`${base}/vitrine/brief/${nextStep}`}>
-            {brief.steps.length ? "Continuar respondendo" : "Começar"}
-          </a>
+          <>
+            <a className={styles.button} href={`${base}/vitrine/brief/${nextStep}`}>
+              {brief.steps.length ? "Continuar respondendo" : "Começar"}
+            </a>
+            {brief.usable ? (
+              <a className={styles.buttonSmall} href={`${base}/vitrine/propostas`}>
+                Ver propostas
+              </a>
+            ) : null}
+          </>
         }
       >
         <p className={styles.hint}>

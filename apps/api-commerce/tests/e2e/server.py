@@ -32,11 +32,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 PORT = int(os.environ.get("E2E_API_PORT", "8791"))
 GOOGLE_PORT = int(os.environ.get("E2E_GOOGLE_PORT", "8792"))
@@ -86,6 +88,9 @@ E2E_ENV = {
     "LOGIN_RATE_LIMIT_ATTEMPTS": "200",
     "METRICS_ENABLED": "false",
     "DOCS_ENABLED": "false",
+    # A montagem da vitrine está ligada; quem responde é o gateway falso de `/__e2e/landing/build`
+    # (a suíte não fala com modelo nenhum, e não teria chave para isso).
+    "LANDING_LLM_ENABLED": "true",
     "LOG_LEVEL": "WARNING",
 }
 # Before any `app` import: settings are read once, at import time.
@@ -118,6 +123,9 @@ from app.core.database import SessionFactory, create_app_engine  # noqa: E402
 from app.core.scopes import TenantRole  # noqa: E402
 from app.coupons.service import CouponService  # noqa: E402
 from app.identity.models import AdminUser, TenantMembership  # noqa: E402
+from app.landing.gateway import FakeGateway  # noqa: E402
+from app.landing.generation import generate_draft  # noqa: E402
+from app.landing.models import DraftStatus, LandingDraft  # noqa: E402
 from app.main import app  # noqa: E402
 from app.media.models import MediaAsset, MediaStatus  # noqa: E402
 from app.models.all import Base  # noqa: E402  (every model, for create_all)
@@ -131,7 +139,7 @@ from app.payments.providers import fake  # noqa: E402
 from app.payments.refunds import run_process_refunds  # noqa: E402
 from app.payments.webhooks import run_process_webhooks  # noqa: E402
 from app.tenancy.context import bind_session_tenant  # noqa: E402
-from app.tenancy.models import TenantStatus  # noqa: E402
+from app.tenancy.models import Tenant, TenantStatus  # noqa: E402
 from app.tenancy.orm_filter import register_tenant_filter  # noqa: E402
 from app.tenancy.resolver import TenantResolver  # noqa: E402
 from app.tenancy.service import Actor, TenantService  # noqa: E402
@@ -429,6 +437,10 @@ class SettleIn(BaseModel):
     status: str = "approved"
 
 
+class BuildLandingIn(BaseModel):
+    tenant: str = "muhbianco"
+
+
 class TickIn(BaseModel):
     minutes: int = 0
 
@@ -461,6 +473,69 @@ async def settle_latest(body: SettleIn) -> dict[str, object]:
             },
         )
     return {"settled": payment.id, "webhook": sent.status_code}
+
+
+@e2e.post("/landing/build")
+async def build_landing(body: BuildLandingIn) -> dict[str, str]:
+    """O worker da montagem, com um modelo de mentira no lugar do de verdade.
+
+    Faz o que o Celery faria — `generate_draft` com um gateway — para o E2E poder atravessar o
+    fluxo inteiro (pedir, ver a prévia, publicar, conferir na vitrine) sem chave e sem rede. É o
+    mesmo papel de `/__e2e/payments/settle` em relação ao provedor de pagamento.
+    """
+    pagina = [
+        {
+            "type": "hero",
+            "title": "Feito na hora, do jeito que você gosta",
+            "subtitle": "Encomende pelo site e retire na loja.",
+            "cta_label": "Ver produtos",
+        },
+        {
+            "type": "benefits",
+            "title": "Por que comprar aqui",
+            "items": [
+                {"icon": "clock", "title": "Feito no dia", "text": "Nada fica de véspera."},
+                {"icon": "pix", "title": "Aceita Pix", "text": "Sem taxa nenhuma."},
+            ],
+        },
+    ]
+    async with SessionFactory() as session:
+        tenant = (
+            await session.execute(select(Tenant).where(Tenant.slug == body.tenant))
+        ).scalar_one()
+        bind_session_tenant(session, tenant.id)
+        draft = (
+            (
+                await session.execute(
+                    select(LandingDraft)
+                    .where(LandingDraft.status == DraftStatus.QUEUED)
+                    .order_by(LandingDraft.created_at)
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if draft is None:
+            return {"status": "nada na fila"}
+        draft_id = draft.id
+
+    async def tx(fn: Any) -> Any:
+        async with SessionFactory() as session:
+            try:
+                result = await fn(session)
+                await session.commit()
+                return result
+            except Exception:
+                await session.rollback()
+                raise
+
+    status = await generate_draft(
+        tx,
+        FakeGateway(replies=[json.dumps({"blocks": pagina}, ensure_ascii=False)]),
+        tenant_id=tenant.id,
+        draft_id=draft_id,
+    )
+    return {"status": status, "draft_id": draft_id}
 
 
 @e2e.post("/tick")

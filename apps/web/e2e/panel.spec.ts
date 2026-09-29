@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { PANEL, STORE } from "./playwright.config";
+import { API, PANEL, STORE } from "./playwright.config";
 
 async function signIn(page: Page): Promise<void> {
   await page.goto(`${PANEL}/`);
@@ -149,4 +149,57 @@ test("brief: WhatsApp impossível nomeia o campo, em vez de recusar a página in
   await page.getByLabel("WhatsApp (opcional)").fill("123");
   await page.getByRole("button", { name: /Salvar e/ }).click();
   await expect(page.getByText(/WhatsApp inválido/)).toBeVisible();
+});
+
+test("proposta de vitrine: pedir, ver a prévia, publicar e conferir na loja", async ({
+  page,
+  request,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  const tenant = page.url().split("?")[0] ?? "";
+
+  // O questionário precisa dizer o que a loja vende: sem isso não há página a escrever.
+  await page.goto(`${tenant}/vitrine/brief/negocio`);
+  await page.getByLabel("O que você vende").fill("brownie, cookie e bolo de pote");
+  await page.getByRole("button", { name: "Salvar e continuar" }).click();
+
+  await page.goto(`${tenant}/vitrine/propostas`);
+  const antes = await page.getByText(/Você já usou \d+ de \d+ neste mês/).textContent();
+  await page.getByRole("button", { name: "Montar uma proposta" }).click();
+  await expect(page.getByText("Pedido recebido")).toBeVisible();
+  // A cota é cobrada no pedido, não na entrega.
+  await expect(page.getByText(/Você já usou \d+ de \d+ neste mês/)).not.toHaveText(antes ?? "");
+
+  // O worker, encenado: a suíte não fala com modelo nenhum (nem teria chave).
+  const built = await request.post(`${API}/__e2e/landing/build`, { data: { tenant: "muhbianco" } });
+  expect((await built.json()).status).toBe("ready");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Prévia" })).toBeVisible();
+  // A prévia renderiza o componente de produção, pelo mesmo resolver da vitrine.
+  await expect(page.getByText("Feito na hora, do jeito que você gosta")).toBeVisible();
+
+  // Daqui em diante a loja modelo fica com esta página inicial, e não com a semeada. A suíte é
+  // serial sobre um banco só de propósito (pedidos.spec depende do pedido de checkout.spec), e
+  // o que vem depois foi conferido com esta página no ar.
+  await page.getByRole("button", { name: "Publicar esta página" }).click();
+  await expect(page.getByText("Proposta publicada")).toBeVisible();
+
+  // E o que a lojista aprovou é o que o cliente vê.
+  await page.goto(`${STORE}/`);
+  await expect(page.getByRole("heading", { name: "Feito na hora, do jeito que você gosta" })).toBeVisible();
+  await expect(page.getByText("Aceita Pix")).toBeVisible();
+});
+
+test("proposta: sem dizer o que a loja vende, o pedido é recusado com o motivo", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Loja Fechada", exact: true }).click();
+  const tenant = page.url().split("?")[0] ?? "";
+
+  await page.goto(`${tenant}/vitrine/propostas`);
+  await page.getByRole("button", { name: "Montar uma proposta" }).click();
+  await expect(page.getByText(/Conte pelo menos o que a sua loja vende/)).toBeVisible();
 });

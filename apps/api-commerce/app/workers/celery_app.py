@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.workers.payments",
         "app.workers.notifications",
         "app.workers.shipping",
+        "app.workers.landing",
     ],
 )
 
@@ -49,6 +50,12 @@ celery_app.conf.update(
         "app.workers.payments.payments_health_check": {"queue": QUEUE_PAYMENTS},
         "app.workers.shipping.track_shipments": {"queue": QUEUE_PAYMENTS},
         "app.workers.notifications.send_notifications": {"queue": QUEUE_NOTIFICATIONS},
+        # Fila padrão de propósito: a montagem espera a rede por dezenas de segundos, e espera
+        # não é trabalho. Na fila de mídia ela bloquearia o processamento de imagem de todas as
+        # lojas, porque aquele worker é um processo só, dimensionado para decodificar imagem.
+        # O `task_time_limit` de 300 s já limita o estrago de uma que trave.
+        "app.workers.landing.generate_landing_draft": {"queue": QUEUE_DEFAULT},
+        "app.workers.landing.sweep_landing_drafts": {"queue": QUEUE_DEFAULT},
     },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -107,6 +114,12 @@ celery_app.conf.update(
         "purge-expired-records": {
             "task": "app.workers.tasks.purge_expired_records",
             "schedule": 86400.0,
+        },
+        # A cada cinco minutos: um rascunho trava em `running` quando o worker morre no meio, e
+        # cada minuto parado é uma tela dizendo "montando…" e uma cota que ainda não voltou.
+        "sweep-landing-drafts": {
+            "task": "app.workers.landing.sweep_landing_drafts",
+            "schedule": 300.0,
         },
     },
 )

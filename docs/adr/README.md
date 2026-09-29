@@ -17,7 +17,7 @@
 | [0013](0013-chatwoot-por-cliente.md) | Chatwoot por cliente: uma account por loja no domínio do cliente, provisionada pela api-agents; host → account no fork |
 | [0014](0014-painel-por-loja.md) | Painel por loja no endereço dela (`<slug>.painel.*` ou `painel.<domínio>`); painel.muhbianco.com.br só da equipe; login volta ao host que pediu |
 | [0015](0015-envio-por-transportadora.md) | Envio por transportadora via agregador (Melhor Envio) com a conta da própria loja; `ShippingProvider` no molde do `PaymentProvider`; entrega por zona continua |
-
 | [0016](0016-motor-de-blocos-da-vitrine.md) | Motor de blocos da vitrine: o esquema alarga e nunca estreita; versão sobe só quando o JSON salvo deixaria de validar; gosto mora no editor, não no validador; um resolver serve a vitrine e a prévia |
+| [0017](0017-vitrine-montada-com-ia.md) | Vitrine montada com IA: o modelo escreve rascunho e nunca `tenant_settings`; publicar usa a mesma porta da edição à mão; a chave vive na api-agents atrás de gateway genérico medido; cota antes da feature; reparo determinístico antes de retentativa; nenhuma transação aberta durante a chamada |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

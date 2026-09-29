@@ -1,0 +1,83 @@
+/* Propostas de página inicial. Usa as variáveis de `.shell`; nada de cor literal aqui. */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* A que está aberta na prévia acima. A borda acompanha; quem diz qual é, para quem não vê cor,
+   é a própria prévia estar logo acima com o mesmo conteúdo. */
+.item[data-current] {
+  border-color: var(--teal);
+  box-shadow: inset 3px 0 0 var(--teal);
+}
+
+.itemHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1 1 18rem;
+}
+
+.itemWhen {
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.itemNote {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.itemHint {
+  margin: 0;
+  flex: 1 1 100%;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ pedir de novo */
+
+.refine {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.refineField {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.refineRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.refineRow input {
+  flex: 1 1 20rem;
+  min-width: 0;
+}

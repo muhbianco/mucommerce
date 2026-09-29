@@ -109,3 +109,61 @@ def test_orders_are_cancelled_only_with_their_refund() -> None:
         and (path.relative_to(APP).as_posix(), scope[-1]) not in allowed
     ]
     assert not offenders, offenders
+
+
+def test_only_the_landing_gateway_talks_to_a_model() -> None:
+    """A chave mora na api-agents e o livro-caixa só fecha se toda chamada passar pelo mesmo
+    lugar. Um segundo caminho, mesmo "temporário", é uma segunda cópia da chave na VPS e uma
+    fatura que ninguém sabe explicar.
+
+    Duas provas: quem pode **importar** o gateway, e quem pode **chamá-lo**.
+    """
+    pode_importar = {
+        "landing/gateway.py",
+        "landing/generation.py",
+        "workers/landing.py",
+    }
+    offenders = []
+    for path, tree, _ in _sources():
+        rel = path.relative_to(APP).as_posix()
+        for node in ast.walk(tree):
+            importa = (
+                isinstance(node, ast.ImportFrom)
+                and (node.module or "").startswith("app.landing.gateway")
+            ) or (
+                isinstance(node, ast.Import)
+                and any(a.name.startswith("app.landing.gateway") for a in node.names)
+            )
+            if importa and rel not in pode_importar:
+                offenders.append(f"{rel}: importa o gateway do modelo")
+        for call, scope in _calls(tree, "complete"):
+            receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+            chama_gateway = isinstance(receiver, ast.Name) and receiver.id in {"gateway", "llm"}
+            if chama_gateway and rel != "landing/generation.py":
+                offenders.append(f"{rel}: gateway.complete em {'.'.join(scope)}")
+    assert not offenders, offenders
+
+
+def test_a_draft_is_never_written_straight_into_settings() -> None:
+    """Publicar uma proposta usa a mesma porta da edição à mão (`TenantService.set_setting`),
+    que valida, confere referências e audita. Um atalho daqui para `tenant_settings` seriam dois
+    caminhos de escrita, e um deles esquecido na próxima mudança."""
+    landing = [p for p, _, _ in _sources() if p.relative_to(APP).as_posix().startswith("landing/")]
+    offenders = []
+    for path in landing:
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(APP).as_posix()
+        if "TenantSetting(" in text:
+            offenders.append(f"{rel}: constrói TenantSetting direto")
+        if re.search(r"\bset_setting\b", text) and rel != "landing/drafts.py":
+            offenders.append(f"{rel}: escreve setting fora do serviço de propostas")
+    assert not offenders, offenders
+
+
+def test_the_prompt_builder_never_touches_the_database() -> None:
+    """`prompt.py` é função pura sobre os snapshots. É a forma mais barata de garantir que nada
+    além do brief e do inventário chegue perto de um serviço externo: não existe caminho."""
+    text = (APP / "landing" / "prompt.py").read_text(encoding="utf-8")
+    proibidos = ["AsyncSession", "session", "select(", "await "]
+    offenders = [termo for termo in proibidos if termo in text]
+    assert not offenders, f"prompt.py tocou no banco: {offenders}"

@@ -18,13 +18,16 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.api.v1.endpoints.storefront_catalog import _card, _category
 from app.catalog.storefront import image_payload
+from app.core.config import settings
 from app.core.scopes import Scope
 from app.landing.brief import STEP_KEYS, LandingBriefService, filled_steps
+from app.landing.drafts import LandingDraftService
+from app.landing.models import LandingDraft
 from app.landing.quota import LandingQuotaService
 from app.landing.resolver import resolve_landing
 from app.landing.schemas import BriefV1
@@ -131,3 +134,182 @@ async def patch_brief(
     )
     await session.commit()
     return await _state(session, tenant)
+
+
+# ---------------------------------------------------------------- propostas de vitrine
+
+
+class DraftOut(BaseModel):
+    """Uma proposta, como a tela precisa dela.
+
+    Sem o prompt e sem a resposta crua: são caros de guardar, não ajudam a lojista e o que a
+    gente registra de uma chamada ao modelo é modelo, tokens, latência e situação — nunca o
+    corpo.
+    """
+
+    id: str
+    status: str
+    source: str
+    parent_draft_id: str | None
+    instruction: str | None
+    #: Nulo enquanto a montagem não terminou.
+    blocks: list[dict[str, Any]] | None
+    #: A saída precisou de conserto determinístico (id inventado, lista comprida demais).
+    repaired: bool
+    failure_reason: str | None
+    created_at: str
+    applied_at: str | None
+
+
+def _draft_out(draft: LandingDraft) -> DraftOut:
+    return DraftOut(
+        id=draft.id,
+        status=str(draft.status),
+        source=str(draft.source),
+        parent_draft_id=draft.parent_draft_id,
+        instruction=draft.instruction,
+        blocks=draft.blocks,
+        repaired=draft.repaired,
+        failure_reason=draft.failure_reason,
+        created_at=draft.created_at.isoformat(),
+        applied_at=draft.applied_at.isoformat() if draft.applied_at else None,
+    )
+
+
+class DraftListOut(BaseModel):
+    drafts: list[DraftOut]
+    quota: QuotaOut
+    #: A montagem com IA está ligada nesta instalação. Desligada, a tela esconde o botão em vez
+    #: de oferecer algo que vai falhar.
+    enabled: bool
+
+
+class RefineIn(BaseModel):
+    instruction: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+@router.get(
+    "/landing/drafts",
+    response_model=DraftListOut,
+    summary="Propostas de página inicial desta loja",
+)
+async def list_drafts(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+) -> DraftListOut:
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    cota = await LandingQuotaService(session, tenant).state()
+    return DraftListOut(
+        drafts=[_draft_out(d) for d in await service.list()],
+        quota=QuotaOut(
+            period=cota.period, used=cota.used, limit=cota.limit, left=cota.left, paid=cota.paid
+        ),
+        enabled=settings.landing_llm_enabled,
+    )
+
+
+@router.post(
+    "/landing/drafts",
+    response_model=DraftOut,
+    status_code=202,
+    summary="Pede uma proposta a partir do brief (consome uma unidade)",
+)
+async def request_draft(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+) -> DraftOut:
+    """202: a montagem roda no worker. A tela consulta a lista até sair de `queued`/`running`."""
+    draft = await LandingDraftService(session, tenant, admin_actor(request, user)).request()
+    await session.commit()
+    return _draft_out(draft)
+
+
+@router.post(
+    "/landing/drafts/{draft_id}/refine",
+    response_model=DraftOut,
+    status_code=202,
+    summary="Reescreve uma proposta a partir de uma instrução curta (consome uma unidade)",
+)
+async def refine_draft(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    draft_id: str,
+    body: RefineIn,
+) -> DraftOut:
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    draft = await service.refine(draft_id, body.instruction)
+    await session.commit()
+    return _draft_out(draft)
+
+
+@router.post(
+    "/landing/drafts/{draft_id}/apply",
+    response_model=dict[str, Any],
+    summary="Publica a proposta (mesma porta da edição à mão)",
+)
+async def apply_draft(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    draft_id: str,
+) -> dict[str, Any]:
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    saved = await service.apply(draft_id)
+    await session.commit()
+    return saved
+
+
+@router.post(
+    "/landing/drafts/{draft_id}/discard",
+    response_model=DraftOut,
+    summary="Descarta a proposta",
+)
+async def discard_draft(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    draft_id: str,
+) -> DraftOut:
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    draft = await service.discard(draft_id)
+    await session.commit()
+    return _draft_out(draft)
+
+
+@router.get(
+    "/landing/drafts/{draft_id}/preview",
+    response_model=list[dict[str, Any]],
+    summary="A proposta como a vitrine vai desenhá-la",
+)
+async def draft_preview(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    draft_id: str,
+) -> list[dict[str, Any]]:
+    """Pelo **mesmo resolver** da vitrine, com os blocos da proposta no lugar dos salvos.
+
+    A prévia vive no painel, e não numa rota da loja, por três razões: uma rota de rascunho na
+    vitrine teria chave de cache que nunca pode ser compartilhada, precisaria de sessão de admin
+    num host que não tem, e abriria um caminho para página não publicada vazar.
+    """
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    draft = await service.get_or_404(draft_id)
+    return await resolve_landing(
+        session,
+        tenant,
+        show_catalog=True,
+        blocks_override=draft.blocks or [],
+        card_payload=lambda card, currency: _card(card, currency).model_dump(mode="json"),
+        category_payload=lambda category: _category(category).model_dump(),
+        image_payload=image_payload,
+    )
