@@ -2282,3 +2282,12 @@
   font-size: 0.82rem;
   color: var(--store-muted);
 }
+
+/* O preço cheio na conta do resumo: riscado e discreto, porque o número que importa é o que
+   ela vai pagar. Existe para o desconto ter de onde cair — desconto sem referência é só um
+   número menor. */
+.strikethrough {
+  text-decoration: line-through;
+  color: var(--store-muted);
+  font-weight: 400;
+}

@@ -111,7 +111,9 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await page.getByRole("button", { name: "Aplicar cupom" }).click();
   await expect(page.getByText("Cupom E2E10 aplicado.")).toBeVisible();
   const resumo = page.getByRole("complementary");
-  await expect(resumo).toContainText(/Desconto\s*−R\$\s*5,90/);
+  // A linha nomeia o cupom: com desconto progressivo e promoção na mesma conta, "Desconto"
+  // sozinho não dizia de onde o abatimento veio.
+  await expect(resumo).toContainText(/Cupom E2E10\s*−R\$\s*5,90/);
   await expect(resumo).toContainText(/Total\s*R\$\s*53,10/);
 
   await page.getByRole("link", { name: "Finalizar compra" }).click();

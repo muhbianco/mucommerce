@@ -177,6 +177,19 @@ export default async function CartPage({
   const { ok, erro, frete } = await searchParams;
   const { quote, options } = cart;
   const currency = quote.currency;
+  /**
+   * Quanto o preço cheio caiu, somando desconto progressivo e promoção.
+   *
+   * O cupom **não** entra aqui: ele abate o total depois, tem linha própria, e somar os dois
+   * mostraria a mesma economia duas vezes. O `compare_at` é o riscado que a própria linha já
+   * carrega, então isto não custa nenhuma ida à API.
+   */
+  const economia = cart.items.reduce((total, item) => {
+    const cheio = item.compare_at_cents;
+    const pago = item.unit_price_cents;
+    if (!cheio || !pago || cheio <= pago) return total;
+    return total + (cheio - pago) * Number(String(item.quantity).replace(",", "."));
+  }, 0);
   const chosen = cart.fulfillment ?? {};
   const current =
     chosen.type === "pickup"
@@ -231,13 +244,30 @@ export default async function CartPage({
                 <FreeShippingBar subtotalCents={quote.subtotal_cents} freeAboveCents={freeAbove} currency={currency} />
               ) : null}
               <dl className={styles.totals}>
+                {economia ? (
+                  // O preço cheio antes do abatimento. Sem esta linha, o desconto progressivo e a
+                  // promoção sumiam da conta: eles baixam o preço unitário, então o subtotal já
+                  // nasce descontado e a pessoa nunca vê o quanto ganhou.
+                  <div>
+                    <dt>Preço cheio</dt>
+                    <dd className={styles.strikethrough}>
+                      {money(quote.subtotal_cents + economia, currency)}
+                    </dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt>Subtotal</dt>
                   <dd>{money(quote.subtotal_cents, currency)}</dd>
                 </div>
+                {economia ? (
+                  <div>
+                    <dt>Você economizou</dt>
+                    <dd className={styles.discount}>−{money(economia, currency)}</dd>
+                  </div>
+                ) : null}
                 {quote.discount_cents ? (
                   <div>
-                    <dt>Desconto</dt>
+                    <dt>Cupom {quote.coupon?.code ?? ""}</dt>
                     <dd className={styles.discount}>
                       −{money(quote.discount_cents, currency)}
                     </dd>

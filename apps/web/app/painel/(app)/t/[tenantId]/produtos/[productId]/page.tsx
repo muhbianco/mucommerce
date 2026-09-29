@@ -7,6 +7,13 @@ import { formatMoney, moneyInput, utcToLocalInput } from "@/lib/panel/format";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { type PillState, PRODUCT_STATE, stateOf } from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
+
+/** Cabe na caixa girando a peça? Compara as três medidas ordenadas, como o empacotador faz. */
+function cabeGirando(peca: number[], caixa: number[]): boolean {
+  const p = [...peca].sort((a, b) => a - b);
+  const c = [...caixa].sort((a, b) => a - b);
+  return p.every((mm, i) => mm <= (c[i] ?? 0));
+}
 import {
   type Category,
   type EventLot,
@@ -174,6 +181,28 @@ export default async function ProductPage({
     api<Category[]>(`${path}/categories`),
     api<TagRef[]>(`${path}/tags`),
   ]);
+  // A caixa padrão da loja, para avisar quando o produto não cabe nela. Espelha
+  // `app/shipping/packing.py#Box.fits`: compara as medidas ordenadas (o item pode girar) e o
+  // peso. Os dois lados precisam concordar, senão o aviso mente.
+  const caixa = (
+    (context.settings.fulfillment as { shipping?: { box?: Record<string, number> } } | undefined)
+      ?.shipping?.box ?? null
+  ) as { width_mm?: number; height_mm?: number; depth_mm?: number; max_weight_grams?: number } | null;
+  const medidas = [product.width_mm, product.height_mm, product.depth_mm];
+  const temMedidas = medidas.every((mm): mm is number => typeof mm === "number" && mm > 0);
+  const caixaMm = caixa ? [caixa.width_mm, caixa.height_mm, caixa.depth_mm] : [];
+  const temCaixa = caixaMm.every((mm): mm is number => typeof mm === "number" && mm > 0);
+  const soltoNaCotacao =
+    temMedidas &&
+    temCaixa &&
+    (!cabeGirando(medidas as number[], caixaMm as number[]) ||
+      (product.weight_grams ?? 0) > (caixa?.max_weight_grams ?? 0));
+  const caixaResumo = temCaixa ? `${caixaMm.map((mm) => (mm as number) / 10).join(" × ")} cm` : "";
+  // Peso cúbico da transportadora: comprimento × largura × altura em cm, dividido por 6000.
+  const cubadoKg = temMedidas
+    ? ((medidas as number[]).reduce((a, b) => a * (b / 10), 1) / 6000).toFixed(1).replace(".", ",")
+    : "";
+
   const otherTags = tags.filter((tag) => !product.tags.some((mine) => mine.slug === tag.slug));
   const isTicket = product.kind === "ticket";
   let event: ProductEvent | null = null;
@@ -584,6 +613,18 @@ export default async function ProductPage({
                 </div>
 
                 <h4 className={local.subhead}>Peso e medidas da caixa</h4>
+                {soltoNaCotacao ? (
+                  // Item que não cabe na caixa padrão viaja **sozinho**, um volume por unidade:
+                  // dez unidades viram dez fretes. É o que transforma um pedido de R$ 300 numa
+                  // cotação de mil e pouco, e nada dizia isso à lojista.
+                  <p className={styles.error} role="status">
+                    Este produto não cabe na sua caixa padrão ({caixaResumo}), então cada unidade
+                    é cotada como um volume separado — dez unidades viram dez fretes. Ou aumente a
+                    caixa em <a href={`${base}/envio`}>Envio</a>, ou confira se as medidas abaixo
+                    estão em milímetros.
+                    {cubadoKg ? ` Hoje cada unidade pesa ${cubadoKg} kg de peso cúbico.` : ""}
+                  </p>
+                ) : null}
                 <p className={styles.fieldHint}>
                   Medidas em <strong>milímetros</strong>: uma caixa de 30 × 20 × 8 cm se escreve
                   300 × 200 × 80. A transportadora cobra pelo volume, e sem as quatro o carrinho
