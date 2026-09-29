@@ -8,29 +8,37 @@ test.describe.configure({ mode: "serial" });
 
 const BIA = { sub: "e2e-bia", email: "bia.e2e@example.com", name: "Bia E2E" };
 
-/** A busca de CEP só vale depois que a ilha está de pé; digitar antes é digitar no vazio. */
-async function esperarCampoVivo(page: Page): Promise<void> {
-  await expect(page.locator("[data-cep-ready]")).toBeAttached();
-}
+/**
+ * Uma sessão para o arquivo inteiro.
+ *
+ * O login do cliente tem limite de dez por minuto, e ele é do código, não de configuração —
+ * entrar uma vez por teste somava com as outras suítes e derrubava a última. Modo serial já
+ * estava ligado, então a página compartilhada é a consequência natural.
+ */
+let page: Page;
 
-async function entrar(page: Page, request: import("@playwright/test").APIRequestContext, next: string) {
-  page.on("console", (m) => console.log(`[c ${m.type()}]`, m.text().slice(0, 200)));
-  page.on("pageerror", (e) => console.log("[pageerror]", e.message.slice(0, 250)));
-  page.on("response", (r) => {
-    if (r.status() >= 400) console.log("[http]", r.status(), r.url().slice(0, 140));
-  });
+test.beforeAll(async ({ browser, request }) => {
   await request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
-  await page.goto(`${STORE}/entrar?next=${encodeURIComponent(next)}`);
+  page = await (await browser.newContext()).newPage();
+  await page.goto(`${STORE}/entrar?next=%2Fconta%2Fenderecos`);
   await page.getByRole("link", { name: "Entrar com Google" }).click();
-  await expect(page).toHaveURL(new RegExp(next.split("?")[0].replace(/\//g, "\/")));
-  if (next.startsWith("/conta/enderecos")) await esperarCampoVivo(page);
+  await expect(page).toHaveURL(/\/conta\/enderecos/);
+});
+
+test.afterAll(async () => {
+  await page.close();
+});
+
+/** Abre uma tela já autenticada. A busca de CEP só vale depois que a ilha está de pé. */
+async function abrir(path: string): Promise<void> {
+  await page.goto(`${STORE}${path}`);
+  if (path.startsWith("/conta/enderecos")) {
+    await expect(page.locator("[data-cep-ready]")).toBeAttached();
+  }
 }
 
-test("o CEP preenche o endereço, e o que já foi escrito não é sobrescrito", async ({
-  page,
-  request,
-}) => {
-  await entrar(page, request, "/conta/enderecos");
+test("o CEP preenche o endereço, e o que já foi escrito não é sobrescrito", async () => {
+  await abrir("/conta/enderecos");
 
   await page.getByLabel("Nome de quem recebe").fill("Bia E2E");
   await page.getByLabel("Apelido").fill("centro");
@@ -53,8 +61,8 @@ test("o CEP preenche o endereço, e o que já foi escrito não é sobrescrito", 
   await expect(page.getByText("Endereço salvo.")).toBeVisible();
 });
 
-test("CEP que não existe não trava o formulário", async ({ page, request }) => {
-  await entrar(page, request, "/conta/enderecos");
+test("CEP que não existe não trava o formulário", async () => {
+  await abrir("/conta/enderecos");
   await page.getByLabel("CEP").pressSequentially("99999999", { delay: 20 });
   await expect(page.getByText(/Não achamos esse CEP/)).toBeVisible();
   // O que importa: dá para seguir à mão.
@@ -62,10 +70,10 @@ test("CEP que não existe não trava o formulário", async ({ page, request }) =
   await expect(page.getByRole("button", { name: "Salvar endereço" })).toBeEnabled();
 });
 
-test("editar um endereço tem saída: dá para voltar e cadastrar outro", async ({ page, request }) => {
+test("editar um endereço tem saída: dá para voltar e cadastrar outro", async () => {
   // Era um beco sem saída: com `?editar=`, o formulário virava o de edição e não havia caminho
   // de volta para o de cadastro.
-  await entrar(page, request, "/conta/enderecos");
+  await abrir("/conta/enderecos");
   await page.getByRole("link", { name: "Editar" }).first().click();
   await expect(page.getByRole("heading", { name: "Editar endereço" })).toBeVisible();
 
@@ -74,13 +82,12 @@ test("editar um endereço tem saída: dá para voltar e cadastrar outro", async 
   await expect(page.getByLabel("Nome de quem recebe")).toHaveValue("");
 });
 
-test("cadastrar endereço a partir do carrinho devolve a pessoa para a compra", async ({
-  page,
-  request,
-}) => {
-  // O endereço do carrinho é um desvio, não um destino: quem saiu para cadastrar precisa voltar
-  // sozinha para onde estava, senão a compra morre na lista de endereços.
-  await entrar(page, request, "/conta/enderecos?next=%2Fcarrinho");
+test("salvar devolve a pessoa para onde ela veio", async () => {
+  // Cadastrar endereço é um desvio, não um destino: quem saiu do carrinho (ou de qualquer
+  // tela) para cadastrar precisa voltar sozinha, senão a compra morre na lista de endereços.
+  // O destino aqui é `/conta` de propósito — provar o retorno não depende do carrinho, e
+  // depender dele amarrava este teste ao estado que o checkout deixa.
+  await abrir("/conta/enderecos?next=%2Fconta");
 
   await page.getByLabel("Nome de quem recebe").fill("Bia no trabalho");
   await page.getByLabel("Apelido").fill("trabalho");
@@ -89,5 +96,5 @@ test("cadastrar endereço a partir do carrinho devolve a pessoa para a compra", 
   await page.getByLabel("Número").fill("900");
   await page.getByRole("button", { name: "Salvar endereço" }).click();
 
-  await expect(page).toHaveURL(/\/carrinho/);
+  await expect(page).toHaveURL(/\/conta$|\/conta\?/);
 });
