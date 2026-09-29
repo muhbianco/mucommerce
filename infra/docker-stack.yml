@@ -78,9 +78,19 @@ x-api-env: &api_env
   # do gateway da api-agents estar no ar; com ele fora, todo pedido vira rascunho `failed`.
   LANDING_LLM_ENABLED: ${LANDING_LLM_ENABLED:-false}
 
+# Rotacao de log por servico. O padrao do daemon da hel1 tambem cobre isto, mas o padrao mora
+# no host e some numa reinstalacao; aqui fica versionado com a stack. Teto de 30 MB por
+# container: sem isto, um servico falante enche o disco da VPS em semanas.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   commerce-api:
     image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
+    logging: *logging
     environment:
       <<: *api_env
     extra_hosts:
@@ -128,6 +138,7 @@ services:
 
   commerce-worker:
     image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
+    logging: *logging
     command:
       - celery
       - -A
@@ -165,6 +176,7 @@ services:
   # never starves the outbox/payments worker of memory or CPU.
   commerce-media:
     image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
+    logging: *logging
     command:
       - celery
       - -A
@@ -200,6 +212,7 @@ services:
 
   commerce-beat:
     image: muhrilobianco/commerce_api:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
+    logging: *logging
     command:
       - celery
       - -A
@@ -230,6 +243,7 @@ services:
 
   commerce-web:
     image: muhrilobianco/commerce_web:${COMMERCE_TAG:?COMMERCE_TAG obrigatorio}
+    logging: *logging
     environment:
       NODE_ENV: production
       PORT: "3000"
