@@ -66,6 +66,10 @@ class ShippingStatusRead(BaseModel):
     unmeasured: list[UnmeasuredProduct] = []
     #: Produtos medidos, mas acima do que os Correios levam (no máximo 20).
     oversized: list[OversizedProduct] = []
+    #: Por que a caixa padrão da loja não passa nos Correios, quando não passa. Vale mais que
+    #: a lista de produtos: a caixa entra em toda cotação, então uma caixa grande demais
+    #: derruba o frete da loja inteira, inclusive o de quem comprou um item pequeno.
+    box_oversize: str | None = None
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
 
@@ -220,6 +224,11 @@ def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
         has_box=cfg.box is not None,
         services=[s.model_dump() for s in cfg.services],
         missing=faltando,
+        box_oversize=_oversize_detail(
+            cfg.box.empty_weight_grams, cfg.box.width_mm, cfg.box.height_mm, cfg.box.depth_mm
+        )
+        if cfg.box is not None
+        else None,
     )
 
 

@@ -24,6 +24,7 @@ interface ShippingStatus {
   missing: string[];
   unmeasured: { id: string; name: string }[];
   oversized: { id: string; name: string; detail: string }[];
+  box_oversize: string | null;
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
 }
@@ -124,6 +125,20 @@ export default async function Shipping({
           Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a
           configuração é da equipe da loja — aqui dá para conferir o estado.
         </p>
+      ) : null}
+
+      {status.box_oversize ? (
+        <Section
+          title="A caixa padrão não passa nos Correios"
+          description="Ela entra em toda cotação, então uma caixa grande demais derruba o frete da loja inteira — inclusive o de quem comprou um item pequeno."
+        >
+          <p className={styles.note}>Sua caixa está com {status.box_oversize}.</p>
+          <p className={styles.hint}>
+            PAC e SEDEX levam até 1 m por lado, 2 m somados e 30 kg. Confira a unidade nos campos
+            abaixo: são milímetros, então uma caixa de 30 cm se escreve 300. E o peso vazio é o da
+            embalagem sozinha — quase sempre alguns gramas, não quilos.
+          </p>
+        </Section>
       ) : null}
 
       {status.oversized.length > 0 ? (

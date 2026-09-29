@@ -315,3 +315,37 @@ async def test_a_tela_de_envio_separa_sem_medida_de_medida_grande_demais(
     assert [(p["name"], p["detail"]) for p in status["oversized"]] == [
         (grande["name"], "largura de 5,00 m, altura de 5,00 m, profundidade de 5,00 m")
     ]
+
+
+async def test_caixa_padrao_grande_demais_aparece_na_tela(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A caixa entra em toda cotação: grande demais, ela derruba o frete da loja inteira.
+
+    Foi o segundo tropeço da mesma unidade na loja do Silvio — corrigidas as medidas do
+    produto, a caixa continuou com 2 m por 1,5 m por 1 m e 10 kg de tara, e nada dizia isso.
+    """
+    tenant, owner, _ = await loja(client, session_factory)
+    base = f"/api/v1/admin/tenants/{tenant.id}"
+
+    # A caixa do `loja()` é de tamanho normal: nada a avisar.
+    assert (await client.get(f"{base}/shipping", headers=owner)).json()["box_oversize"] is None
+
+    atual = (await client.get(f"{base}/settings", headers=owner)).json()["fulfillment"]
+    envio = dict(atual["shipping"])
+    envio["box"] = {
+        "width_mm": 2000,
+        "height_mm": 1500,
+        "depth_mm": 1000,
+        "max_weight_grams": 30000,
+        "empty_weight_grams": 10000,
+    }
+    salvo = await client.put(
+        f"{base}/settings/fulfillment",
+        json={"value": {**atual, "shipping": envio}},
+        headers=owner,
+    )
+    assert salvo.status_code == 200, salvo.text
+
+    status = (await client.get(f"{base}/shipping", headers=owner)).json()
+    assert status["box_oversize"] == "largura de 2,00 m, altura de 1,50 m"
