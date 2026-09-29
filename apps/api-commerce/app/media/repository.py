@@ -10,8 +10,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.media.models import MediaAsset, MediaStatus
 from app.tenancy.context import CROSS_TENANT_OPTION
 
+#: Quantas imagens cabem por dono. O brief é o que mais recebe — logotipo, fachada, equipe,
+#: produtos, referências —, e doze não davam para contar a história de uma loja.
+MEDIA_LIMITS: dict[str, int] = {
+    "product": 12,
+    "tenant_brand": 12,
+    "landing": 24,
+    "brief": 30,
+}
+#: Dono que não está no mapa (nenhum hoje) cai aqui.
 MAX_MEDIA_PER_OWNER = 12
 MAINTENANCE_BATCH = 100
+
+
+def media_limit(owner_type: str) -> int:
+    return MEDIA_LIMITS.get(owner_type, MAX_MEDIA_PER_OWNER)
 
 
 class MediaRepository:
@@ -35,7 +48,9 @@ class MediaRepository:
                 else MediaAsset.owner_id.is_(None)
             )
             .order_by(MediaAsset.position, MediaAsset.id)
-            .limit(MAX_MEDIA_PER_OWNER * 4)
+            # Deriva do limite do dono: com o número fixo, subir o teto do brief deixaria a
+            # listagem cortando em silêncio o que a loja acabou de enviar.
+            .limit(media_limit(owner_type) * 4)
         )
         return (await self.session.execute(stmt)).scalars().all()
 

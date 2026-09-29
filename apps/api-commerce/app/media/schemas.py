@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
@@ -10,7 +10,10 @@ from app.schemas.common import StrictModel
 
 EntityId = Annotated[str, StringConstraints(min_length=36, max_length=36)]
 Position = Annotated[int, Field(ge=-1_000_000, le=1_000_000)]
-MediaOwnerIn = Literal["product", "tenant_brand", "landing"]
+MediaOwnerIn = Literal["product", "tenant_brand", "landing", "brief"]
+MediaRoleIn = Literal[
+    "logo", "icon", "banner", "product_photo", "place_photo", "team_photo", "texture", "other"
+]
 
 
 class UploadCreate(StrictModel):
@@ -22,11 +25,14 @@ class UploadCreate(StrictModel):
     bytes: Annotated[int, Field(ge=1, le=MAX_UPLOAD_BYTES)]
     filename: Annotated[str, Field(max_length=200)] | None = None
     alt: Annotated[str, Field(max_length=300)] | None = None
+    #: O que a imagem é. Quem monta a vitrine lê isto para saber qual foto vira destaque.
+    role: MediaRoleIn | None = None
 
 
 class MediaUpdate(StrictModel):
     alt: Annotated[str, Field(max_length=300)] | None = None
     position: Position | None = None
+    role: MediaRoleIn | None = None
 
 
 class UploadForm(BaseModel):
@@ -54,6 +60,9 @@ class MediaRead(BaseModel):
     width: int | None
     height: int | None
     failure_reason: str | None
+    role: str | None = None
+    #: Cores sugeridas a partir do arquivo, quando ele é um logotipo.
+    palette: dict[str, Any] | None = None
     renditions: list[RenditionRead]
     created_at: datetime
 

@@ -36,6 +36,28 @@ class MediaOwner(StrEnum):
     # Tenant-level images (logo, landing blocks): no owner_id.
     TENANT_BRAND = "tenant_brand"
     LANDING = "landing"
+    # Material que a lojista manda para a gente montar a vitrine dela: logo, fachada, produto,
+    # referência. É insumo, não conteúdo publicado — ver `MediaRole`.
+    BRIEF = "brief"
+
+
+class MediaRole(StrEnum):
+    """O que a imagem é, na palavra de quem mandou.
+
+    Existe porque quem monta a página precisa saber que uma foto é a fachada da loja e a outra
+    é o logotipo — e a alternativa seria olhar a imagem, que custa e erra. Vive numa coluna
+    própria, e **não** no `alt`: `alt` é o texto que um leitor de tela vai ler na página
+    publicada, e "banner" ali não ajuda ninguém.
+    """
+
+    LOGO = "logo"
+    ICON = "icon"
+    BANNER = "banner"
+    PRODUCT_PHOTO = "product_photo"
+    PLACE_PHOTO = "place_photo"
+    TEAM_PHOTO = "team_photo"
+    TEXTURE = "texture"
+    OTHER = "other"
 
 
 class MediaAsset(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
@@ -62,6 +84,11 @@ class MediaAsset(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantSco
     height: Mapped[int | None] = mapped_column(Integer)
     checksum_sha256: Mapped[str | None] = mapped_column(String(64))
     alt: Mapped[str | None] = mapped_column(String(300))
+    #: `MediaRole`, quando quem enviou disse o que é. Nulo em tudo que veio antes disto existir.
+    role: Mapped[str | None] = mapped_column(String(24))
+    #: Cores dominantes extraídas do arquivo, quando ele é um logotipo. Propriedade da imagem,
+    #: não da loja: fica aqui para não depender de existir brief.
+    palette: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failure_reason: Mapped[str | None] = mapped_column(String(300))

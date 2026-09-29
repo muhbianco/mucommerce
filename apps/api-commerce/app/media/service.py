@@ -46,9 +46,10 @@ from app.core.storage import (
     PresignedPost,
     public_object_url,
 )
-from app.media.imaging import MAX_UPLOAD_BYTES, InvalidImageError, process_image
-from app.media.models import MediaAsset, MediaOwner, MediaStatus
-from app.media.repository import MAX_MEDIA_PER_OWNER, MediaRepository
+from app.landing.color import extract_palette
+from app.media.imaging import MAX_UPLOAD_BYTES, InvalidImageError, ProcessedImage, process_image
+from app.media.models import MediaAsset, MediaOwner, MediaRole, MediaStatus
+from app.media.repository import MediaRepository, media_limit
 from app.media.schemas import MediaUpdate, UploadCreate
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext, bind_session_tenant
@@ -139,8 +140,9 @@ class MediaService:
     async def create_upload(self, data: UploadCreate) -> UploadTicket:
         await self._check_owner(data.owner_type, data.owner_id)
         used = await self.repo.count_for_owner(data.owner_type, data.owner_id)
-        if used >= MAX_MEDIA_PER_OWNER:
-            raise ConflictError("Limite de imagens atingido.", limit=MAX_MEDIA_PER_OWNER)
+        limite = media_limit(data.owner_type)
+        if used >= limite:
+            raise ConflictError("Limite de imagens atingido.", limit=limite)
 
         media_id = new_id()
         upload_key = f"incoming/{self.tenant.id}/{media_id}"
@@ -162,6 +164,7 @@ class MediaService:
             filename=_clean_filename(data.filename),
             upload_key=upload_key,
             alt=data.alt,
+            role=data.role,
             position=used,
             created_by_actor=self.actor.id,
             updated_by_actor=self.actor.id,
@@ -358,6 +361,10 @@ async def process_media(
             "bytes": len(rendition.data),
         }
 
+    # Cores sugeridas, só para o que a loja disse ser logotipo ou material de marca. É conta
+    # determinística com Pillow: "qual é a cor desta marca" não é pergunta para um modelo.
+    palette = _palette_of(processed)
+
     async def finish(session: AsyncSession) -> str:
         bind_session_tenant(session, tenant_id)
         media = await MediaRepository(session).get(media_id)
@@ -365,6 +372,8 @@ async def process_media(
             return "missing"  # deleted meanwhile; media.deleted cleans the objects up
         if media.status != MediaStatus.PROCESSING:
             return str(media.status)
+        if palette is not None and _suggests_brand(media):
+            media.palette = palette
         media.status = MediaStatus.READY
         media.public_prefix = prefix
         media.renditions = renditions
@@ -429,3 +438,24 @@ async def sweep_stale_media(session: AsyncSession) -> list[tuple[str, str]]:
         await session.delete(media)
     await session.flush()
     return requeue
+
+
+def _suggests_brand(media: MediaAsset) -> bool:
+    """Vale sugerir cor a partir desta imagem?
+
+    Logotipo, sim. Foto de produto, não: a cor dominante de um brownie é marrom, e propor marrom
+    como a cor da loja seria uma sugestão ruim com cara de automação esperta.
+    """
+    if media.role in {MediaRole.LOGO, MediaRole.ICON}:
+        return True
+    # Sem papel declarado, só o dono "marca" conta — é onde o logotipo vive hoje.
+    return media.role is None and media.owner_type == MediaOwner.TENANT_BRAND
+
+
+def _palette_of(processed: ProcessedImage) -> dict[str, Any] | None:
+    """Paleta a partir da menor rendição já gerada. Nunca derruba o processamento."""
+    menor = min(processed.renditions, key=lambda r: r.width, default=None)
+    if menor is None:
+        return None
+    extracted = extract_palette(menor.data)
+    return extracted.as_dict() if extracted else None
