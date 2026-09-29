@@ -101,11 +101,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_landing_generation_usage_tenant_id", table_name="landing_generation_usage")
+    # Só `drop_table`: ele já leva os índices junto, e derrubar à mão o índice que sustenta a
+    # chave estrangeira faz o MariaDB recusar com 1553 ("needed in a foreign key constraint").
+    # No SQLite passava, então é o passo de MariaDB da CI que pega isto.
     op.drop_table("landing_generation_usage")
-    op.drop_index("ix_landing_drafts_status_updated", table_name="landing_drafts")
-    op.drop_index("ix_landing_drafts_tenant_status", table_name="landing_drafts")
-    op.drop_index("ix_landing_drafts_tenant_id", table_name="landing_drafts")
     op.drop_table("landing_drafts")
-    op.drop_index("ix_landing_briefs_tenant_id", table_name="landing_briefs")
     op.drop_table("landing_briefs")
