@@ -312,6 +312,27 @@ class CheckoutV1(_Setting):
     refund_four_eyes_threshold_cents: Annotated[int, Field(ge=0, le=100_000_000)] = 20_000
 
 
+class EmailV1(_Setting):
+    """De onde saem os e-mails desta loja.
+
+    A senha **não** mora aqui: é senha de app, vai para o cofre cifrado
+    (`tenant_integration_credentials`, provider `smtp`), como a chave do meio de pagamento.
+
+    `username` é também o remetente. Não são dois campos porque o Gmail recusa enviar com um
+    "De" diferente da conta autenticada — separar convidaria a loja a preencher errado e a
+    descobrir pelo cliente que não recebeu.
+    """
+
+    enabled: bool = False
+    host: Annotated[str, Field(min_length=3, max_length=200)] = "smtp.gmail.com"
+    #: 587 é STARTTLS, que é o que o Gmail pede. 465 (TLS direto) também é aceito.
+    port: Annotated[int, Field(ge=1, le=65535)] = 587
+    #: A conta que autentica e assina o envio. Vazio enquanto a loja não configurou.
+    username: Annotated[str, Field(max_length=200)] = ""
+    #: O nome que aparece no "De". Vazio: vale o nome da loja.
+    from_name: Annotated[str, Field(max_length=80)] = ""
+
+
 SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
     "storefront": (1, StorefrontV1),
     "branding": (1, BrandingV1),
@@ -320,6 +341,7 @@ SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
     "fulfillment": (2, FulfillmentV2),
     "checkout": (1, CheckoutV1),
     "payments": (1, PaymentsV1),
+    "email": (1, EmailV1),
 }
 
 
@@ -343,6 +365,11 @@ def validate_setting(key: str, value: dict[str, Any]) -> tuple[int, dict[str, An
         ]
         raise ValidationError("Configuração inválida.", key=key, errors=errors) from exc
     return version, parsed.model_dump(mode="json")
+
+
+def email_settings(settings: Mapping[str, Any]) -> EmailV1:
+    """De onde saem os e-mails da loja; loja que nunca configurou cai nos padrões."""
+    return EmailV1.model_validate(settings.get("email") or {})
 
 
 def checkout_settings(settings: Mapping[str, Any]) -> CheckoutV1:

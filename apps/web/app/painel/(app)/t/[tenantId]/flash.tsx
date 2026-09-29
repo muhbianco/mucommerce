@@ -19,6 +19,8 @@ const OK: Record<string, string> = {
   checkout: "Checkout salvo.",
   pagamento: "Meio de pagamento salvo.",
   pedido: "Pedido atualizado.",
+  email: "Configuração de e-mail salva.",
+  email_teste: "Teste enviado. Confira a caixa de entrada dessa conta.",
   despachado: "Etiqueta comprada. O cliente recebeu o código de rastreio.",
   cupom_criado: "Cupom criado.",
   cupom_salvo: "Cupom salvo.",
@@ -67,6 +69,8 @@ const ERRORS: Record<string, string> = {
   conflict: "Conflito com o estado atual (ex.: SKU/slug em uso ou produto sem imagem).",
   insufficient_stock: "Estoque insuficiente para essa saída.",
   permission_denied: "Seu papel não permite essa ação.",
+  email_teste_falhou:
+    "O servidor de e-mail recusou. Confira a conta e a senha de app, e tente de novo.",
   shipping_unavailable: "A transportadora não respondeu. Nada foi comprado; tente de novo.",
   shipping_insufficient_balance:
     "Sem saldo na carteira da transportadora. Recarregue e despache de novo.",

@@ -11,7 +11,7 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -51,6 +51,15 @@ def signature(body: bytes, timestamp: int) -> str:
     secret = settings.notify_n8n_secret.get_secret_value().encode()
     digest = hmac.new(secret, f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
     return f"t={timestamp},v1={digest}"
+
+
+class EmailTransport(Protocol):
+    """Um jeito de um e-mail sair. Hoje: o SMTP da loja, ou o n8n da plataforma."""
+
+    @property
+    def configured(self) -> bool: ...
+
+    async def send(self, delivery: NotificationDelivery) -> str | None: ...
 
 
 class N8nTransport:

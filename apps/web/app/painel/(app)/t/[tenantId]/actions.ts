@@ -590,3 +590,39 @@ export async function publishLegalDocument(form: FormData): Promise<void> {
     await api(`${path}/legal-documents`, { json: { kind, content: text(form, "content") } });
   });
 }
+
+/**
+ * De onde saem os e-mails da loja.
+ *
+ * A senha vai só quando preenchida: campo em branco mantém a que está guardada, senão abrir a
+ * tela e salvar outra coisa apagaria a credencial sem ninguém pedir.
+ */
+export async function saveEmail(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/configuracoes`, "email", async () => {
+    const password = text(form, "password");
+    await api(`${path}/email`, {
+      method: "PUT",
+      json: {
+        enabled: form.get("enabled") === "on",
+        host: text(form, "host") || "smtp.gmail.com",
+        port: Number(text(form, "port") || 587),
+        username: optional(form, "username"),
+        from_name: text(form, "from_name"),
+        ...(password ? { password } : {}),
+      },
+    });
+  });
+}
+
+/** Manda um e-mail de teste para a própria conta configurada. */
+export async function testEmail(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/configuracoes`, "email_teste", async () => {
+    const resultado = await api<{ ok: boolean; detail: string }>(`${path}/email/test`, {
+      method: "POST",
+      json: {},
+    });
+    if (!resultado.ok) throw new FormError("email_teste_falhou");
+  });
+}

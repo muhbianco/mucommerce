@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     admin_coupons,
     admin_customers,
     admin_domains,
+    admin_email,
     admin_events,
     admin_inventory,
     admin_landing,
@@ -83,6 +84,13 @@ TAGS_METADATA: list[dict[str, object]] = [
         ),
     },
     {
+        "name": "Painel — E-mails",
+        "description": (
+            "De onde saem os e-mails da loja. A senha de app fica cifrada no cofre e só volta "
+            "mascarada; o envio de teste é a única prova de que ela está certa."
+        ),
+    },
+    {
         "name": "Painel — Envio",
         "description": (
             "Transportadora da loja: conectar a conta (só o dono) e despachar o pedido "
@@ -141,6 +149,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_orders.router,
     admin_modules.router,
     admin_payments.router,
+    admin_email.router,
     admin_shipping.router,
     admin_shipping.orders_router,
     admin_refunds.router,

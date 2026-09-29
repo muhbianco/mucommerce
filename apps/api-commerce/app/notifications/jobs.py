@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.models.base import utcnow
 from app.notifications.models import DeliveryStatus, NotificationDelivery
-from app.notifications.transport import N8nTransport, TransportError
+from app.notifications.resolver import transport_for
+from app.notifications.transport import EmailTransport, N8nTransport, TransportError
 from app.tenancy.context import CROSS_TENANT_OPTION
 
 logger = get_logger(__name__)
@@ -33,20 +34,21 @@ BATCH = 100
 BODY_KEPT = timedelta(days=30)
 
 
-async def due(session: AsyncSession, now: datetime) -> list[str]:
+async def due(session: AsyncSession, now: datetime) -> list[tuple[str, str]]:
+    """As entregas vencidas, com a loja de cada uma: é a loja que decide por onde o e-mail sai."""
     stmt = (
-        select(NotificationDelivery.id)
+        select(NotificationDelivery.id, NotificationDelivery.tenant_id)
         .where(NotificationDelivery.status.in_((DeliveryStatus.QUEUED, DeliveryStatus.SENDING)))
         .where(NotificationDelivery.next_attempt_at <= now)
         .order_by(NotificationDelivery.next_attempt_at)
         .limit(BATCH)
         .execution_options(**{CROSS_TENANT_OPTION: True})
     )
-    return list((await session.execute(stmt)).scalars())
+    return [(row[0], row[1]) for row in (await session.execute(stmt)).tuples()]
 
 
 async def send_one(
-    session: AsyncSession, delivery_id: str, transport: N8nTransport, now: datetime
+    session: AsyncSession, delivery_id: str, transport: EmailTransport, now: datetime
 ) -> str:
     """Claim, send, record. Commits; returns the row's new status (or why it was skipped)."""
     delivery = await session.scalar(
@@ -111,15 +113,28 @@ async def send_one(
 
 
 async def run_send_notifications(
-    factory: async_sessionmaker[AsyncSession], now: datetime, transport: N8nTransport | None = None
+    factory: async_sessionmaker[AsyncSession],
+    now: datetime,
+    transport: EmailTransport | None = None,
 ) -> int:
-    sender = transport or N8nTransport()
+    """Cada entrega sai pelo transporte da loja dela.
+
+    O `transport` explícito continua valendo para o teste e para o E2E; sem ele, a loja que
+    configurou SMTP manda pela conta dela e as demais caem no caminho da plataforma. A escolha
+    é por entrega porque a fila é de todas as lojas ao mesmo tempo.
+    """
+    padrao = transport or N8nTransport()
     async with factory() as session:
-        ids = await due(session, now)
+        pendentes = await due(session, now)
     sent = 0
-    for delivery_id in ids:
+    for delivery_id, tenant_id in pendentes:
         async with factory() as session:
             try:
+                sender = (
+                    padrao
+                    if transport is not None
+                    else await transport_for(session, tenant_id, padrao)
+                )
                 sent += await send_one(session, delivery_id, sender, now) == DeliveryStatus.SENT
             except Exception:
                 logger.exception("E-mail sending failed", extra={"delivery_id": delivery_id})

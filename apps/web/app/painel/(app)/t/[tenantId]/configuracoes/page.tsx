@@ -7,7 +7,15 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import type { Media } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
-import { applyPalette, deleteMedia, publishLegalDocument, saveBranding, saveSeo } from "../actions";
+import {
+  applyPalette,
+  deleteMedia,
+  publishLegalDocument,
+  saveBranding,
+  saveEmail,
+  saveSeo,
+  testEmail,
+} from "../actions";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
 import { PageHeader, Pill, Section } from "../ui";
@@ -62,12 +70,14 @@ export default async function Settings({
   const path = `/admin/tenants/${context.tenant_id}`;
   // As imagens da página inicial e os produtos saíram daqui: quem cuida deles é a tela da
   // página inicial, que tem prévia.
-  const [brandMedia, legal, suggestions] = await Promise.all([
+  const [brandMedia, legal, suggestions, email] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
     api<LegalOverview>(`${path}/legal-documents`),
     // Cores tiradas do logotipo no processamento da imagem. Loja sem logotipo (ou com um
     // enviado antes disto existir) recebe lista vazia, e a seção some.
     api<PaletteSuggestion[]>(`${path}/branding/suggestions`).catch(() => [] as PaletteSuggestion[]),
+    // A equipe da MuhBianco lê para dar suporte; gravar é só da equipe da loja (members_only).
+    api<EmailConfig>(`${path}/email`).catch(() => EMAIL_VAZIO),
   ]);
   const branding = context.settings.branding ?? {};
   // Mesmo padrão da API (storefront_context): sem configuração, só clientes aprovados.
@@ -269,6 +279,104 @@ export default async function Settings({
         </form>
       </Section>
 
+      <Section
+        id="emails"
+        title="E-mails e notificações"
+        description="De onde saem os e-mails que a sua loja manda ao cliente"
+      >
+        <p className={styles.hint}>
+          Hoje os avisos de pedido saem pela MuhBianco. Cadastrando a sua conta, eles passam a
+          sair do seu e-mail — o cliente responde para você, e não para nós.
+        </p>
+        <form action={saveEmail}>
+          {tenantField}
+          <div className={styles.fields}>
+            <label className={styles.field}>
+              Conta de e-mail
+              <input
+                name="username"
+                type="email"
+                maxLength={200}
+                placeholder="loja@gmail.com"
+                defaultValue={email.username}
+              />
+              <span className={styles.fieldHint}>
+                É também o remetente: o Gmail recusa enviar com outro nome no &quot;De&quot;.
+              </span>
+            </label>
+            <label className={styles.field}>
+              Senha de app
+              <input
+                name="password"
+                type="password"
+                maxLength={200}
+                autoComplete="new-password"
+                placeholder={email.password_masked ?? "16 letras, sem espaços"}
+              />
+              <span className={styles.fieldHint}>
+                {email.password_masked
+                  ? "Guardada. Preencha só para trocar."
+                  : "Não é a senha do seu e-mail."}{" "}
+                <a
+                  href="https://myaccount.google.com/apppasswords"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Gerar no Google
+                </a>
+              </span>
+            </label>
+            <label className={styles.field}>
+              Nome no remetente
+              <input
+                name="from_name"
+                maxLength={80}
+                placeholder={context.name}
+                defaultValue={email.from_name}
+              />
+            </label>
+            <label className={styles.field}>
+              Servidor
+              <input name="host" maxLength={200} defaultValue={email.host} />
+              <span className={styles.fieldHint}>Gmail: smtp.gmail.com</span>
+            </label>
+            <label className={styles.field}>
+              Porta
+              <input name="port" type="number" min={1} max={65535} defaultValue={email.port} />
+              <span className={styles.fieldHint}>587 para Gmail.</span>
+            </label>
+          </div>
+          <label className={styles.check}>
+            <input type="checkbox" name="enabled" defaultChecked={email.enabled} />
+            <span>
+              Mandar os e-mails por esta conta
+              <span className={styles.fieldHint}>
+                Desligado, os avisos continuam saindo pela MuhBianco.
+              </span>
+            </span>
+          </label>
+          <p className={styles.hint}>
+            Conta comum do Gmail entrega algumas centenas de mensagens por dia. Se a sua loja
+            passar disso, o Google recusa o resto — e o erro dele não explica isso.
+          </p>
+          <div className={styles.formActions}>
+            <button type="submit" className={styles.button}>
+              Salvar e-mail
+            </button>
+          </div>
+        </form>
+        {email.username && email.password_masked ? (
+          <form action={testEmail}>
+            {tenantField}
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.buttonGhost}>
+                Enviar teste para {email.username}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </Section>
+
       <Section id="termos" title="Termos e privacidade" description="O que o cliente aceita ao entrar na loja">
         <p className={local.intro}>
           Cada publicação vira uma nova versão. Quem entra na loja aceita a versão mostrada na tela de login, e o
@@ -312,6 +420,25 @@ export default async function Settings({
     </>
   );
 }
+
+interface EmailConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  username: string;
+  from_name: string;
+  password_masked: string | null;
+}
+
+/** Loja que nunca configurou, ou leitura que falhou: a seção aparece vazia em vez de sumir. */
+const EMAIL_VAZIO: EmailConfig = {
+  enabled: false,
+  host: "smtp.gmail.com",
+  port: 587,
+  username: "",
+  from_name: "",
+  password_masked: null,
+};
 
 const LEGAL_LABEL = { terms: "Termos de uso", privacy: "Política de privacidade" } as const;
 

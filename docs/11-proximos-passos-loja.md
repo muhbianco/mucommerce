@@ -1,7 +1,10 @@
 # Próximos passos da loja (levantado em 29/09/2026)
 
-Quatro pedidos do dono depois do primeiro pedido pago de verdade na SG Pipas. A tela de
-despacho já subiu; os três abaixo estão levantados no código e prontos para começar.
+Pedidos do dono depois do primeiro pedido pago de verdade na SG Pipas.
+
+**Estado em 29/09/2026, fim do dia: os dois abaixo estão feitos e no ar**, junto com a tela de
+despacho. O item de unificar horários foi retirado a pedido dele. O que fica aqui é o registro
+do desenho e dos cuidados — útil para entender por que cada peça é como é.
 
 ---
 
@@ -72,42 +75,12 @@ lojista põe o e-mail e a senha de app do Google. Os e-mails da loja passam a sa
 
 ---
 
-## 3. Horário de atendimento num lugar só
+## O que ficou de fora, e por quê
 
-**Hoje são dois lugares, e eles não são a mesma coisa.**
+**Rateio do frete e do acréscimo de cartão na devolução por item.** Devolver o produto não
+devolve por si só o custo de tê-lo mandado; quem quiser isso usa a devolução por valor, que
+continua existindo. É decisão de política da loja, não de código.
 
-- **Entrega e checkout → janelas** (`DeliveryWindow`: dia da semana, início, fim, modos).
-  Elas não dizem quando a loja abre: dizem **quais horários o cliente pode escolher** para
-  retirar ou receber. Viram os `slots` do carrinho, com antecedência mínima e limite de dias.
-- **Bloco "Horário de Atendimento" da vitrine.** Sete linhas digitadas à mão, só para mostrar.
-
-Respondendo à pergunta do dono: **as janelas ditam o carrinho, não a loja.** Uma loja pode
-abrir 8h–18h e só entregar 14h–18h — as duas informações são legitimamente diferentes, e é por
-isso que hoje existem duas telas.
-
-**O desenho proposto.** Um lugar para editar, dois usos:
-
-1. A janela ganha o modo **`atendimento`**, ao lado de `retirada` e `entrega`.
-2. Janela marcada como atendimento **não gera horário de carrinho** — ela só aparece na vitrine.
-3. O bloco da vitrine para de ter sete linhas próprias e passa a mostrar o que está configurado;
-   mantém título, endereço e observação, que são dele.
-4. A tela ganha adicionar e remover linha (hoje são sete fixas).
-
-**Cuidado que decide o desenho.** `FulfillmentMode` é o mesmo tipo que diz como o **pedido** é
-entregue. Não dá para enfiar `atendimento` ali: um pedido nunca é "atendimento". O modo novo
-vive só no tipo da janela, e `slots()` ignora quem não é retirada ou entrega.
-
-**Compatibilidade.** Loja que já preencheu o bloco à mão continua vendo o que preencheu
-enquanto não houver janela de atendimento — o bloco só troca de fonte quando existe a nova.
-
-**Aceite.** O Silvio edita os horários em um lugar, marca os de atendimento, e eles aparecem na
-vitrine sem ele digitar de novo. Os horários de retirada continuam governando o carrinho.
-
----
-
-## Ordem sugerida
-
-1. **Devolução por item** — mexe com dinheiro e estoque, e é a que dá mais trabalho se ficar
-   para depois de a loja ter volume.
-2. **SMTP** — hoje o cliente da SG Pipas não recebe nada; é o que mais aparece para quem compra.
-3. **Horários** — melhoria de operação, sem ninguém bloqueado.
+**Limite de envio do Gmail.** Conta comum entrega algumas centenas de mensagens por dia. A tela
+avisa; uma loja que crescer vai precisar de conta de serviço ou provedor de envio, e aí é outra
+conversa.
