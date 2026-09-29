@@ -72,7 +72,7 @@ test("painel: cancelar um pedido pago devolve o dinheiro e o estoque", async ({ 
   const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
   if (await accept.count()) await accept.check();
   await page.getByRole("button", { name: "Fazer pedido" }).click();
-  await page.getByRole("button", { name: "Pagar com Pix" }).click();
+  // O pagamento dispara sozinho quando a loja oferece um jeito só.
   await expect(page.getByLabel("Pix copia e cola")).toBeVisible(); // the payment exists now
   const settled = await page.request.post(`${API}/__e2e/payments/settle`, {
     data: { tenant: "muhbianco" },

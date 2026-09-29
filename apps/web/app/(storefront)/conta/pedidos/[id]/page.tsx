@@ -14,6 +14,7 @@ import { Breadcrumb, Notice, PageHead, Pill, Section, Split } from "../../../_st
 import styles from "../../../_store/store.module.css";
 import { CUSTOMER_ORDER_STATE, stateOf } from "@/lib/store/states";
 import { cancelOrder } from "../../actions";
+import { PayBox } from "./pay-box";
 import { PaymentSection } from "./payment-section";
 
 export const metadata: Metadata = { title: "Pedido", robots: { index: false, follow: false } };
@@ -132,6 +133,10 @@ export default async function OrderPage({
                 <dd>{money(order.total_cents, order.currency)}</dd>
               </div>
             </dl>
+            {/* Pagar mora ao lado do valor. Antes era um botão pequeno no meio da coluna da
+                esquerda, embaixo do estado do pagamento — onde se lê o que aconteceu, não onde
+                se age. */}
+            {payment ? <PayBox state={payment} total={money(order.total_cents, order.currency)} /> : null}
             {order.fulfillment_type === "pickup" ? <p className={styles.where}>Retirada: {place}</p> : null}
             {order.fulfillment_type === "delivery" ? <p className={styles.where}>Entrega: {place}</p> : null}
             {order.scheduled_start ? <p className={styles.where}>Horário: {when(order.scheduled_start)}</p> : null}

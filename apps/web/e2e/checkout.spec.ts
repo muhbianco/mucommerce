@@ -120,12 +120,15 @@ test("pagamento: paga com Pix e a página confirma sozinha", async ({ page }) =>
   await page.getByRole("button", { name: "Fazer pedido" }).click();
   await expect(page).toHaveURL(/\/conta\/pedidos\/[0-9a-f-]{36}\?ok=pedido$/);
 
-  await page.getByRole("button", { name: "Pagar com Pix" }).click();
+  // Um jeito só de pagar dispara sozinho: não há escolha a fazer, e pedir um clique para
+  // confirmar o óbvio é um passo a mais entre a pessoa e o pagamento dela.
   await expect(page).toHaveURL(/\?ok=pagamento$/);
   await expect(page.getByText("Aguardando o seu pagamento")).toBeVisible();
   await expect(page.getByRole("img", { name: "QR Code do Pix" })).toBeVisible();
   await expect(page.getByLabel("Pix copia e cola")).toHaveValue(/^00020126fake/);
-  await expect(page.getByRole("button", { name: "Pagar com Pix" })).toHaveCount(0); // one at a time
+  // Um pagamento por vez: com um em pé, a caixa mostra "continuar", não cria outro.
+  // (não confundir com "Pagar de outro jeito", que é o de trocar de meio.)
+  await expect(page.getByRole("button", { name: /^Pagar (R\$|com)/ })).toHaveCount(0);
 
   // The bank pays; the provider notifies the store; the page notices by itself (no reload).
   const settled = await page.request.post(`${API}/__e2e/payments/settle`, { data: { tenant: "muhbianco" } });

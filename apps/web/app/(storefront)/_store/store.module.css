@@ -2257,3 +2257,28 @@
     transform: none;
   }
 }
+
+/* ------------------------------------------------------------------ pagar, ao lado do total */
+
+.payBox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--store-line);
+}
+
+/* Largura inteira da coluna do resumo: é a ação da tela, e um botão do tamanho do texto ao lado
+   de um total em corpo grande some. */
+.payButton {
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1rem;
+}
+
+.payHint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--store-muted);
+}

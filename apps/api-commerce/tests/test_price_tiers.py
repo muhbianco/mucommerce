@@ -215,3 +215,91 @@ async def test_faixa_cadastrada_volta_no_painel(
 
     lido = await client.get(f"{base}/products/{produto_id}", headers=owner)
     assert lido.json()["price_tiers"] == SILVIO
+
+
+async def test_as_cores_do_mesmo_produto_somam_para_o_degrau(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cinco rabiolas pretas mais cinco amarelas são dez rabiolas.
+
+    Veio de uma loja de verdade: a lojista cadastrou "10 un ou mais" no produto, o cliente levou
+    cinco de cada cor e pagou preço cheio. Quem comprou não vê duas compras — vê uma, de dez.
+
+    A faixa está no **produto**, e é isso que decide o que ela mede.
+    """
+    from app.pricing.quote import LineInput
+    from tests.shoppers import selling_store
+    from tests.test_catalog import member_headers
+    from tests.test_catalog_options import put_options
+    from tests.test_pricing import pricing, product
+    from tests.test_storefront_catalog import set_stock
+
+    tenant = await selling_store(session_factory)
+    owner = await member_headers(client, session_factory, tenant)
+    criado = await product(
+        client, session_factory, tenant, owner, base_price_cents=1000, price_tiers=SILVIO
+    )
+    com_cores = (
+        await put_options(
+            client, tenant, owner, criado["id"], [{"name": "Cor", "values": ["Preta", "Amarela"]}]
+        )
+    ).json()
+    preta, amarela = (v["id"] for v in com_cores["variants"][:2])
+    for variant_id in (preta, amarela):
+        await set_stock(session_factory, variant_id, 100)
+
+    priced, problems = await pricing(
+        session_factory,
+        tenant,
+        lambda s: s.price([LineInput(preta, 5 * UN), LineInput(amarela, 5 * UN)]),
+    )
+    assert problems == []
+    assert [line.unit_cents for line in priced] == [900, 900]
+
+
+async def test_faixa_da_variante_continua_medindo_so_aquela_variante(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Onde a faixa está definida diz o que ela mede.
+
+    Uma loja que vende "kit 1 un" e "kit 10 un" como variações do mesmo produto põe a tabela na
+    variante justamente para elas **não** se somarem; herdar a soma do produto ali daria desconto
+    a quem não alcançou nada.
+    """
+    from app.catalog.models import ProductVariant
+    from app.pricing.quote import LineInput
+    from app.tenancy.context import bind_session_tenant
+    from tests.shoppers import selling_store
+    from tests.test_catalog import member_headers
+    from tests.test_catalog_options import put_options
+    from tests.test_pricing import pricing, product
+    from tests.test_storefront_catalog import set_stock
+
+    tenant = await selling_store(session_factory)
+    owner = await member_headers(client, session_factory, tenant)
+    criado = await product(client, session_factory, tenant, owner, base_price_cents=1000)
+    com_cores = (
+        await put_options(
+            client, tenant, owner, criado["id"], [{"name": "Cor", "values": ["Preta", "Amarela"]}]
+        )
+    ).json()
+    preta, amarela = (v["id"] for v in com_cores["variants"][:2])
+    for variant_id in (preta, amarela):
+        await set_stock(session_factory, variant_id, 100)
+    # A tabela vai só na preta, direto na linha: o painel ainda não oferece faixa por variante,
+    # mas a coluna existe e o cálculo a lê — é essa leitura que este teste protege.
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        variante = await session.get(ProductVariant, preta)
+        assert variante is not None
+        variante.price_tiers = SILVIO
+        await session.commit()
+
+    priced, problems = await pricing(
+        session_factory,
+        tenant,
+        lambda s: s.price([LineInput(preta, 5 * UN), LineInput(amarela, 5 * UN)]),
+    )
+    assert problems == []
+    # Cinco pretas não alcançam o degrau de dez, mesmo com cinco amarelas no carrinho.
+    assert [line.unit_cents for line in priced] == [1000, 1000]

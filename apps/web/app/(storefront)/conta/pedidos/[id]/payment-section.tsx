@@ -7,16 +7,12 @@ import {
   PAYMENT_STATUS_LABEL,
   paymentError,
   qrImageSource,
-  safeCheckoutUrl,
-  WEB_METHODS,
 } from "@/lib/payments";
 
-import { cancelPayment, checkPayment, startPayment } from "../../actions";
+import { cancelPayment, checkPayment } from "../../actions";
 
-/** Reais, para a linha do acréscimo. A moeda das lojas é sempre BRL hoje. */
-const money = (cents: number): string =>
-  new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cents / 100);
 import { CardBrick } from "./card-brick";
+import { payChoices } from "./pay-box";
 import { CopyButton } from "./copy-button";
 import { PaymentPoller } from "./payment-poller";
 
@@ -25,18 +21,6 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
   const payment = state.payment;
   const waiting = payment?.status === "requires_action" || payment?.status === "pending";
   const qr = qrImageSource(payment?.pix_qr_base64 ?? null);
-  const link = safeCheckoutUrl(payment?.checkout_url ?? null);
-  const choices = state.can_pay
-    ? state.options.flatMap((option) =>
-        option.methods
-          .filter((method): method is (typeof WEB_METHODS)[number] => (WEB_METHODS as readonly string[]).includes(method))
-          .map((method) => ({
-            provider: option.provider,
-            method,
-            surcharge: option.surcharge_cents?.[method] ?? 0,
-          })),
-      )
-    : [];
   const card = cardOption(state);
 
   return (
@@ -72,13 +56,7 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
           <CopyButton text={payment.pix_copy_paste} />
         </div>
       ) : null}
-      {payment?.status === "requires_action" && link ? (
-        <p>
-          <a href={link} rel="noopener noreferrer">
-            Continuar para o pagamento
-          </a>
-        </p>
-      ) : null}
+
 
       {waiting && payment ? (
         <div>
@@ -98,22 +76,7 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
         </div>
       ) : null}
 
-      {choices.length ? (
-        <div>
-          {choices.map(({ provider, method, surcharge }) => (
-            <form key={`${provider}:${method}`} action={startPayment}>
-              <input type="hidden" name="order_id" value={state.order_id} />
-              <input type="hidden" name="provider" value={provider} />
-              <input type="hidden" name="method" value={method} />
-              <input type="hidden" name="idempotency_key" value={randomUUID()} />
-              <button type="submit">
-                {METHOD_LABEL[method] ?? method}
-                {surcharge > 0 ? ` (+ ${money(surcharge)})` : ""}
-              </button>
-            </form>
-          ))}
-        </div>
-      ) : null}
+
       {card ? (
         <details>
           <summary>{METHOD_LABEL.card}</summary>
@@ -127,7 +90,7 @@ export function PaymentSection({ state, when }: { state: OrderPayment; when: (is
           />
         </details>
       ) : null}
-      {state.can_pay && !choices.length && !card ? (
+      {state.can_pay && !payChoices(state).length && !card ? (
         <p className="muted">Esta loja ainda não recebe pagamentos online. Fale com a loja para combinar.</p>
       ) : null}
     </section>

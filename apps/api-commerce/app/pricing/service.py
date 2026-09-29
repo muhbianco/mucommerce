@@ -102,9 +102,18 @@ class PricingService:
         wanted: dict[str, int] = defaultdict(int)
         # Desconto por quantidade olha o carrinho inteiro, nao a linha: quem leva 10 em duas
         # linhas de 5 (adicionais diferentes) levou 10, e e assim que a pessoa entende.
+        #
+        # E soma as variacoes do mesmo produto quando a faixa e do **produto**. Cinco rabiolas
+        # pretas mais cinco amarelas sao dez rabiolas: quem comprou nao ve duas compras, ve uma.
+        # Onde a faixa esta definida e o que diz o que ela mede -- faixa na variante mede so
+        # aquela variante, porque foi para isso que alguem a colocou la.
         no_carrinho: dict[str, int] = defaultdict(int)
+        por_produto: dict[str, int] = defaultdict(int)
         for line in lines:
             no_carrinho[line.variant_id] += line.quantity_milli
+            pair = found.get(line.variant_id)
+            if pair is not None:
+                por_produto[pair[1].id] += line.quantity_milli
         for line in lines:
             pair = found.get(line.variant_id)
             if pair is None:
@@ -126,10 +135,11 @@ class PricingService:
                 ends_at=product.promo_ends_at,
                 now=self.now,
             )
+            da_variante = parse_tiers(variant.price_tiers)
             base = apply_tiers(
                 base,
-                parse_tiers(variant.price_tiers or product.price_tiers),
-                no_carrinho[line.variant_id],
+                da_variante or parse_tiers(product.price_tiers),
+                no_carrinho[line.variant_id] if da_variante else por_produto[product.id],
             )
             try:
                 modified = price_with_modifiers(base, product.modifier_groups, line.modifier_ids)
