@@ -24,12 +24,26 @@ from app.tenancy.settings_schemas import LandingV1
 #: Chaves que o Pydantic põe para documentação e que não ensinam nada ao modelo.
 _NOISE = ("title", "description")
 
+#: Mapas cujas chaves são nomes que nós escolhemos, não palavras do vocabulário do esquema.
+#: Dentro deles, `title` é um campo do bloco — não a legenda que o Pydantic gerou.
+_NAME_KEYED = ("properties", "$defs")
 
-def _clean(node: Any) -> Any:
-    """Tira o ruído e o campo `id` de todo lugar, sem mexer no resto da forma."""
+
+def _clean(node: Any, *, names: bool = False) -> Any:
+    """Tira o ruído de documentação sem confundir palavra de esquema com nome de campo.
+
+    A primeira versão removia a chave `title` em todo lugar, e com isso levou junto a
+    propriedade `title` de onze tipos de bloco. O Gemini recusou o esquema inteiro — `required`
+    pedia um campo que `properties` não declarava mais — e, se tivesse aceitado, teria sido pior:
+    o modelo nunca proporia um título, e ninguém ligaria a página sem título a este arquivo.
+    """
     if isinstance(node, dict):
+        if names:
+            return {nome: _clean(sub) for nome, sub in node.items()}
         return {
-            key: _clean(value) for key, value in node.items() if key not in _NOISE and key != "id"
+            chave: _clean(valor, names=chave in _NAME_KEYED)
+            for chave, valor in node.items()
+            if chave not in _NOISE
         }
     if isinstance(node, list):
         return [_clean(item) for item in node]
@@ -40,8 +54,13 @@ def landing_generation_schema() -> dict[str, Any]:
     """O esquema que viaja no pedido ao modelo."""
     bruto = LandingV1.model_json_schema()
     limpo: dict[str, Any] = _clean(bruto)
-    # `id` some das propriedades, então também não pode continuar na lista de obrigatórios.
+    # `id` é nosso: quem atribui somos nós, e deixá-lo no esquema convida o modelo a inventar um.
+    # Sai das propriedades e, por consequência, da lista de obrigatórios — as duas coisas juntas,
+    # porque `required` apontando para propriedade que não existe é esquema inválido.
     for definicao in (limpo.get("$defs") or {}).values():
+        propriedades = definicao.get("properties")
+        if isinstance(propriedades, dict):
+            propriedades.pop("id", None)
         obrigatorios = definicao.get("required")
         if isinstance(obrigatorios, list):
             definicao["required"] = [campo for campo in obrigatorios if campo != "id"]

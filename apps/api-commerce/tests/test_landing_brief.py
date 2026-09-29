@@ -209,6 +209,32 @@ class TestEsquemaParaOModelo:
         bruto = _texto(landing_generation_schema())
         assert '"id"' not in bruto
 
+    def test_todo_obrigatorio_existe_como_propriedade(self) -> None:
+        """Esquema em que `required` pede campo que `properties` nao declara e esquema invalido.
+
+        O Gemini recusa a chamada inteira com 400 ("requires unspecified property"), e foi o que
+        derrubou a montagem em producao em 29/09/2026: o limpador tirava a chave `title` de todo
+        lugar, inclusive de dentro de `properties`, onde ela e o nome de um campo do bloco.
+        """
+        schema = landing_generation_schema()
+        for nome, definicao in (schema.get("$defs") or {}).items():
+            propriedades = set((definicao.get("properties") or {}).keys())
+            obrigatorios = set(definicao.get("required") or [])
+            assert not obrigatorios - propriedades, f"{nome}: {sorted(obrigatorios - propriedades)}"
+
+    def test_o_campo_title_do_bloco_sobrevive_a_limpeza(self) -> None:
+        """A limpeza tira a legenda que o Pydantic gera, nao o campo que a lojista preenche.
+
+        Sem esta distincao o esquema sai sem titulo nenhum e o modelo devolve uma pagina de
+        secoes sem titulo — uma falha silenciosa, que ninguem liga ao exportador de esquema.
+        """
+        defs = landing_generation_schema().get("$defs") or {}
+        com_title = [n for n, d in defs.items() if "title" in (d.get("properties") or {})]
+        assert "HeroBlock" in com_title
+        assert len(com_title) >= 10
+        # E a legenda gerada pelo Pydantic continua fora: ela e ruido em ingles no prompt.
+        assert not [n for n, d in defs.items() if "title" in d or "description" in d]
+
     def test_leva_o_teto_de_blocos(self) -> None:
         assert landing_generation_schema()["maxBlocks"] == MAX_BLOCKS
 
