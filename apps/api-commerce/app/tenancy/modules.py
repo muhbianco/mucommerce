@@ -158,6 +158,18 @@ MODULES: tuple[Module, ...] = (
         locked_reason="É um serviço à parte: contrate em muhbianco.com.br/conta.",
     ),
     Module(
+        key="landing_ai",
+        label="Montagem da vitrine com IA",
+        summary=(
+            "Você conta do seu negócio e a gente monta uma proposta de página inicial para "
+            "você aprovar."
+        ),
+        where="vitrine",
+        # Toda loja já pode pedir algumas propostas por mês sem contratar nada; o módulo abre
+        # o teto maior. Por isso ele não é o portão de usar — é o portão de usar mais.
+        locked_reason="É um serviço à parte: contrate em muhbianco.com.br/conta.",
+    ),
+    Module(
         key="manufacturing",
         label="Produção e insumos",
         summary="Fichas técnicas, insumos e custo por produto.",

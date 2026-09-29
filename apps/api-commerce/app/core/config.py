@@ -99,6 +99,23 @@ class Settings(BaseSettings):
     dns_resolvers: str = "1.1.1.1,8.8.8.8"
     domain_verify_max_age_hours: int = 48
 
+    # --- vitrine montada com IA (etapa K) ---------------------------------------------
+    #: Propostas de página inicial por mês. A grátis vale com o módulo desligado — senão
+    #: "algumas incluídas" seria mentira, e ninguém contrata para experimentar.
+    landing_free_generations_per_month: int = 3
+    landing_paid_generations_per_month: int = 30
+    #: Teto de saída por chamada. O gateway da api-agents tem o dele, e o menor vence.
+    landing_llm_max_output_tokens: int = 4000
+    #: Uma geração demora dezenas de segundos: quem espera é o worker, não a tela.
+    landing_llm_timeout_seconds: float = 75.0
+    #: Uma tentativa e um conserto. Modelo que erra o mesmo esquema duas vezes não acerta na
+    #: terceira, e mais tentativas transformam prompt ruim em dinheiro queimado.
+    landing_llm_max_attempts: int = 2
+    #: Quantas propostas ficam guardadas por loja.
+    landing_drafts_kept: int = 5
+    #: Desligado até o gateway da api-agents estar no ar.
+    landing_llm_enabled: bool = False
+
     # --- object storage (MinIO, S3 API) -----------------------------------------------
     # Empty endpoint = storage not configured: media routes answer 503, readiness omits it.
     storage_endpoint: str = ""  # internal S3 API, e.g. http://minio:9000

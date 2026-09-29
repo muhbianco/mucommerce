@@ -197,6 +197,8 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "pickup": False,
     "delivery": False,
     "manufacturing": False,
+    # Etapa K: abre o teto de propostas de vitrine. A cota grátis existe sem ele.
+    "landing_ai": False,
     "coupons": False,
     "chatwoot": False,
     "payments.mercadopago": False,

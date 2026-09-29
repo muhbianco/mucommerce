@@ -73,6 +73,11 @@ COVERED_TENANT_SCOPED_TABLES = {
     "supplies",
     "supply_receipts",
     "supply_movements",
+    # Etapa K: o brief da loja, as propostas de vitrine e a conta do mês. O vazamento destas
+    # três é exercitado em `test_landing_quota.py` e `test_landing_drafts.py`.
+    "landing_briefs",
+    "landing_drafts",
+    "landing_generation_usage",
 }
 
 
