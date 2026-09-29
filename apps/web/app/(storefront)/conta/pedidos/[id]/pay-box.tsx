@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { METHOD_LABEL, type OrderPayment, safeCheckoutUrl, WEB_METHODS } from "@/lib/payments";
+import {
+  METHOD_LABEL,
+  type OrderPayment,
+  safeCheckoutUrl,
+  shouldAutoStart,
+  webPayChoices,
+} from "@/lib/payments";
 
 import styles from "../../../_store/store.module.css";
 import { startPayment } from "../../actions";
@@ -25,24 +31,8 @@ import { AutoSubmit } from "./pay-now";
 
 const PAY_FORM_ID = "pagar-agora";
 
-export function payChoices(state: OrderPayment): {
-  provider: string;
-  method: (typeof WEB_METHODS)[number];
-  surcharge: number;
-}[] {
-  if (!state.can_pay) return [];
-  return state.options.flatMap((option) =>
-    option.methods
-      .filter((method): method is (typeof WEB_METHODS)[number] =>
-        (WEB_METHODS as readonly string[]).includes(method),
-      )
-      .map((method) => ({
-        provider: option.provider,
-        method,
-        surcharge: option.surcharge_cents?.[method] ?? 0,
-      })),
-  );
-}
+/** Reexportado para a seção de pagamento, que decide o recado de "loja sem meio nenhum". */
+export const payChoices = webPayChoices;
 
 export function PayBox({ state, total }: { state: OrderPayment; total: string }) {
   const payment = state.payment;
@@ -60,13 +50,10 @@ export function PayBox({ state, total }: { state: OrderPayment; total: string })
     );
   }
 
-  const choices = payChoices(state);
+  const choices = webPayChoices(state);
   if (!choices.length) return null;
 
-  // Só dispara sozinho quando não há escolha a fazer **e** ainda não há pagamento. Com um
-  // pagamento recusado em pé, a pessoa decide se tenta de novo: repetir sozinho uma recusa é
-  // insistir num cartão que o banco negou.
-  const sozinho = choices.length === 1 && !payment;
+  const sozinho = shouldAutoStart(state);
 
   return (
     <div className={styles.payBox}>

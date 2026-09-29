@@ -162,3 +162,41 @@ export function cardOption(state: OrderPayment): { publicKey: string; maxInstall
   if (!option || typeof publicKey !== "string" || !/^[A-Za-z0-9_-]{8,200}$/.test(publicKey)) return null;
   return { publicKey, maxInstallments: Math.min(Math.max(option.installments_max, 1), 12) };
 }
+
+/**
+ * Os meios que a própria página consegue disparar com um formulário.
+ *
+ * Cartão fica de fora **de propósito**: ele não é um envio nosso, é o Brick do provedor, que
+ * monta no navegador e mora na seção de pagamento.
+ */
+export function webPayChoices(
+  state: OrderPayment,
+): { provider: string; method: (typeof WEB_METHODS)[number]; surcharge: number }[] {
+  if (!state.can_pay) return [];
+  return state.options.flatMap((option) =>
+    option.methods
+      .filter((method): method is (typeof WEB_METHODS)[number] =>
+        (WEB_METHODS as readonly string[]).includes(method),
+      )
+      .map((method) => ({
+        provider: option.provider,
+        method,
+        surcharge: option.surcharge_cents?.[method] ?? 0,
+      })),
+  );
+}
+
+/**
+ * A página abre o pagamento sozinha?
+ *
+ * Só quando não há escolha nenhuma a fazer. **O cartão conta como escolha**, mesmo não estando
+ * em `webPayChoices`: sem essa conta, uma loja com Pix *e* cartão disparava o Pix ao abrir a
+ * tela — e o Pix em pé derruba `can_pay`, então o cartão sumia para sempre. O cliente nunca via
+ * a opção que a loja tinha configurado.
+ *
+ * Com um pagamento em pé (ainda que recusado), também não dispara: repetir sozinho uma recusa é
+ * insistir num cartão que o banco negou.
+ */
+export function shouldAutoStart(state: OrderPayment): boolean {
+  return webPayChoices(state).length === 1 && !state.payment && !cardOption(state);
+}

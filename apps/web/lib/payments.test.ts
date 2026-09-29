@@ -10,6 +10,8 @@ import {
   pollDelay,
   qrImageSource,
   safeCheckoutUrl,
+  shouldAutoStart,
+  webPayChoices,
 } from "./payments";
 
 describe("payment poller rules", () => {
@@ -100,5 +102,33 @@ describe("card payments", () => {
     const pixOnly = state();
     pixOnly.options[0]!.methods = ["pix"];
     expect(cardOption(pixOnly)).toBeNull();
+  });
+
+  it("does not fire the Pix on its own when the store also takes cards", () => {
+    // A loja do Silvio: Pix e cartão configurados, e só o Pix aparecia. A página disparava o
+    // Pix ao abrir; o Pix em pé derruba `can_pay`, e com isso o cartão sumia para sempre.
+    const comCartao = state();
+    expect(webPayChoices(comCartao).map((c) => c.method)).toEqual(["pix"]);
+    expect(shouldAutoStart(comCartao)).toBe(false);
+  });
+
+  it("still fires on its own when Pix is the only way to pay", () => {
+    const soPix = state();
+    soPix.options[0]!.methods = ["pix"];
+    expect(shouldAutoStart(soPix)).toBe(true);
+  });
+
+  it("never fires with a payment already standing, even a refused one", () => {
+    const soPix = state();
+    soPix.options[0]!.methods = ["pix"];
+    soPix.payment = { id: "p", status: "rejected" } as OrderPayment["payment"];
+    expect(shouldAutoStart(soPix)).toBe(false);
+  });
+
+  it("offers nothing to fire once a payment is in progress", () => {
+    // `can_pay` falso zera as opções no servidor: a tela não tem o que disparar nem oferecer.
+    const emAndamento = state({ can_pay: false, options: [] });
+    expect(webPayChoices(emAndamento)).toEqual([]);
+    expect(shouldAutoStart(emAndamento)).toBe(false);
   });
 });

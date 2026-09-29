@@ -2291,3 +2291,132 @@
   color: var(--store-muted);
   font-weight: 400;
 }
+
+/* ------------------------------------------------------------------ pagamento por Pix
+   O QR e o código são a mesma coisa em dois formatos: quem está no telefone copia e cola no
+   app do banco, quem está no computador aponta a câmera. Lado a lado onde cabe, empilhado
+   onde não cabe — e o QR num quadro claro, porque código de barras sem moldura no meio de
+   texto parece imagem quebrada. */
+.pixPanel {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  margin-top: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .pixPanel {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+}
+
+.pixQr {
+  display: grid;
+  place-items: center;
+  padding: 0.75rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  /* Branco fixo, não a cor da loja: leitor de QR precisa de contraste, e uma vitrine de tema
+     escuro deixaria o código ilegível. */
+  background: #fff;
+}
+
+.pixQr img {
+  display: block;
+}
+
+.pixCode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+}
+
+/* Monoespaçada e quebrando em qualquer ponto: é uma sequência sem palavras, e quebrar por
+   espaço deixaria uma linha só, com rolagem lateral. */
+.pixCodeValue {
+  width: 100%;
+  min-height: 5.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface, transparent);
+  color: var(--store-ink-soft);
+  font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  word-break: break-all;
+  resize: vertical;
+}
+
+/* Uma ação de destaque, uma de apoio e uma saída discreta — na mesma linha quando cabe. */
+.payActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.payActions form {
+  margin: 0;
+}
+
+/* Saída de baixo peso: trocar de meio de pagamento é escolha legítima, mas não é o caminho
+   que a tela está propondo. Botão cheio aqui competiria com "Já paguei". */
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--store-muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linkButton:hover {
+  color: var(--store-ink);
+}
+
+/* O cartão como escolha aberta pela pessoa: fechado por padrão para não empurrar dois
+   formulários de uma vez, mas com cara de botão, não de triângulo de navegador. */
+.payAlt {
+  margin-top: 1rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  overflow: hidden;
+}
+
+.payAltSummary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.payAltSummary::-webkit-details-marker {
+  display: none;
+}
+
+.payAltSummary::after {
+  content: "›";
+  margin-left: auto;
+  font-size: 1.2rem;
+  color: var(--store-muted);
+  transition: transform 0.15s ease;
+}
+
+.payAlt[open] .payAltSummary::after {
+  transform: rotate(90deg);
+}
+
+.payAltBody {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--store-line);
+}
