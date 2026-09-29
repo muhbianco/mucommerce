@@ -553,3 +553,31 @@ export interface Coupon {
   status: string;
   note: string | null;
 }
+
+/** A remessa de um pedido enviado por transportadora. */
+export interface Shipment {
+  id: string;
+  status: string;
+  provider: string;
+  carrier: string;
+  service_name: string;
+  tracking_code: string | null;
+  label_url: string | null;
+  charged_cents: number;
+  cost_cents: number | null;
+  last_error: string | null;
+  purchased_at: string | null;
+  delivered_at: string | null;
+  events: { status: string; description: string; occurred_at: string }[];
+}
+
+export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
+  creating: "Comprando etiqueta",
+  purchased: "Etiqueta comprada",
+  posted: "Postado",
+  in_transit: "A caminho",
+  delivered: "Entregue",
+  returned: "Devolvido ao remetente",
+  cancelled: "Cancelado",
+  failed: "Não deu certo",
+};

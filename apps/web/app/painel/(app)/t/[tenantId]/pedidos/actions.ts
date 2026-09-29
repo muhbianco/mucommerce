@@ -82,3 +82,17 @@ export async function decideRefund(form: FormData): Promise<void> {
     throw new FormError("id_invalido");
   });
 }
+
+/**
+ * Compra a etiqueta e marca o pedido como enviado.
+ *
+ * Gasta dinheiro da carteira da loja, então é um clique consciente — nada aqui dispara sozinho.
+ * A API é idempotente por pedido: clicar duas vezes não compra duas etiquetas.
+ */
+export async function dispatchShipment(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const orderId = id(text(form, "order_id"));
+  await run(`${page}/pedidos/${orderId}`, "despachado", async () => {
+    await api(`${path}/orders/${orderId}/shipment`, { method: "POST", json: {} });
+  });
+}

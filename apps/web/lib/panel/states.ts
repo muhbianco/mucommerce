@@ -49,3 +49,14 @@ export const REFUND_STATE: Record<string, PillState> = {
 export function stateOf(map: Record<string, PillState>, status: string): PillState {
   return map[status] ?? "off";
 }
+
+export const SHIPMENT_STATE: Record<string, PillState> = {
+  creating: "pending",
+  purchased: "info",
+  posted: "info",
+  in_transit: "info",
+  delivered: "live",
+  returned: "warn",
+  cancelled: "off",
+  failed: "off",
+};

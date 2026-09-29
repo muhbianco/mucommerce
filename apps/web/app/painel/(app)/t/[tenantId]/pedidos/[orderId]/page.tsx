@@ -5,7 +5,14 @@ import type { ReactNode } from "react";
 
 import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
-import { ORDER_STATE, PAYMENT_STATE, type PillState, REFUND_STATE, stateOf } from "@/lib/panel/states";
+import {
+  ORDER_STATE,
+  PAYMENT_STATE,
+  type PillState,
+  REFUND_STATE,
+  SHIPMENT_STATE,
+  stateOf,
+} from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   DELIVERY_STATUS_LABEL,
@@ -16,13 +23,15 @@ import {
   PAYMENT_STATUS_LABEL,
   REFUND_KIND_LABEL,
   REFUND_STATUS_LABEL,
+  type Shipment,
+  SHIPMENT_STATUS_LABEL,
   TRANSITION_LABEL,
 } from "@/lib/panel/types";
 
 import styles from "../../../../../panel.module.css";
 import { Flash } from "../../flash";
 import { KeyValues, PageHeader, Pill, Section, TableWrap } from "../../ui";
-import { decideRefund, moveOrder, requestRefund } from "../actions";
+import { decideRefund, dispatchShipment, moveOrder, requestRefund } from "../actions";
 import local from "./order.module.css";
 
 export const metadata: Metadata = { title: "Pedido" };
@@ -64,6 +73,20 @@ export default async function OrderPage({
   if (!context.features.checkout || !scopes.can("orders:read")) notFound();
   const detail = await api<OrderDetail>(`/admin/tenants/${tenantId}/orders/${orderId}`);
   const { order, customer } = detail;
+  // Só pedido de transportadora tem remessa. Perguntar para os outros seria uma chamada por
+  // pedido de retirada para receber `null` — e o operador de balcão paga o tempo dela.
+  const porTransportadora = order.fulfillment_type === "shipping";
+  const shipment = porTransportadora
+    ? await api<Shipment | null>(`/admin/tenants/${tenantId}/orders/${orderId}/shipment`).catch(
+        () => null,
+      )
+    : null;
+  // Despachar compra etiqueta: gasta dinheiro da loja, e quem move pedido é quem pode gastar.
+  const podeDespachar =
+    porTransportadora &&
+    scopes.can("orders:transition") &&
+    ["accepted", "in_production"].includes(order.status) &&
+    (shipment === null || shipment.status === "failed");
   const currency = order.currency;
   const when = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", {
@@ -280,6 +303,84 @@ export default async function OrderPage({
                     </div>
                   </form>
                 </details>
+              ) : null}
+            </Section>
+          ) : null}
+
+          {porTransportadora ? (
+            <Section
+              title="Envio"
+              description="Comprar a etiqueta marca o pedido como enviado e manda o código ao cliente"
+            >
+              {shipment ? (
+                <>
+                  <div className={local.pills}>
+                    <Pill state={stateOf(SHIPMENT_STATE, shipment.status)}>
+                      {SHIPMENT_STATUS_LABEL[shipment.status] ?? shipment.status}
+                    </Pill>
+                  </div>
+                  <KeyValues
+                    items={[
+                      {
+                        label: "Transportadora",
+                        value: `${shipment.carrier} ${shipment.service_name}`.trim() || "—",
+                      },
+                      {
+                        label: "Rastreio",
+                        value: shipment.tracking_code ?? "Ainda não veio",
+                      },
+                      {
+                        label: "Custo da etiqueta",
+                        value:
+                          shipment.cost_cents !== null
+                            ? money(shipment.cost_cents, currency)
+                            : "—",
+                      },
+                      ...(shipment.purchased_at
+                        ? [{ label: "Comprada em", value: when(shipment.purchased_at) }]
+                        : []),
+                    ]}
+                  />
+                  {shipment.label_url ? (
+                    <p>
+                      <a href={shipment.label_url} target="_blank" rel="noopener noreferrer">
+                        Imprimir etiqueta
+                      </a>
+                    </p>
+                  ) : null}
+                  {shipment.last_error ? (
+                    <p className={styles.note}>{shipment.last_error}</p>
+                  ) : null}
+                  {shipment.events.length ? (
+                    <ul className={styles.steps}>
+                      {shipment.events.map((evento) => (
+                        <li key={`${evento.occurred_at}-${evento.status}`}>
+                          {when(evento.occurred_at)} — {evento.description || evento.status}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <p className={styles.hint}>
+                  Nenhuma etiqueta comprada ainda.
+                </p>
+              )}
+              {podeDespachar ? (
+                <form action={dispatchShipment} className={local.actions}>
+                  <input type="hidden" name="tenant_id" value={tenantId} />
+                  <input type="hidden" name="order_id" value={orderId} />
+                  <button type="submit" className={styles.button}>
+                    {shipment?.status === "failed" ? "Tentar despachar de novo" : "Despachar agora"}
+                  </button>
+                </form>
+              ) : null}
+              {porTransportadora && !podeDespachar && !shipment ? (
+                <p className={styles.hint}>
+                  {["accepted", "in_production"].includes(order.status)
+                    ? "Seu papel não permite despachar."
+                    : "Aceite o pedido antes de despachar."}
+                </p>
               ) : null}
             </Section>
           ) : null}

@@ -19,6 +19,7 @@ const OK: Record<string, string> = {
   checkout: "Checkout salvo.",
   pagamento: "Meio de pagamento salvo.",
   pedido: "Pedido atualizado.",
+  despachado: "Etiqueta comprada. O cliente recebeu o código de rastreio.",
   cupom_criado: "Cupom criado.",
   cupom_salvo: "Cupom salvo.",
   devolucao: "Devolução registrada.",
@@ -66,6 +67,10 @@ const ERRORS: Record<string, string> = {
   conflict: "Conflito com o estado atual (ex.: SKU/slug em uso ou produto sem imagem).",
   insufficient_stock: "Estoque insuficiente para essa saída.",
   permission_denied: "Seu papel não permite essa ação.",
+  shipping_unavailable: "A transportadora não respondeu. Nada foi comprado; tente de novo.",
+  shipping_insufficient_balance:
+    "Sem saldo na carteira da transportadora. Recarregue e despache de novo.",
+  shipment_in_progress: "O despacho deste pedido já está em andamento.",
   feature_disabled: "Esse módulo está desligado para a loja.",
   not_found: "Item não encontrado.",
   preco_obrigatorio: "Informe o preço.",
