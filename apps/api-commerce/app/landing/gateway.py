@@ -134,8 +134,16 @@ class AgentsGateway:
             logger.warning("llm gateway not deployed", extra={"url": self._base_url})
             raise LlmUnavailableError("O serviço de montagem ainda não está no ar.")
         if response.status_code != 200:
-            logger.warning("llm gateway refused", extra={"status": response.status_code})
-            raise LlmUnavailableError()
+            motivo, rastro = _refusal(response)
+            logger.warning(
+                "llm gateway refused",
+                extra={"status": response.status_code, "reason": motivo, "upstream": rastro},
+            )
+            # O rastro vai junto para o rascunho, e daí para a tela. A lojista não vai entender
+            # `INVALID_ARGUMENT` — mas ela não precisa: precisa poder ler o código para alguém que
+            # entenda, em vez de "não está disponível agora" quatro vezes seguidas sem nenhuma
+            # pista de onde procurar.
+            raise LlmUnavailableError(_unavailable_message(motivo, rastro))
 
         try:
             data = response.json()
@@ -150,6 +158,36 @@ class AgentsGateway:
         except (ValueError, KeyError, TypeError) as exc:
             logger.warning("llm gateway answered in an unexpected shape")
             raise LlmUnavailableError() from exc
+
+
+def _refusal(response: httpx.Response) -> tuple[str, str]:
+    """`(motivo, rastro)` do erro que a api-agents devolveu.
+
+    O motivo é o código fechado do provedor, já filtrado do outro lado. O rastro é o `request_id`
+    da api-agents: é por ele que uma linha do histórico da loja encontra a linha do log que
+    explica o que aconteceu, sem ninguém ter de cruzar horário entre dois serviços.
+    """
+    try:
+        corpo = response.json()
+    except ValueError:
+        return "", ""
+    if not isinstance(corpo, dict):
+        return "", ""
+    detalhes = corpo.get("details")
+    motivo = ""
+    if isinstance(detalhes, dict):
+        bruto = detalhes.get("provider_reason")
+        motivo = bruto.strip()[:60] if isinstance(bruto, str) else ""
+    rastro = corpo.get("request_id")
+    return motivo, rastro[:36] if isinstance(rastro, str) else ""
+
+
+def _unavailable_message(motivo: str, rastro: str) -> str:
+    """A frase que a lojista lê, com o que alguém precisa para investigar entre parênteses."""
+    pistas = [p for p in (motivo, rastro) if p]
+    if not pistas:
+        return LlmUnavailableError.message
+    return f"{LlmUnavailableError.message} ({' · '.join(pistas)})"
 
 
 @dataclass

@@ -12,13 +12,18 @@ O que se tira do esquema bruto:
 - **títulos e descrições** que o Pydantic gera sozinho a partir dos nomes de classe
   (`HeroBlock`, `FeaturedProductsBlock`). São ruído em inglês no meio de um prompt em português
   e só gastam token.
+
+**O que sai daqui é JSON Schema e nada além disso.** Houve aqui um `maxBlocks` na raiz, posto
+por nós: não é palavra do vocabulário, não acrescentava nada — o teto já viaja como `maxItems`
+em `properties.blocks`, que é onde um esquema diz isso — e chave inventada é o tipo de coisa que
+faz um provedor recusar a requisição inteira sem dizer onde. Limite de gosto ("de 4 a 7 blocos")
+vive no prompt, que é onde instrui alguém.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from app.landing.blocks import MAX_BLOCKS
 from app.tenancy.settings_schemas import LandingV1
 
 #: Chaves que o Pydantic põe para documentação e que não ensinam nada ao modelo.
@@ -64,7 +69,6 @@ def landing_generation_schema() -> dict[str, Any]:
         obrigatorios = definicao.get("required")
         if isinstance(obrigatorios, list):
             definicao["required"] = [campo for campo in obrigatorios if campo != "id"]
-    limpo["maxBlocks"] = MAX_BLOCKS
     return limpo
 
 

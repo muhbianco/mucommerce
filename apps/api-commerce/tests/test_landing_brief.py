@@ -235,8 +235,24 @@ class TestEsquemaParaOModelo:
         # E a legenda gerada pelo Pydantic continua fora: ela e ruido em ingles no prompt.
         assert not [n for n, d in defs.items() if "title" in d or "description" in d]
 
-    def test_leva_o_teto_de_blocos(self) -> None:
-        assert landing_generation_schema()["maxBlocks"] == MAX_BLOCKS
+    def test_leva_o_teto_de_blocos_como_json_schema(self) -> None:
+        """O teto viaja, mas no lugar onde um esquema diz isso.
+
+        Havia aqui um `maxBlocks` na raiz, inventado por nos: chave fora do vocabulario, que nao
+        acrescentava nada ao `maxItems` que ja estava em `properties.blocks` e que dava ao
+        provedor um motivo para recusar a requisicao inteira sem dizer onde.
+        """
+        schema = landing_generation_schema()
+        assert schema["properties"]["blocks"]["maxItems"] == MAX_BLOCKS
+        assert "maxBlocks" not in schema
+
+    def test_nada_de_chave_inventada_na_raiz(self) -> None:
+        """A raiz so tem palavra de JSON Schema.
+
+        Um teste de valor fixo nao pegaria a proxima: pega qualquer chave nossa que apareca aqui.
+        """
+        permitidas = {"$defs", "type", "properties", "required", "additionalProperties", "title"}
+        assert set(landing_generation_schema()) <= permitidas
 
     def test_o_enum_de_icone_chega_inteiro(self) -> None:
         # O modelo não pode adivinhar nome de ícone: ou está na lista, ou o reparo vai trocar.
