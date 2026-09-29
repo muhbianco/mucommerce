@@ -69,6 +69,8 @@ export async function updateProduct(form: FormData): Promise<void> {
         width_mm: measure(form, "width_mm"),
         height_mm: measure(form, "height_mm"),
         depth_mm: measure(form, "depth_mm"),
+        // Vazio = caixa padrão da loja. `null` é o que apaga a escolha; `undefined` a manteria.
+        shipping_box_id: optional(form, "shipping_box_id"),
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
         tags: tagNames(form),

@@ -9,7 +9,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
 import { KeyValues, PageHeader, Pill, Section } from "../ui";
-import { connectAccount, saveOrigin, saveRules, testAccount } from "./actions";
+import { connectAccount, saveBoxes, saveOrigin, saveRules, testAccount } from "./actions";
 
 export const metadata: Metadata = { title: "Envio por transportadora" };
 
@@ -55,6 +55,8 @@ interface ShippingSettings {
   enabled?: boolean;
   origin?: Origin | null;
   box?: Box | null;
+  /** As demais embalagens, cada uma com `id` e `name`. O produto aponta para uma delas. */
+  boxes?: (Box & { id?: string; name?: string })[];
   markup_percent?: number;
   markup_cents?: number;
   free_above_cents?: number | null;
@@ -97,6 +99,9 @@ export default async function Shipping({
   const cfg = ((context.settings.fulfillment ?? {}) as { shipping?: ShippingSettings }).shipping ?? {};
   const origin = cfg.origin ?? {};
   const box = cfg.box ?? {};
+  // Uma linha em branco no fim, para acrescentar sem precisar de botão que exija JavaScript.
+  type Caixa = NonNullable<ShippingSettings["boxes"]>[number];
+  const caixas: Caixa[] = [...(cfg.boxes ?? []), {} as Caixa];
   const pronto = status.connected && status.has_origin && status.flag_on;
   const carrier = PROVIDER_LABEL[status.provider] ?? status.provider;
 
@@ -376,6 +381,60 @@ export default async function Shipping({
           <div className={styles.formActions}>
             <button type="submit" className={styles.button}>
               Salvar
+            </button>
+          </div>
+        </form>
+      </Section>
+
+      <Section
+        title="Outras embalagens"
+        description="Cadastre as caixas que você usa de verdade e diga, em cada produto, em qual delas ele viaja."
+      >
+        <p className={styles.hint}>
+          Quem não escolher nenhuma usa a caixa padrão acima. O empacotador respeita a medida e o
+          peso da embalagem escolhida e abre outra igual quando enche — então dez unidades que
+          cabem juntas viajam juntas, e não como dez fretes.
+        </p>
+        <form action={saveBoxes}>
+          <input type="hidden" name="tenant_id" value={tenantId} />
+          {caixas.map((caixa, i) => (
+            <div key={caixa?.id ?? `nova-${i}`} className={styles.fields}>
+              {/* O id volta escondido: é por ele que o produto aponta, e perdê-lo numa edição
+                  faria todo produto atrelado cair na caixa padrão sem avisar. */}
+              <input type="hidden" name="box_id" value={caixa?.id ?? ""} />
+              <label className={styles.field}>
+                Nome
+                <input name="box_name" maxLength={60} defaultValue={caixa?.name ?? ""} placeholder="Caixa grande" />
+              </label>
+              <label className={styles.field}>
+                Largura (mm)
+                <input name="box_w" type="number" min={0} max={2000} defaultValue={caixa?.width_mm ?? ""} />
+              </label>
+              <label className={styles.field}>
+                Altura (mm)
+                <input name="box_h" type="number" min={0} max={2000} defaultValue={caixa?.height_mm ?? ""} />
+              </label>
+              <label className={styles.field}>
+                Profundidade (mm)
+                <input name="box_d" type="number" min={0} max={2000} defaultValue={caixa?.depth_mm ?? ""} />
+              </label>
+              <label className={styles.field}>
+                Peso máximo (g)
+                <input name="box_max" type="number" min={0} max={100000} defaultValue={caixa?.max_weight_grams ?? ""} />
+              </label>
+              <label className={styles.field}>
+                Caixa vazia (g)
+                <input name="box_tara" type="number" min={0} max={10000} defaultValue={caixa?.empty_weight_grams ?? ""} />
+              </label>
+            </div>
+          ))}
+          <p className={styles.hint}>
+            Para apagar uma embalagem, limpe o nome dela e salve. Produto que apontava para ela
+            volta a usar a caixa padrão.
+          </p>
+          <div className={styles.formActions}>
+            <button type="submit" className={styles.button}>
+              Salvar embalagens
             </button>
           </div>
         </form>

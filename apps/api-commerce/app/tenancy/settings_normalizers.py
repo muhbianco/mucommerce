@@ -44,6 +44,9 @@ def normalize_fulfillment(previous: dict[str, Any] | None, value: dict[str, Any]
     for section, key, label in (
         ("pickup", "locations", "Local de retirada"),
         ("delivery", "zones", "Zona de entrega"),
+        # O produto aponta para a caixa pelo id, então ele precisa sobreviver a uma edição que
+        # mexa em qualquer outra caixa da lista — é a mesma razão dos locais e das zonas.
+        ("shipping", "boxes", "Embalagem"),
     ):
         incoming = (value.get(section) or {}).get(key)
         if isinstance(incoming, list):

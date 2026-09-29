@@ -179,8 +179,15 @@ class ShippingOrigin(_Setting):
 
 
 class ShippingBoxSetting(_Setting):
-    """Caixa padrão da loja. Sem ela o empacotador usa uma caixa pequena genérica."""
+    """Uma embalagem da loja. Sem nenhuma, o empacotador usa uma caixa pequena genérica.
 
+    `id` e `name` chegaram depois e por isso são opcionais: as lojas que já tinham uma caixa
+    padrão continuam validando, e o normalizador atribui o id na primeira escrita — o mesmo
+    caminho dos locais de retirada e das zonas de entrega.
+    """
+
+    id: SettingId | None = None
+    name: Annotated[str, Field(min_length=1, max_length=60)] | None = None
     width_mm: Annotated[int, Field(ge=10, le=2000)]
     height_mm: Annotated[int, Field(ge=10, le=2000)]
     depth_mm: Annotated[int, Field(ge=10, le=2000)]
@@ -204,7 +211,11 @@ class ShippingSettings(_Setting):
     enabled: bool = False
     provider: Annotated[str, Field(min_length=1, max_length=24)] = "melhorenvio"
     origin: ShippingOrigin | None = None
+    #: A caixa padrão, de quando havia uma só. Continua sendo a usada por todo produto que não
+    #: aponta para nenhuma — tirá-la mudaria o frete de quem já vende.
     box: ShippingBoxSetting | None = None
+    #: As demais embalagens. O produto escolhe a dele pelo `id`; quem não escolhe usa a padrão.
+    boxes: Annotated[list[ShippingBoxSetting], Field(max_length=12)] = []
     #: Vazio = oferece tudo que a transportadora devolver.
     services: Annotated[list[ShippingService], Field(max_length=20)] = []
     #: Acréscimo da loja sobre o frete cotado (embalagem, mão de obra).
@@ -234,6 +245,12 @@ class FulfillmentV2(_Setting):
             names = [item.name.casefold() for item in items]
             if len(set(ids)) != len(ids) or len(set(names)) != len(names):
                 raise ValueError(f"{label} repetido")
+        # Nome repetido em embalagem é escolha impossível na tela do produto; id repetido faria
+        # o empacotador escolher uma das duas em silêncio.
+        nomes = [b.name.casefold() for b in self.shipping.boxes if b.name]
+        identificadores = [b.id for b in self.shipping.boxes if b.id]
+        if len(set(nomes)) != len(nomes) or len(set(identificadores)) != len(identificadores):
+            raise ValueError("embalagem repetida")
         return self
 
 

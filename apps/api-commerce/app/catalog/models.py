@@ -161,6 +161,10 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     width_mm: Mapped[int | None] = mapped_column(Integer)
     height_mm: Mapped[int | None] = mapped_column(Integer)
     depth_mm: Mapped[int | None] = mapped_column(Integer)
+    #: Em qual embalagem da loja este produto vai (`fulfillment.shipping.boxes[].id`). Nulo usa a
+    #: caixa padrão. Id solto e não chave estrangeira porque a embalagem mora numa setting, não
+    #: numa tabela; o empacotador trata id que não existe mais como "sem escolha".
+    shipping_box_id: Mapped[str | None] = mapped_column(String(36))
     lead_time_hours: Mapped[int | None] = mapped_column(Integer)
     daily_capacity: Mapped[int | None] = mapped_column(Integer)
     has_variants: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

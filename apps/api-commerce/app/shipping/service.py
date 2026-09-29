@@ -12,6 +12,7 @@ não uma lista vazia que parece "não entregamos aí".
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -224,7 +225,10 @@ async def parcels_for(
     if not lines:
         return ()
     variantes = await variants_for(session, [line.variant_id for line in lines])
-    itens: list[PackItem] = []
+    caixas = _boxes(cfg)
+    # Um grupo por embalagem: produtos que viajam em caixas diferentes não podem ser somados na
+    # mesma conta de volume. A chave `None` é a caixa padrão, de quem não escolheu nenhuma.
+    por_caixa: dict[str | None, list[PackItem]] = defaultdict(list)
     faltando: list[str] = []
     for line in lines:
         par = variantes.get(line.variant_id)
@@ -233,23 +237,29 @@ async def parcels_for(
         variante, produto = par
         unidades = max(1, round(line.quantity_milli / 1000))
         try:
-            itens.extend(
-                item_from_variant(
-                    # Peso e medidas são do produto: hoje o catálogo não guarda medida por
-                    # variante, então P e GG pesam igual para a transportadora.
-                    weight_grams=produto.weight_grams,
-                    width_mm=produto.width_mm,
-                    height_mm=produto.height_mm,
-                    depth_mm=produto.depth_mm,
-                    value_cents=_unit_price(variante, produto) * unidades,
-                    quantity=unidades,
-                )
+            itens = item_from_variant(
+                # Peso e medidas são do produto: hoje o catálogo não guarda medida por
+                # variante, então P e GG pesam igual para a transportadora.
+                weight_grams=produto.weight_grams,
+                width_mm=produto.width_mm,
+                height_mm=produto.height_mm,
+                depth_mm=produto.depth_mm,
+                value_cents=_unit_price(variante, produto) * unidades,
+                quantity=unidades,
             )
         except MissingDimensions:
             faltando.append(variante.id)
+            continue
+        # Embalagem apagada depois de o produto apontar para ela cai na padrão. Recusar a
+        # cotação por causa disso puniria o cliente por uma edição da loja.
+        escolhida = produto.shipping_box_id if produto.shipping_box_id in caixas else None
+        por_caixa[escolhida].extend(itens)
     if faltando:
         raise MissingDimensions("variantes sem medida", tuple(faltando))
-    return pack(itens, _box(cfg))
+    volumes: list[Parcel] = []
+    for box_id, itens in por_caixa.items():
+        volumes.extend(pack(itens, caixas.get(box_id) if box_id else _box(cfg)))
+    return tuple(volumes)
 
 
 async def variants_for(
@@ -277,6 +287,21 @@ def _unit_price(variant: ProductVariant, product: Product) -> int:
 def _with_markup(price_cents: int, cfg: ShippingSettings) -> int:
     """Acréscimo da loja (embalagem, mão de obra). Entra antes da assinatura, senão não vale."""
     return round(price_cents * (100 + cfg.markup_percent) / 100) + cfg.markup_cents
+
+
+def _boxes(cfg: ShippingSettings) -> dict[str, Box]:
+    """As embalagens cadastradas, por id. A caixa padrão não entra: ela não tem id próprio."""
+    return {
+        b.id: Box(
+            width_mm=b.width_mm,
+            height_mm=b.height_mm,
+            depth_mm=b.depth_mm,
+            max_weight_grams=b.max_weight_grams,
+            empty_weight_grams=b.empty_weight_grams,
+        )
+        for b in cfg.boxes
+        if b.id
+    }
 
 
 def _box(cfg: ShippingSettings) -> Box | None:

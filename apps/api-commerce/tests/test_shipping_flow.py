@@ -22,6 +22,7 @@ from app.shipping.dispatch import ShipmentService
 from app.shipping.jobs import run_track_shipments
 from app.shipping.models import ShipmentStatus
 from app.shipping.providers import fake as fake_shipping
+from app.shipping.service import QuoteLine
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
@@ -349,3 +350,97 @@ async def test_caixa_padrao_grande_demais_aparece_na_tela(
 
     status = (await client.get(f"{base}/shipping", headers=owner)).json()
     assert status["box_oversize"] == "largura de 2,00 m, altura de 1,50 m"
+
+
+async def test_o_produto_viaja_na_embalagem_que_a_loja_escolheu(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Mais de uma embalagem cadastrada, e o produto aponta para a dele.
+
+    É o caso da rabiola: a caixa padrão da loja é pequena, e um produto grande que apontasse
+    para ela viraria um volume por unidade — dez unidades, dez fretes. Com a embalagem certa
+    atrelada, as unidades enchem a caixa e só abre outra quando acaba o espaço.
+    """
+    from app.shipping.service import parcels_for
+    from app.tenancy.settings_schemas import fulfillment_settings
+
+    grande = {
+        "name": "Caixa grande",
+        "width_mm": 600,
+        "height_mm": 400,
+        "depth_mm": 400,
+        "max_weight_grams": 30_000,
+    }
+    com_caixas = {
+        **FULFILLMENT,
+        "shipping": {**FULFILLMENT["shipping"], "boxes": [grande]},
+    }
+    tenant = await selling_store(
+        session_factory, flags={"pickup": True}, settings={"fulfillment": com_caixas}
+    )
+    owner = await member_headers(client, session_factory, tenant)
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        context = await TenantResolver(session).resolve_by_id(tenant.id)
+        cfg = fulfillment_settings(context.settings).shipping
+        box_id = cfg.boxes[0].id
+    assert box_id, "o normalizador atribui o id da embalagem na escrita"
+
+    # 250x200x200 mm: nao cabe na caixa padrao (300x200x200, por um lado so), cabe na grande.
+    criado = await product(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        weight_grams=1000,
+        width_mm=250,
+        height_mm=200,
+        depth_mm=200,
+        shipping_box_id=box_id,
+    )
+    variant_id = criado["variants"][0]["id"]
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        volumes = await parcels_for(session, [QuoteLine(variant_id, 4000)], cfg)
+
+    # Quatro unidades numa caixa grande só, com as medidas dela — não quatro volumes soltos.
+    assert len(volumes) == 1
+    assert (volumes[0].width_mm, volumes[0].height_mm) == (600, 400)
+    assert volumes[0].weight_grams == 4000
+
+
+async def test_embalagem_apagada_cai_na_caixa_padrao_em_vez_de_recusar(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A loja apagou a embalagem depois de o produto apontar para ela.
+
+    Recusar a cotação puniria o cliente por uma edição da loja; cair na caixa padrão é o pior
+    que pode acontecer e ainda é uma venda.
+    """
+    from app.shipping.service import parcels_for
+    from app.tenancy.settings_schemas import fulfillment_settings
+
+    tenant, owner, _ = await loja(client, session_factory)
+    criado = await product(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        weight_grams=800,
+        width_mm=150,
+        height_mm=100,
+        depth_mm=80,
+        shipping_box_id="01a00000-0000-7000-8000-000000000000",
+    )
+    variant_id = criado["variants"][0]["id"]
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        context = await TenantResolver(session).resolve_by_id(tenant.id)
+        cfg = fulfillment_settings(context.settings).shipping
+        volumes = await parcels_for(session, [QuoteLine(variant_id, 2000)], cfg)
+
+    assert len(volumes) == 1
+    assert (volumes[0].width_mm, volumes[0].height_mm) == (300, 200)

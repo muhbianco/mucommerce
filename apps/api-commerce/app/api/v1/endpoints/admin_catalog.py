@@ -96,6 +96,7 @@ def _product_read(view: ProductView) -> ProductRead:
         width_mm=product.width_mm,
         height_mm=product.height_mm,
         depth_mm=product.depth_mm,
+        shipping_box_id=product.shipping_box_id,
         lead_time_hours=product.lead_time_hours,
         daily_capacity=product.daily_capacity,
         has_variants=product.has_variants,

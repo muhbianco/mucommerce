@@ -144,6 +144,8 @@ export interface Product extends ProductSummary {
   width_mm: number | null;
   height_mm: number | null;
   depth_mm: number | null;
+  /** Em qual embalagem da loja este produto viaja. Nulo usa a caixa padrão. */
+  shipping_box_id?: string | null;
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
   tags: TagRef[];

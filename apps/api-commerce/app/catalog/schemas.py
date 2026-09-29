@@ -73,6 +73,8 @@ class _ProductFields(StrictModel):
     width_mm: Dimension | None = None
     height_mm: Dimension | None = None
     depth_mm: Dimension | None = None
+    #: Em qual embalagem da loja este produto viaja. Nulo usa a caixa padrão.
+    shipping_box_id: EntityId | None = None
     lead_time_hours: Annotated[int, Field(ge=0, le=8760)] | None = None
     daily_capacity: Annotated[int, Field(ge=0, le=100_000)] | None = None
     position: Position = 0
@@ -115,6 +117,7 @@ class ProductUpdate(StrictModel):
     width_mm: Dimension | None = None
     height_mm: Dimension | None = None
     depth_mm: Dimension | None = None
+    shipping_box_id: EntityId | None = None
     lead_time_hours: Annotated[int, Field(ge=0, le=8760)] | None = None
     daily_capacity: Annotated[int, Field(ge=0, le=100_000)] | None = None
     position: Position | None = None
@@ -278,6 +281,7 @@ class ProductRead(ProductSummary):
     width_mm: int | None
     height_mm: int | None
     depth_mm: int | None
+    shipping_box_id: str | None = None
     lead_time_hours: int | None
     daily_capacity: int | None
     has_variants: bool

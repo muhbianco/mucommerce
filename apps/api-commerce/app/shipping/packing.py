@@ -34,12 +34,24 @@ class Box:
     def volume_mm3(self) -> int:
         return self.width_mm * self.height_mm * self.depth_mm
 
+    @property
+    def usable_grams(self) -> int:
+        """Quanto cabe de produto: o teto menos a embalagem vazia.
+
+        É **este** número que decide se a peça entra, e não `max_weight_grams`. Enquanto a
+        peneira olhava o teto cheio e o enchimento olhava o útil, uma peça no meio do caminho
+        (numa caixa de 300 g com 100 g de tara, qualquer coisa entre 201 g e 300 g) passava na
+        peneira e abria uma caixa sozinha que estourava o próprio limite declarado. Uma
+        definição só de "cabe em peso", usada pelos dois lados.
+        """
+        return max(0, self.max_weight_grams - self.empty_weight_grams)
+
     def fits(self, item: PackItem) -> bool:
-        """Cabe na caixa girando o item? Compara as dimensões ordenadas."""
+        """Cabe na caixa girando o item? Compara as dimensões ordenadas e o peso útil."""
         caixa = sorted((self.width_mm, self.height_mm, self.depth_mm))
         peca = sorted((item.width_mm, item.height_mm, item.depth_mm))
         return all(p <= c for p, c in zip(peca, caixa, strict=True)) and (
-            item.weight_grams <= self.max_weight_grams
+            item.weight_grams <= self.usable_grams
         )
 
 
@@ -107,7 +119,9 @@ def _fill_boxes(items: Sequence[PackItem], box: Box) -> list[Parcel]:
     caixas: list[list[PackItem]] = []
     peso: list[int] = []
     volume: list[int] = []
-    util = box.max_weight_grams - box.empty_weight_grams
+    # Todo item que chega aqui passou pela peneira, então cabe no peso útil: abrir caixa
+    # nova é sempre seguro.
+    util = box.usable_grams
     for item in restantes:
         for indice in range(len(caixas)):
             cabe_peso = peso[indice] + item.weight_grams <= util

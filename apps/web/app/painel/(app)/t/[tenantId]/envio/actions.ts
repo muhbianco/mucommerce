@@ -89,6 +89,31 @@ export async function saveRules(form: FormData): Promise<void> {
   }));
 }
 
+/**
+ * As embalagens da loja, além da caixa padrão.
+ *
+ * O formulário posta linhas paralelas (`box_name`, `box_w`, …) e a lista é remontada na ordem.
+ * O `id` viaja escondido e **precisa** voltar: é por ele que o produto aponta para a embalagem,
+ * e perdê-lo numa edição faria todo produto atrelado cair na caixa padrão em silêncio.
+ */
+export async function saveBoxes(form: FormData): Promise<void> {
+  const nomes = form.getAll("box_name").map(String);
+  const ids = form.getAll("box_id").map(String);
+  const boxes = nomes
+    .map((name, i) => ({
+      id: ids[i] || undefined,
+      name: name.trim(),
+      width_mm: Number(form.getAll("box_w")[i] ?? 0),
+      height_mm: Number(form.getAll("box_h")[i] ?? 0),
+      depth_mm: Number(form.getAll("box_d")[i] ?? 0),
+      max_weight_grams: Number(form.getAll("box_max")[i] ?? 0),
+      empty_weight_grams: Number(form.getAll("box_tara")[i] ?? 0),
+    }))
+    // Linha em branco é a que a lojista deixou sem preencher, não um pedido de apagar tudo.
+    .filter((b) => b.name && b.width_mm > 0 && b.height_mm > 0 && b.depth_mm > 0);
+  await saveMerged(form, "envio_regras", (shipping) => ({ ...shipping, boxes }));
+}
+
 /** Conecta a conta da loja na transportadora (só o dono; o token compra etiqueta). */
 export async function connectAccount(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);

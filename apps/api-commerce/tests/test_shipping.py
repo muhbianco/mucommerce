@@ -68,6 +68,23 @@ def test_tara_da_caixa_entra_no_peso() -> None:
     assert pack([item(peso=1000)], caixa)[0].weight_grams == 1200
 
 
+def test_peca_que_nao_cabe_no_peso_util_nao_abre_caixa_estourada() -> None:
+    """A peneira e o enchimento precisam concordar sobre o que é "cabe em peso".
+
+    Enquanto a peneira olhava o teto cheio e o enchimento o teto menos a tara, uma peça no meio
+    do caminho passava na peneira e abria uma caixa sozinha acima do próprio limite declarado —
+    a loja prometia 300 g na caixa e despachava 400.
+    """
+    caixa = Box(
+        width_mm=300, height_mm=200, depth_mm=200, max_weight_grams=300, empty_weight_grams=100
+    )
+    # 250 g está abaixo do teto (300) e acima do útil (200): não cabe.
+    volumes = pack([item(peso=250, lado=50)], caixa)
+    assert len(volumes) == 1
+    # Vai como volume próprio, com as medidas da peça, e sem a tara de uma caixa que não existe.
+    assert (volumes[0].width_mm, volumes[0].weight_grams) == (50, 250)
+
+
 def test_peca_grande_viaja_sozinha_com_as_medidas_dela() -> None:
     gigante = PackItem(weight_grams=4000, width_mm=900, height_mm=400, depth_mm=300)
     volumes = pack([gigante, item()], CAIXA)
