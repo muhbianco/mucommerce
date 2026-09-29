@@ -100,6 +100,12 @@ def map_status(status: str | None, detail: str | None, payment_type: str | None)
         return PaymentStatus.PARTIALLY_REFUNDED
     if detail == "accredited":
         return PaymentStatus.APPROVED
+    # A Orders API diz "o pagador tem de fazer alguma coisa" com estas duas palavras, e é
+    # exatamente o Pix esperando transferência. Sem elas a cobrança virava `pending`, e a tela
+    # só mostra o QR em `requires_action`: o cliente ficava com um código válido que a loja
+    # escondia dele. Aconteceu em produção no mesmo dia da migração.
+    if status == "action_required" or detail == "waiting_transfer":
+        return PaymentStatus.REQUIRES_ACTION
     match status:
         case "approved" | "in_mediation":
             return PaymentStatus.APPROVED
@@ -111,10 +117,15 @@ def map_status(status: str | None, detail: str | None, payment_type: str | None)
             )
         case "authorized" | "in_process":
             return PaymentStatus.PENDING
-        case "rejected":
+        case "rejected" | "failed":
             return PaymentStatus.REJECTED
-        case "cancelled":
-            return PaymentStatus.EXPIRED if detail == "expired" else PaymentStatus.CANCELLED
+        # A Orders API escreve com um `l` só; a antiga, com dois. As duas grafias chegam.
+        case "cancelled" | "canceled":
+            return (
+                PaymentStatus.EXPIRED
+                if detail in ("expired", "expired_transaction")
+                else PaymentStatus.CANCELLED
+            )
         case "refunded":
             return PaymentStatus.REFUNDED
         case "charged_back":

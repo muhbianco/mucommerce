@@ -53,9 +53,16 @@ export interface PaymentSnapshot {
 // Methods started with a plain button; card goes through the provider's browser SDK (Brick).
 export const WEB_METHODS = ["pix", "link"] as const;
 
+/**
+ * O botão diz o meio, sempre — inclusive quando é o único.
+ *
+ * "Pagar R$ 1,30" não conta o que vai acontecer ao clicar, e o que acontece muda bastante: o
+ * Pix abre um QR aqui mesmo, o link leva para a página do provedor. Quem paga decide melhor
+ * sabendo disso antes, e o valor continua em corpo grande no resumo ao lado.
+ */
 export const METHOD_LABEL: Record<string, string> = {
   pix: "Pagar com Pix",
-  link: "Pagar pelo link",
+  link: "Pagar com link",
   card: "Pagar com cartão",
 };
 

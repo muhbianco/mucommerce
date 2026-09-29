@@ -68,7 +68,7 @@ export function PayBox({ state, total }: { state: OrderPayment; total: string })
           <input type="hidden" name="method" value={method} />
           <input type="hidden" name="idempotency_key" value={randomUUID()} />
           <button type="submit" className={`button ${styles.payButton}`}>
-            {choices.length === 1 ? `Pagar ${total}` : (METHOD_LABEL[method] ?? method)}
+            {METHOD_LABEL[method] ?? method}
             {surcharge > 0 ? ` (+ ${money(surcharge)})` : ""}
           </button>
         </form>
@@ -76,7 +76,9 @@ export function PayBox({ state, total }: { state: OrderPayment; total: string })
       {sozinho ? <AutoSubmit formId={PAY_FORM_ID} /> : null}
       {choices.length === 1 ? (
         <p className={styles.payHint}>
-          {METHOD_LABEL[choices[0]!.method] ?? choices[0]!.method}. Abrimos o pagamento para você.
+          {choices[0]!.method === "pix"
+            ? `Abrimos o código de ${total} aqui mesmo.`
+            : `Abrimos a página do pagamento de ${total}.`}
         </p>
       ) : null}
     </div>

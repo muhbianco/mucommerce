@@ -236,6 +236,14 @@ def test_the_refund_collection_wins_over_the_payment() -> None:
     ("status", "detail", "kind", "ours"),
     [
         ("pending", "pending_waiting_transfer", "bank_transfer", PaymentStatus.REQUIRES_ACTION),
+        # Vocabulário da Orders API, visto em produção: Pix esperando transferência. Sem estes
+        # dois a cobrança virava `pending`, e a tela só mostra o QR em `requires_action` — o
+        # cliente ficava com um código válido escondido pela própria loja.
+        ("action_required", "waiting_transfer", "bank_transfer", PaymentStatus.REQUIRES_ACTION),
+        ("action_required", None, "credit_card", PaymentStatus.REQUIRES_ACTION),
+        ("canceled", "canceled_transaction", "bank_transfer", PaymentStatus.CANCELLED),
+        ("canceled", "expired_transaction", "bank_transfer", PaymentStatus.EXPIRED),
+        ("failed", "cc_rejected_other_reason", "credit_card", PaymentStatus.REJECTED),
         ("in_process", "pending_review_manual", "credit_card", PaymentStatus.PENDING),
         ("approved", "accredited", "credit_card", PaymentStatus.APPROVED),
         ("in_mediation", None, "credit_card", PaymentStatus.APPROVED),

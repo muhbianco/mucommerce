@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cardOption,
+  METHOD_LABEL,
   changed,
   type OrderPayment,
   isPaymentErrorCode,
@@ -123,6 +124,26 @@ describe("card payments", () => {
     soPix.options[0]!.methods = ["pix"];
     soPix.payment = { id: "p", status: "rejected" } as OrderPayment["payment"];
     expect(shouldAutoStart(soPix)).toBe(false);
+  });
+
+  it("puts Pix first for Mercado Pago and keeps the link for the others", () => {
+    // Pix é o meio prioritário no MP: cai na conta na hora e não tira o cliente da loja. Quem
+    // não faz checkout aqui dentro (InfinitePay, PagBank) só tem link, e o botão diz isso.
+    const duas = state();
+    duas.options.push({
+      provider: "pagbank",
+      methods: ["link"],
+      mode: "redirect",
+      is_default: false,
+      public_config: {},
+      installments_max: 1,
+    });
+    expect(webPayChoices(duas).map((c) => `${c.provider}:${c.method}`)).toEqual([
+      "mercadopago:pix",
+      "pagbank:link",
+    ]);
+    expect(METHOD_LABEL.pix).toBe("Pagar com Pix");
+    expect(METHOD_LABEL.link).toBe("Pagar com link");
   });
 
   it("offers nothing to fire once a payment is in progress", () => {
