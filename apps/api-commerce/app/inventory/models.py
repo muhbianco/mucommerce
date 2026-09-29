@@ -130,6 +130,9 @@ class InventoryReservation(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Ba
     order_id: Mapped[str] = mapped_column(String(36), nullable=False)
     variant_id: Mapped[str] = mapped_column(String(36), nullable=False)
     quantity_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: Quanto desta reserva já voltou para a prateleira. A reserva é uma linha por variante do
+    #: pedido: devolver metade não pode fechá-la, senão a outra metade nunca mais volta.
+    returned_milli: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=ReservationStatus.ACTIVE
     )

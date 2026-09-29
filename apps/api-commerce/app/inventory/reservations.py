@@ -140,16 +140,64 @@ class ReservationService:
         balances = await self._lock([r.variant_id for r in reservations])
         now = utcnow()
         for reservation in reservations:
+            # O que já voltou por devolução de item não volta de novo no cancelamento.
+            quanto = reservation.quantity_milli - reservation.returned_milli
+            if quanto <= 0:
+                reservation.status = ReservationStatus.RETURNED
+                reservation.released_at = now
+                reservation.release_reason = reason[:32]
+                continue
             balance = balances[reservation.variant_id]
-            balance.on_hand_milli += reservation.quantity_milli
-            self._movement(
-                reservation, MovementType.SALE_RETURN, reservation.quantity_milli, balance, now
-            )
+            balance.on_hand_milli += quanto
+            self._movement(reservation, MovementType.SALE_RETURN, quanto, balance, now)
+            reservation.returned_milli = reservation.quantity_milli
             reservation.status = ReservationStatus.RETURNED
             reservation.released_at = now
             reservation.release_reason = reason[:32]
         await self.session.flush()
         return len(reservations)
+
+    async def return_some(
+        self, order_id: str, wanted: Mapping[str, int], *, reason: str
+    ) -> dict[str, int]:
+        """Devolve só o que foi pedido, por variante, e devolve quanto realmente voltou.
+
+        Existe por causa da devolução por item: o operador escolhe uma rabiola de três e só ela
+        sobe para a prateleira. A reserva não fecha enquanto sobrar quantidade — ela é uma linha
+        por variante do pedido, e fechá-la cedo enterraria o resto.
+
+        Nunca devolve mais do que a reserva ainda tem, mesmo que o pedido chegue pedindo: quem
+        vende dez e devolve onze está criando estoque do nada.
+        """
+        pedidas = {vid: qty for vid, qty in wanted.items() if qty > 0}
+        if not pedidas:
+            return {}
+        reservations = {
+            r.variant_id: r
+            for r in await self._reservations(order_id, ReservationStatus.COMMITTED)
+            if r.variant_id in pedidas
+        }
+        if not reservations:
+            return {}
+        balances = await self._lock(sorted(reservations))
+        now = utcnow()
+        devolvido: dict[str, int] = {}
+        for variant_id, reservation in reservations.items():
+            resta = reservation.quantity_milli - reservation.returned_milli
+            quanto = min(pedidas[variant_id], max(resta, 0))
+            if quanto <= 0:
+                continue
+            balance = balances[variant_id]
+            balance.on_hand_milli += quanto
+            self._movement(reservation, MovementType.SALE_RETURN, quanto, balance, now)
+            reservation.returned_milli += quanto
+            if reservation.returned_milli >= reservation.quantity_milli:
+                reservation.status = ReservationStatus.RETURNED
+                reservation.released_at = now
+                reservation.release_reason = reason[:32]
+            devolvido[variant_id] = quanto
+        await self.session.flush()
+        return devolvido
 
     # ------------------------------------------------------------------ helpers
     async def _reservations(self, order_id: str, status: str) -> list[InventoryReservation]:

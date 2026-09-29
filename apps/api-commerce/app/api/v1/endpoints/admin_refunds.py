@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.audit.idempotency import idempotent
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.pagination import Page, decode_cursor, encode_cursor
 from app.core.scopes import Scope
 from app.orders.models import Order
@@ -52,10 +52,21 @@ RefundApprover = Annotated[
 EntityId = Annotated[str, Path(min_length=36, max_length=36)]
 
 
+class RefundLineIn(StrictModel):
+    line_no: Annotated[int, Field(ge=1, le=999)]
+    quantity_milli: Annotated[int, Field(gt=0, le=1_000_000_000)]
+
+
 class RefundIn(StrictModel):
     # Omitted: everything that can still be refunded on the order's payment.
     amount_cents: Annotated[int, Field(gt=0, le=100_000_000)] | None = None
     reason: Annotated[str, Field(min_length=3, max_length=200)]
+    #: Devolução por item. O valor sai daqui, não de `amount_cents`: quanto uma linha rendeu
+    #: depende do desconto do pedido, e deixar a tela mandar o número seria deixá-la decidir
+    #: quanto sai do caixa.
+    lines: Annotated[list[RefundLineIn], Field(max_length=100)] | None = None
+    #: Devolver ao estoque o que foi devolvido. Só vale com `lines`.
+    restock: bool = True
 
 
 class RejectIn(StrictModel):
@@ -145,8 +156,17 @@ async def request_refund(
     )
     if order is None:
         raise NotFoundError("Pedido não encontrado.")
+    if body.lines and body.amount_cents is not None:
+        raise ValidationError(
+            "Escolha itens ou um valor, não os dois.", fields=["lines", "amount_cents"]
+        )
     refund = await RefundService(session, tenant, admin_actor(request, user)).request(
-        order, kind=RefundKind.OPERATOR, reason=body.reason, amount_cents=body.amount_cents
+        order,
+        kind=RefundKind.OPERATOR,
+        reason=body.reason,
+        amount_cents=body.amount_cents,
+        lines={line.line_no: line.quantity_milli for line in body.lines} if body.lines else None,
+        restock=body.restock,
     )
     return await _sent(session, tenant, refund)
 

@@ -50,10 +50,29 @@ export async function requestRefund(form: FormData): Promise<void> {
   await run(`${page}/pedidos/${orderId}`, "devolucao", async () => {
     const reason = text(form, "reason");
     if (reason.length < 3) throw new FormError("motivo_obrigatorio");
+    // Itens marcados mandam a devolução; sem nenhum, vale o valor digitado. **O valor dos
+    // itens não sai daqui**: quanto uma linha rendeu depende do desconto do pedido, e quem
+    // calcula é o servidor. A tela manda o que foi escolhido, não quanto isso vale.
+    const lines = refundLines(form);
     await api(`${path}/orders/${orderId}/refunds`, {
-      json: { amount_cents: money(form, "amount"), reason },
+      json: lines.length
+        ? { lines, reason, restock: form.get("restock") === "on" }
+        : { amount_cents: money(form, "amount"), reason },
     });
   });
+}
+
+/** Os itens marcados na tabela, com a quantidade de cada um. */
+function refundLines(form: FormData): { line_no: number; quantity_milli: number }[] {
+  const lines: { line_no: number; quantity_milli: number }[] = [];
+  for (const marcado of form.getAll("refund_line").map(String)) {
+    const lineNo = Number(marcado);
+    if (!Number.isInteger(lineNo) || lineNo < 1) throw new FormError("id_invalido");
+    const quantidade = Number(text(form, `refund_qty_${lineNo}`) || 0);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) throw new FormError("quantidade_invalida");
+    lines.push({ line_no: lineNo, quantity_milli: Math.round(quantidade * 1000) });
+  }
+  return lines;
 }
 
 /** Approve, refuse, or record a refund made by hand in the provider's app. */

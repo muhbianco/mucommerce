@@ -20,6 +20,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -218,6 +219,35 @@ class RefundKind(StrEnum):
 class RefundMethod(StrEnum):
     PROVIDER = "provider"  # through the provider's API (Mercado Pago)
     EXTERNAL = "external"  # done by the store in the provider's app, proven with evidence
+
+
+class RefundLine(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Qual item do pedido esta devolução cobre, e quanto dele em dinheiro.
+
+    O valor fica **congelado** aqui. O desconto de cupom mora no cabeçalho do pedido, então
+    quanto uma linha rendeu só se sabe dividindo o que foi pago (`app/orders/refund_lines.py`).
+    Recalcular depois daria outro número se o pedido mudasse, e relatório de devolução que se
+    reescreve sozinho não serve para conferir caixa.
+    """
+
+    __tablename__ = "refund_lines"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "refund_id"],
+            ["refunds.tenant_id", "refunds.id"],
+            name="fk_refund_lines_refund",
+        ),
+        # Uma linha do pedido entra uma vez por devolução; devolver de novo é outra devolução.
+        UniqueConstraint("tenant_id", "refund_id", "line_no", name="uq_refund_lines_line"),
+        Index("ix_refund_lines_refund", "tenant_id", "refund_id"),
+    )
+
+    refund_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    line_no: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    #: Para devolver ao estoque sem precisar reler o pedido.
+    variant_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    quantity_milli: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
 class Refund(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):

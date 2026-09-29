@@ -475,3 +475,121 @@ async def test_a_refund_whose_claim_was_taken_is_not_counted_twice(
     assert payment_row.status == "partially_refunded"  # the rest can still be refunded
     left = await ask_refund(client, tenant, owner, order["id"])
     assert left.json()["amount_cents"] == 1000
+
+
+async def test_devolver_um_item_devolve_so_ele_ao_estoque_e_o_que_ele_rendeu(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    """Devolução por item, ponta a ponta.
+
+    O pedido tem duas unidades pagas; devolver uma devolve metade do dinheiro e **uma** unidade
+    à prateleira. A outra continua vendida — devolver o pedido inteiro por causa de um item era
+    o que existia antes, e não é o que a loja quer.
+    """
+    from app.inventory.models import InventoryBalance
+    from app.payments.models import RefundLine
+    from app.tenancy.context import CROSS_TENANT_OPTION
+
+    tenant, owner, _ = shop
+    order, variant, _ = await paid_order(client, session_factory, shop)
+
+    async def saldo() -> int:
+        async with session_factory() as session:
+            balance = await session.scalar(
+                select(InventoryBalance)
+                .where(InventoryBalance.variant_id == variant)
+                .execution_options(**{CROSS_TENANT_OPTION: True})
+            )
+            return int(balance.on_hand_milli) if balance else 0
+
+    antes = await saldo()
+    pedido = await ask_refund(
+        client, tenant, owner, order["id"], lines=[{"line_no": 1, "quantity_milli": 1000}]
+    )
+    assert pedido.status_code == 201, pedido.text
+    # Duas unidades por R$ 30,00: uma vale R$ 15,00.
+    assert pedido.json()["amount_cents"] == 1500
+    assert await saldo() == antes + 1000
+
+    async with session_factory() as session:
+        linhas = list(
+            (
+                await session.execute(
+                    select(RefundLine)
+                    .where(RefundLine.refund_id == pedido.json()["id"])
+                    .execution_options(**{CROSS_TENANT_OPTION: True})
+                )
+            ).scalars()
+        )
+    assert [(linha.line_no, linha.quantity_milli, linha.amount_cents) for linha in linhas] == [
+        (1, 1000, 1500)
+    ]
+
+    # A segunda unidade continua devolvível, e aí sim o pedido fecha.
+    resto = await ask_refund(
+        client, tenant, owner, order["id"], lines=[{"line_no": 1, "quantity_milli": 1000}]
+    )
+    assert resto.status_code == 201, resto.text
+    assert resto.json()["amount_cents"] == 1500
+    assert await saldo() == antes + 2000
+
+
+async def test_devolver_item_sem_devolver_ao_estoque(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    """Item que voltou quebrado: o dinheiro sai, a prateleira não recebe."""
+    from app.inventory.models import InventoryBalance
+    from app.tenancy.context import CROSS_TENANT_OPTION
+
+    tenant, owner, _ = shop
+    order, variant, _ = await paid_order(client, session_factory, shop)
+
+    async with session_factory() as session:
+        antes = int(
+            (
+                await session.scalar(
+                    select(InventoryBalance.on_hand_milli)
+                    .where(InventoryBalance.variant_id == variant)
+                    .execution_options(**{CROSS_TENANT_OPTION: True})
+                )
+            )
+            or 0
+        )
+    feito = await ask_refund(
+        client,
+        tenant,
+        owner,
+        order["id"],
+        lines=[{"line_no": 1, "quantity_milli": 1000}],
+        restock=False,
+    )
+    assert feito.status_code == 201, feito.text
+    async with session_factory() as session:
+        depois = int(
+            (
+                await session.scalar(
+                    select(InventoryBalance.on_hand_milli)
+                    .where(InventoryBalance.variant_id == variant)
+                    .execution_options(**{CROSS_TENANT_OPTION: True})
+                )
+            )
+            or 0
+        )
+    assert depois == antes
+
+
+async def test_item_e_valor_juntos_sao_recusados(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    """Dois jeitos de dizer quanto devolver, no mesmo pedido, é ambiguidade sobre dinheiro."""
+    tenant, owner, _ = shop
+    order, _, _ = await paid_order(client, session_factory, shop)
+    recusado = await ask_refund(
+        client,
+        tenant,
+        owner,
+        order["id"],
+        amount_cents=500,
+        lines=[{"line_no": 1, "quantity_milli": 1000}],
+    )
+    assert recusado.status_code == 422

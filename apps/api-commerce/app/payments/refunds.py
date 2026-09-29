@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -35,8 +36,10 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.metrics import REFUNDS_COMPLETED
+from app.inventory.reservations import ReservationService
 from app.models.base import utcnow
-from app.orders.models import Order
+from app.orders.models import Order, OrderItem
+from app.orders.refund_lines import LineMoney, refund_cents
 from app.orders.state_machine import RefundStatus as OrderRefundStatus
 from app.payments import registry
 from app.payments.config_service import PaymentConfigService
@@ -47,6 +50,7 @@ from app.payments.models import (
     PaymentStatus,
     Refund,
     RefundKind,
+    RefundLine,
     RefundMethod,
     RefundStatus,
 )
@@ -105,13 +109,38 @@ class RefundService:
         reason: str,
         amount_cents: int | None = None,
         payment_id: str | None = None,
+        lines: Mapping[int, int] | None = None,
+        restock: bool = True,
     ) -> Refund:
         """Ask to give money back. The caller holds the order lock. `amount_cents=None`: all
-        that can still be refunded. `payment_id`: which payment (default: the one that paid)."""
+        that can still be refunded. `payment_id`: which payment (default: the one that paid).
+
+        `lines` é `{line_no: quantidade em milésimos}` e muda o sentido da devolução: em vez de
+        um valor solto, ela passa a cobrir itens. O valor **não** vem de quem chamou — é
+        calculado do que foi pago para cada linha, porque o desconto do cupom mora no cabeçalho
+        do pedido e a linha guarda o preço cheio. Deixar o chamador mandar o valor aqui seria
+        deixar a tela decidir quanto sai do caixa.
+
+        Com `restock`, o que foi devolvido volta para a prateleira — só aquelas quantidades.
+        """
         payment = await self.refundable_payment(order, payment_id)
         assert payment is not None  # required=True raises instead of returning None
         remaining = await self.remaining(payment)
-        amount = remaining if amount_cents is None else amount_cents
+        por_linha: dict[int, int] = {}
+        itens: list[OrderItem] = []
+        if lines:
+            itens = await self._order_items(order.id)
+            calculado, por_linha = refund_cents(
+                [LineMoney(i.line_no, i.total_cents, i.quantity_milli) for i in itens],
+                lines,
+                subtotal_cents=order.subtotal_cents,
+                discount_cents=order.discount_cents,
+            )
+            if calculado <= 0:
+                raise NothingToRefundError()
+            amount = calculado
+        else:
+            amount = remaining if amount_cents is None else amount_cents
         if amount <= 0 or remaining <= 0:
             raise NothingToRefundError()
         if amount > remaining:
@@ -141,11 +170,37 @@ class RefundService:
         )
         self.session.add(refund)
         await self.session.flush()
+        if por_linha:
+            variantes = {i.line_no: i.variant_id for i in itens}
+            quantidades = {i.line_no: i.quantity_milli for i in itens}
+            devolver: dict[str, int] = {}
+            for line_no, valor in sorted(por_linha.items()):
+                pedida = min(lines[line_no], quantidades.get(line_no, 0)) if lines else 0
+                self.session.add(
+                    RefundLine(
+                        refund_id=refund.id,
+                        line_no=line_no,
+                        variant_id=variantes[line_no],
+                        quantity_milli=pedida,
+                        amount_cents=valor,
+                    )
+                )
+                variant_id = variantes[line_no]
+                devolver[variant_id] = devolver.get(variant_id, 0) + pedida
+            await self.session.flush()
+            if restock:
+                await ReservationService(self.session, self.tenant, self.actor).return_some(
+                    order.id, devolver, reason="refund"
+                )
         await self._audit("refund.requested", refund, {"status": refund.status})
         await self._emit(refund, "refund.requested")
         if refund.status == RefundStatus.APPROVED:
             await self._emit(refund, "refund.approved")
         return refund
+
+    async def _order_items(self, order_id: str) -> list[OrderItem]:
+        stmt = select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.line_no)
+        return list((await self.session.execute(stmt)).scalars())
 
     async def remaining(self, payment: Payment) -> int:
         counted = await self.session.scalar(

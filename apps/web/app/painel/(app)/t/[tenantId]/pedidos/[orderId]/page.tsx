@@ -285,11 +285,51 @@ export default async function OrderPage({
                   <summary>Devolver dinheiro ao cliente</summary>
                   <form action={requestRefund}>
                     {hidden}
+                    <fieldset className={local.plain}>
+                      <legend className={styles.hint}>
+                        Marque o que volta. O valor de cada item é calculado do que o cliente
+                        pagou por ele — com desconto no pedido, a linha vale menos que o preço
+                        de etiqueta.
+                      </legend>
+                      {order.items.map((item) => (
+                        <div key={item.line_no} className={styles.check}>
+                          <label>
+                            <input type="checkbox" name="refund_line" value={item.line_no} />
+                            <span>
+                              {item.name}
+                              <span className={styles.fieldHint}>
+                                {item.quantity} {item.unit_label} · {money(item.total_cents, currency)}
+                              </span>
+                            </span>
+                          </label>
+                          <input
+                            name={`refund_qty_${item.line_no}`}
+                            type="number"
+                            min={0}
+                            step="any"
+                            max={Number(item.quantity)}
+                            defaultValue={item.quantity}
+                            aria-label={`Quantidade a devolver de ${item.name}`}
+                          />
+                        </div>
+                      ))}
+                      <label className={styles.check}>
+                        <input type="checkbox" name="restock" defaultChecked />
+                        <span>
+                          Devolver ao estoque o que voltou
+                          <span className={styles.fieldHint}>
+                            Desmarque se o item voltou quebrado ou não voltou.
+                          </span>
+                        </span>
+                      </label>
+                    </fieldset>
                     <div className={styles.fields}>
                       <label className={styles.field}>
-                        Valor
+                        Ou um valor (R$)
                         <input name="amount" inputMode="decimal" placeholder="ex.: 12,50" />
-                        <span className={styles.fieldHint}>Em branco: devolve tudo o que ainda resta.</span>
+                        <span className={styles.fieldHint}>
+                          Sem item marcado. Em branco: devolve tudo o que ainda resta.
+                        </span>
                       </label>
                       <label className={`${styles.field} ${styles.fieldWide}`}>
                         Motivo da devolução
