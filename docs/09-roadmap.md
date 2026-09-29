@@ -184,6 +184,12 @@ Substitui o desenho anterior (`shared`/`owned`); decisão em [ADR 0010](adr/0010
 
 **Dependências**: contratos com provedores fiscais/logísticos; DNS API.
 
+## Levantado em 29/09/2026, depois do primeiro pedido pago
+
+Devolução por item com estoque proporcional, SMTP do lojista para os e-mails da loja, e horário
+de atendimento num lugar só: o desenho, os cuidados e a ordem estão em
+[11-proximos-passos-loja](11-proximos-passos-loja.md).
+
 ## Dependências entre fases
 
 ```mermaid
