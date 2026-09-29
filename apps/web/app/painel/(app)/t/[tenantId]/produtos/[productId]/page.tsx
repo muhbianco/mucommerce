@@ -585,9 +585,10 @@ export default async function ProductPage({
 
                 <h4 className={local.subhead}>Peso e medidas da caixa</h4>
                 <p className={styles.fieldHint}>
-                  A transportadora cobra pelo volume. Sem as quatro, o carrinho não mostra frete
-                  nenhum para este produto — nem erro, só a opção sumindo. Deixe vazio se ele não
-                  é enviado (serviço, digital, ingresso).
+                  Medidas em <strong>milímetros</strong>: uma caixa de 30 × 20 × 8 cm se escreve
+                  300 × 200 × 80. A transportadora cobra pelo volume, e sem as quatro o carrinho
+                  não mostra frete nenhum para este produto — nem erro, só a opção sumindo. Deixe
+                  vazio se ele não é enviado (serviço, digital, ingresso).
                 </p>
                 <div className={styles.fields}>
                   <label className={styles.field}>

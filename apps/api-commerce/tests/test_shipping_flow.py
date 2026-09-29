@@ -270,3 +270,48 @@ async def test_a_tela_de_envio_aponta_o_produto_que_trava_a_cotacao(
     )
     depois = await client.get(f"{base}/shipping", headers=owner)
     assert depois.json()["unmeasured"] == []
+
+
+def test_o_motivo_de_nao_caber_sai_em_metro_e_quilo() -> None:
+    """5000 nos quatro campos: o peso fica certo (5 kg) e a caixa vira um cubo de 5 metros.
+
+    Foi o cadastro real que derrubou o frete da loja. Dizer "5000 mm" de volta não ajuda quem
+    digitou 5000 sem perceber a unidade; dizer "5,00 m" ajuda.
+    """
+    from app.api.v1.endpoints.admin_shipping import _oversize_detail
+
+    assert _oversize_detail(5000, 5000, 5000, 5000) == (
+        "largura de 5,00 m, altura de 5,00 m, profundidade de 5,00 m"
+    )
+    # Cada lado cabe, a soma não.
+    assert _oversize_detail(1000, 900, 900, 900) == "os tres lados somam 2,70 m"
+    # Medida boa, peso acima do que os Correios levam.
+    assert _oversize_detail(45_000, 300, 200, 100) == "45,0 kg"
+    # Caixa de sapato: nada a dizer.
+    assert _oversize_detail(900, 300, 200, 100) is None
+
+
+async def test_a_tela_de_envio_separa_sem_medida_de_medida_grande_demais(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner, _ = await loja(client, session_factory)
+    base = f"/api/v1/admin/tenants/{tenant.id}"
+
+    sem = await product(client, session_factory, tenant, owner, name="Sem medida")
+    grande = await product(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        name="Cubo de cinco metros",
+        weight_grams=5000,
+        width_mm=5000,
+        height_mm=5000,
+        depth_mm=5000,
+    )
+
+    status = (await client.get(f"{base}/shipping", headers=owner)).json()
+    assert [p["name"] for p in status["unmeasured"]] == [sem["name"]]
+    assert [(p["name"], p["detail"]) for p in status["oversized"]] == [
+        (grande["name"], "largura de 5,00 m, altura de 5,00 m, profundidade de 5,00 m")
+    ]
