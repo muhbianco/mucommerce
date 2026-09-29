@@ -81,7 +81,12 @@
 }
 
 /* Botão sem classe = secundário. `:where` zera a especificidade, para as classes vencerem. */
-.storefront :where(button, .button, .buttonGhost, .buttonSmall) {
+/* `:global(.button)` junto com os demais, e não é detalhe: dentro de um CSS module o `.button`
+   acima vira nome com hash e só casa com `styles.button`. O seletor de elemento `button` salva
+   os `<button>`, mas um `<a className="button">` — o "Entrar com Google", o "Ver Catálogo" do
+   herói, os avançar do carrinho e do checkout — ficava sem forma nenhuma: só a cor, aplicada a
+   um texto sem padding nem raio. Parecia texto selecionado. */
+.storefront :where(button, .button, .buttonGhost, .buttonSmall, :global(.button)) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
