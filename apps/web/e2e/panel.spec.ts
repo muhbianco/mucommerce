@@ -203,3 +203,69 @@ test("proposta: sem dizer o que a loja vende, o pedido é recusado com o motivo"
   await page.getByRole("button", { name: "Montar uma proposta" }).click();
   await expect(page.getByText(/Conte pelo menos o que a sua loja vende/)).toBeVisible();
 });
+
+test("cores do logo: a tela sugere, e só muda a marca quando a lojista manda", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  const tenant = page.url().split("?")[0] ?? "";
+
+  await page.goto(`${tenant}/configuracoes#marca`);
+  await expect(page.getByRole("heading", { name: "Marca" })).toBeVisible();
+  await expect(page.getByText("Sugestões do seu logo")).toBeVisible();
+  // A amostra é um botão de mentira com texto dentro: um quadrado mudo não deixa ver se o preço
+  // vai ficar legível sobre a cor.
+  await expect(page.getByText("Comprar", { exact: true })).toBeVisible();
+  await expect(page.getByText("#2e7d32")).toBeVisible();
+
+  // Ver a sugestão não pode ter mexido em nada. (O campo é o do formulário da marca; o da
+  // sugestão é um `hidden` de mesmo nome, em outro formulário.)
+  const corPrincipal = page.getByLabel("Cor principal");
+  await expect(corPrincipal).toHaveValue("#111111");
+
+  await page.getByRole("button", { name: "Usar estas cores" }).click();
+  await expect(page.getByText("Marca salva.")).toBeVisible();
+  await expect(page.getByLabel("Cor principal")).toHaveValue("#2e7d32");
+
+  // E a loja passa a usar a cor: `--brand-primary` é o contrato de entrada do tema.
+  await page.goto(`${STORE}/`);
+  const brand = await page
+    .locator("header")
+    .evaluate((h) => getComputedStyle(h.parentElement!).getPropertyValue("--brand-primary"));
+  expect(brand.trim()).toBe("#2e7d32");
+
+  // Devolve a cor semeada: a suíte é serial sobre um banco só, e `storefront.spec` compara a
+  // marca da loja modelo com a do seed. Teste que pinta a loja e vai embora quebra o vizinho.
+  await page.goto(`${tenant}/configuracoes#marca`);
+  await page.getByLabel("Cor principal").fill("#111111");
+  await page.getByRole("button", { name: "Salvar marca" }).click();
+  await expect(page.getByText("Marca salva.")).toBeVisible();
+  await expect(page.getByLabel("Cor principal")).toHaveValue("#111111");
+});
+
+test("no celular, nenhuma tela do painel rola de lado", async ({ page }) => {
+  // O painel não tinha essa guarda (a vitrine tem), e ela pegou um campo de arquivo que não
+  // encolhia: rótulo com largura do conteúdo faz o `max-width: 100%` do campo medir o próprio
+  // rótulo, ou seja, não limitar nada.
+  await page.setViewportSize({ width: 375, height: 812 });
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  const tenant = page.url().split("?")[0] ?? "";
+
+  for (const rota of [
+    "",
+    "/configuracoes",
+    "/vitrine",
+    "/vitrine/brief/negocio",
+    "/vitrine/brief/onde",
+    "/vitrine/propostas",
+    "/produtos",
+    "/pedidos",
+  ]) {
+    await page.goto(`${tenant}${rota}`);
+    const { scroll, client } = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(scroll, `rola de lado em ${rota || "/"}`).toBeLessThanOrEqual(client + 1);
+  }
+});

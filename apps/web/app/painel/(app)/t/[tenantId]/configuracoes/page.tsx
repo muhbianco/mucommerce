@@ -7,11 +7,21 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import type { Media } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
-import { deleteMedia, publishLegalDocument, saveBranding, saveSeo } from "../actions";
+import { applyPalette, deleteMedia, publishLegalDocument, saveBranding, saveSeo } from "../actions";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
 import { PageHeader, Pill, Section } from "../ui";
 import local from "./configuracoes.module.css";
+
+/** Uma sugestão de cor, como `GET /branding/suggestions` a devolve. */
+interface PaletteSuggestion {
+  media_id: string;
+  thumbnail_url: string | null;
+  primary: string;
+  /** Preto ou branco sobre `primary`, pela mesma conta do tema. Calculado, nunca escolhido. */
+  on_primary: string;
+  secondary: string | null;
+}
 
 export const metadata: Metadata = { title: "Configurações" };
 
@@ -52,9 +62,12 @@ export default async function Settings({
   const path = `/admin/tenants/${context.tenant_id}`;
   // As imagens da página inicial e os produtos saíram daqui: quem cuida deles é a tela da
   // página inicial, que tem prévia.
-  const [brandMedia, legal] = await Promise.all([
+  const [brandMedia, legal, suggestions] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
     api<LegalOverview>(`${path}/legal-documents`),
+    // Cores tiradas do logotipo no processamento da imagem. Loja sem logotipo (ou com um
+    // enviado antes disto existir) recebe lista vazia, e a seção some.
+    api<PaletteSuggestion[]>(`${path}/branding/suggestions`).catch(() => [] as PaletteSuggestion[]),
   ]);
   const branding = context.settings.branding ?? {};
   // Mesmo padrão da API (storefront_context): sem configuração, só clientes aprovados.
@@ -124,8 +137,52 @@ export default async function Settings({
             tenantId={context.tenant_id}
             ownerType="tenant_brand"
             label="Enviar logo ou imagem de compartilhamento"
+            askRole
+            defaultRole="logo"
           />
         </div>
+
+        {suggestions.length ? (
+          <>
+            <p className={local.subhead}>Sugestões do seu logo</p>
+            <p className={styles.hint}>
+              Tiramos estas cores do arquivo que você enviou. Nada muda até você escolher uma.
+            </p>
+            <div className={local.palettes}>
+              {suggestions.map((s) => (
+                <form key={s.media_id} action={applyPalette} className={local.palette}>
+                  {tenantField}
+                  <input type="hidden" name="primary_color" value={s.primary} />
+                  <input type="hidden" name="secondary_color" value={s.secondary ?? ""} />
+                  {s.thumbnail_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={s.thumbnail_url} alt="" className={local.paletteThumb} />
+                  ) : null}
+                  <span className={local.swatches}>
+                    {/* A amostra mostra a cor com um texto dentro, e não um quadrado mudo: é
+                        assim que dá para ver se o botão vai ficar legível — `on_primary` é
+                        calculado pela mesma conta do tema, nunca escolhido. */}
+                    <span
+                      className={local.swatch}
+                      style={{ background: s.primary, color: s.on_primary }}
+                    >
+                      Comprar
+                    </span>
+                    {s.secondary ? (
+                      <span className={local.swatchLink} style={{ color: s.secondary }}>
+                        um link
+                      </span>
+                    ) : null}
+                    <code className={local.swatchHex}>{s.primary}</code>
+                  </span>
+                  <button type="submit" className={styles.buttonSmall}>
+                    Usar estas cores
+                  </button>
+                </form>
+              ))}
+            </div>
+          </>
+        ) : null}
 
         <form action={saveBranding} className={local.part}>
           {tenantField}

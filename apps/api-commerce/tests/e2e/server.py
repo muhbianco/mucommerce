@@ -152,6 +152,33 @@ PRODUCTS = [
 ]
 
 
+async def _brand_logo(session: AsyncSession, tenant_id: str) -> None:
+    """Um logotipo processado, com a paleta que o worker de imagem teria extraído.
+
+    A suíte não roda o processamento (precisaria de MinIO), então a paleta é semeada: o que os
+    testes olham é a tela de sugestões, não o Pillow — esse tem teste próprio em pytest.
+    """
+    bind_session_tenant(session, tenant_id)
+    session.add(
+        MediaAsset(
+            owner_type="tenant_brand",
+            owner_id=None,
+            status=MediaStatus.READY,
+            role="logo",
+            declared_mime="image/png",
+            declared_bytes=1,
+            upload_key=f"incoming/{tenant_id}/logo",
+            width=320,
+            height=320,
+            palette={"primary": "#2e7d32", "on_primary": "#ffffff", "secondary": "#7d3227"},
+            renditions={
+                "w320": {"key": f"tenants/{tenant_id}/logo.webp", "width": 320, "height": 320}
+            },
+        )
+    )
+    await session.flush()
+
+
 async def _ready_image(session: AsyncSession, tenant_id: str, product_id: str) -> None:
     bind_session_tenant(session, tenant_id)
     session.add(
@@ -285,6 +312,7 @@ async def seed() -> None:
             TenantMembership(tenant_id=store.id, admin_user_id=admin.id, role=TenantRole.OWNER)
         )
         await session.commit()
+        await _brand_logo(session, store.id)
         await _publish_products(session, store.id)
         await _variant_product(session, store.id)
         await _event_product(session, store.id)

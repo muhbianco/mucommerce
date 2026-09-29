@@ -103,6 +103,34 @@ carteira para o primeiro despacho real; CEP de origem da loja.
 e entrega por zona sem tocar em pedido nenhum. Carteira pré-paga sem saldo é erro esperado, não
 muda o estado do pedido.
 
+## Fase 2.6 (etapa K) — Vitrine repaginada e montada com IA
+
+O motor de landing era bom e ninguém conseguia usá-lo: seis tipos de bloco, o editor expondo
+quatro, e a vitrine sem sistema visual nenhum — 16 páginas com `#eee` escrito à mão. Esta fase
+dá identidade à loja, amplia o motor e deixa a primeira versão da página ser montada a partir do
+que a lojista conta. Decisões em [ADR 0016](adr/0016-motor-de-blocos-da-vitrine.md) (motor) e
+[ADR 0017](adr/0017-vitrine-montada-com-ia.md) (IA). Operação:
+[runbook](runbooks/etapa-k-vitrine.md).
+
+**Escopo**: kit visual da vitrine com paleta derivada em OKLCH (contraste por construção, não por
+escolha) e fontes auto-hospedadas; UX de conversão no molde do Mercado Livre (buy box, hierarquia
+de preço, parcelamento com as guardas do CDC, estoque baixo, frete grátis, vazios, confirmação
+decente); doze tipos de bloco com arranjo e tom por enum, id estável e um resolver único para
+vitrine e prévia; questionário em quatro passos; gateway de LLM genérico e medido na `api-agents`;
+geração de rascunhos com reparo determinístico, cota mensal e prévia no painel; cores sugeridas a
+partir do logotipo.
+
+**Aceite**: a cor do lojista nunca produz texto ilegível (varredura de 524 cores em teste); o
+modelo nunca escreve em `tenant_settings` (regra em `test_architecture.py`); nenhuma transação
+aberta durante a chamada ao modelo; falha terminal devolve a cota; a cota grátis funciona com o
+módulo `landing_ai` desligado; a compra inteira funciona sem JavaScript.
+
+**Dependências**: a `api-agents` com o gateway no ar **antes** do commerce — são dois repos, e a
+ordem importa; enquanto não estiver, `LANDING_LLM_ENABLED=false` esconde o botão.
+
+**Riscos/rollback**: `LANDING_LLM_ENABLED=false` desliga a montagem sem tocar no resto;
+migrations 0031–0032 são aditivas e uma imagem anterior convive com elas.
+
 ## Fase 3 — Chatwoot operacional e Dashboard App
 
 **Escopo**: conversa por pedido na inbox Loja, atributos e labels por status, notas privadas em transições, Dashboard App "Pedido" (`/cw-app`) com transições permitidas, aprovação de acesso e link para painel; automations opcionais (`pedido-acao-*` → webhook); reconciliação Chatwoot; `api-agents`: `channel_tenant_bindings` para handoff cair na account do tenant; e-mails restantes (aceito, em preparo, pronto, enviado, entregue); CSAT opcional; cupons básicos (percentual/valor, mínimo, validade) se a fase 2 fechou no prazo.

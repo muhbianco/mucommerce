@@ -271,6 +271,10 @@ export async function requestUpload(input: {
   mime: string;
   bytes: number;
   filename: string;
+  /** O que a imagem é (`MediaRole`). Quem monta a vitrine lê isto para saber qual foto vira
+   *  destaque — e o logotipo nunca vira. Vai numa coluna própria, e não no `alt`, que é texto de
+   *  acessibilidade e aparece na página publicada. */
+  role?: string | null;
 }): Promise<{ ok: true; mediaId: string; url: string; fields: Record<string, string> } | { ok: false; code: string }> {
   try {
     const created = await api<UploadCreated>(`/admin/tenants/${id(input.tenantId)}/media/uploads`, {
@@ -280,6 +284,7 @@ export async function requestUpload(input: {
         mime: input.mime,
         bytes: input.bytes,
         filename: input.filename.slice(0, 200),
+        role: input.role || null,
       },
     });
     return { ok: true, mediaId: created.media.id, url: created.upload.url, fields: created.upload.fields };
@@ -429,6 +434,41 @@ export async function saveBranding(form: FormData): Promise<void> {
         },
       },
     });
+  });
+}
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Aplica uma cor sugerida a partir do logotipo.
+ *
+ * Existe como ação separada porque **sugerir e aplicar são coisas diferentes**: a paleta é
+ * calculada no processamento da imagem e mostrada em amostras; quem decide é a lojista. Uma loja
+ * que já escolheu a cor dela não pode perdê-la porque trocou o logotipo.
+ *
+ * Só os dois campos de cor viajam: o resto de `branding` (logo, fonte, raio, densidade) fica
+ * como está, e é por isso que o valor atual é lido antes.
+ */
+export async function applyPalette(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const primary = text(form, "primary_color");
+  const secondary = text(form, "secondary_color");
+  if (!HEX.test(primary)) throw new FormError("cor_invalida");
+  await run(`${page}/configuracoes`, "marca", async () => {
+    const current = await currentSetting(path, "branding");
+    await api(`${path}/settings/branding`, {
+      method: "PUT",
+      json: {
+        value: {
+          ...current,
+          primary_color: primary.toLowerCase(),
+          secondary_color: HEX.test(secondary) ? secondary.toLowerCase() : null,
+        },
+      },
+    });
+    // A âncora vem **depois** da query, senão `?ok=marca` cai dentro do fragmento e o aviso
+    // nunca aparece — a cor muda e a lojista não vê confirmação nenhuma.
+    return `${page}/configuracoes?ok=marca#marca`;
   });
 }
 

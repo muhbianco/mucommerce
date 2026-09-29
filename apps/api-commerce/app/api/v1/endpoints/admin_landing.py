@@ -31,6 +31,8 @@ from app.landing.models import LandingDraft
 from app.landing.quota import LandingQuotaService
 from app.landing.resolver import resolve_landing
 from app.landing.schemas import BriefV1
+from app.media.models import MediaOwner, MediaStatus
+from app.media.repository import MediaRepository
 from app.tenancy.context import TenantContext
 
 router = APIRouter(prefix="/admin/tenants/{tenant_id}", tags=["Painel — Vitrine"])
@@ -313,3 +315,59 @@ async def draft_preview(
         category_payload=lambda category: _category(category).model_dump(),
         image_payload=image_payload,
     )
+
+
+# ---------------------------------------------------------------- cores do logotipo
+
+
+class PaletteOut(BaseModel):
+    """Uma sugestão de cor, extraída de uma imagem da marca."""
+
+    media_id: str
+    #: A miniatura, para a lojista ver de qual imagem veio a sugestão.
+    thumbnail_url: str | None
+    primary: str
+    #: Preto ou branco, o que lê melhor sobre `primary`. Calculado, nunca escolhido.
+    on_primary: str
+    secondary: str | None
+
+
+@router.get(
+    "/branding/suggestions",
+    response_model=list[PaletteOut],
+    summary="Cores sugeridas a partir das imagens da marca",
+)
+async def branding_suggestions(
+    session: DbSession,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+) -> list[PaletteOut]:
+    """As cores que já foram extraídas de cada logotipo, no momento do processamento.
+
+    Extrair aqui seria baixar a imagem do storage a cada abertura da tela para calcular sempre a
+    mesma coisa. A paleta é propriedade do arquivo, não do momento: fica gravada em
+    `media_assets.palette` quando a imagem é processada.
+
+    **Isto não escreve `branding`.** Sugerir e aplicar são coisas diferentes: a lojista olha as
+    amostras e decide. Uma loja que já escolheu a cor dela não pode perdê-la porque trocou o
+    logotipo.
+    """
+    rows = await MediaRepository(session).for_owner(MediaOwner.TENANT_BRAND, None)
+    saidas: list[PaletteOut] = []
+    for media in rows:
+        palette = media.palette or {}
+        primary = palette.get("primary")
+        if media.status != MediaStatus.READY or not isinstance(primary, str):
+            continue
+        renditions = image_payload(media) or {}
+        variantes = renditions.get("renditions") or []
+        secondary = palette.get("secondary")
+        saidas.append(
+            PaletteOut(
+                media_id=media.id,
+                thumbnail_url=str(variantes[0]["url"]) if variantes else None,
+                primary=primary,
+                on_primary=str(palette.get("on_primary") or "#ffffff"),
+                secondary=secondary if isinstance(secondary, str) else None,
+            )
+        )
+    return saidas

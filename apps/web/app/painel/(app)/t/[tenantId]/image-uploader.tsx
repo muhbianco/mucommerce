@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import styles from "../../../panel.module.css";
 import { completeUpload, mediaStatus, requestUpload } from "./actions";
 
 const ACCEPT = ["image/jpeg", "image/png", "image/webp"];
@@ -11,6 +12,16 @@ const POLL_MS = 1500;
 const POLL_LIMIT = 40; // ~60 s
 
 type Line = { name: string; state: string };
+
+/** Os papéis que fazem sentido escolher à mão, em palavras de lojista. */
+const ROLES: { value: string; label: string }[] = [
+  { value: "banner", label: "Foto grande / banner" },
+  { value: "place_photo", label: "A loja por dentro ou por fora" },
+  { value: "product_photo", label: "Foto de produto" },
+  { value: "team_photo", label: "Eu ou a equipe" },
+  { value: "logo", label: "Logotipo" },
+  { value: "other", label: "Outra coisa" },
+];
 
 const ERRORS: Record<string, string> = {
   storage_unavailable: "armazenamento indisponível",
@@ -29,15 +40,22 @@ export function ImageUploader({
   ownerType,
   ownerId = null,
   label = "Enviar imagens",
+  askRole = false,
+  defaultRole = "banner",
 }: {
   tenantId: string;
   ownerType: "product" | "tenant_brand" | "landing";
   ownerId?: string | null;
   label?: string;
+  /** Mostra o seletor de papel ao lado do arquivo. Só onde o papel muda o que a gente faz com a
+   *  imagem — na vitrine ele decide o que pode virar destaque. */
+  askRole?: boolean;
+  defaultRole?: string;
 }) {
   const router = useRouter();
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
+  const [role, setRole] = useState(defaultRole);
 
   const update = (index: number, state: string) =>
     setLines((current) => current.map((line, i) => (i === index ? { ...line, state } : line)));
@@ -53,6 +71,7 @@ export function ImageUploader({
       mime: file.type,
       bytes: file.size,
       filename: file.name,
+      role: askRole ? role : null,
     });
     if (!ticket.ok) return update(index, `erro: ${ERRORS[ticket.code] ?? ticket.code}`);
 
@@ -89,13 +108,25 @@ export function ImageUploader({
   }
 
   return (
-    <div>
+    <div className={styles.uploader}>
+      {askRole ? (
+        <label>
+          O que você vai enviar{" "}
+          <select value={role} onChange={(event) => setRole(event.target.value)} disabled={busy}>
+            {ROLES.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         {label}{" "}
         <input type="file" accept={ACCEPT.join(",")} multiple onChange={onChange} disabled={busy} />
       </label>
       {lines.length > 0 ? (
-        <ul>
+        <ul className={styles.uploaderLines}>
           {lines.map((line, i) => (
             <li key={`${line.name}-${i}`}>
               {line.name}: {line.state}

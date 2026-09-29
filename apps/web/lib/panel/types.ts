@@ -86,6 +86,11 @@ export interface Media {
   width: number | null;
   height: number | null;
   failure_reason: string | null;
+  /** `MediaRole`: o que a imagem é. Quem monta a vitrine lê isto para saber qual foto pode
+   *  virar destaque — e o logotipo nunca vira. Nulo no que veio antes disto existir. */
+  role: string | null;
+  /** Cores tiradas do arquivo quando ele é um logotipo. Propriedade da imagem, não da loja. */
+  palette: { primary: string; on_primary: string; secondary: string | null } | null;
   renditions: Rendition[];
   created_at: string;
 }

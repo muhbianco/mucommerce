@@ -4,12 +4,14 @@ import { notFound } from "next/navigation";
 import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
+import type { Media } from "@/lib/panel/types";
 import { themeVariables, type Branding } from "@/lib/theme";
 
 import { Block as StoreBlock } from "../../../../../../(storefront)/_store/landing-blocks";
 import storeStyles from "../../../../../../(storefront)/_store/store.module.css";
 import styles from "../../../../../panel.module.css";
 import { Flash } from "../../flash";
+import { ImageUploader } from "../../image-uploader";
 import { EmptyState, PageHeader, Pill, Section } from "../../ui";
 import vitrine from "../vitrine.module.css";
 import { applyDraft, discardDraft, refineDraft, requestDraft } from "./actions";
@@ -51,6 +53,18 @@ const STATUS: Record<string, { label: string; state: "live" | "pending" | "off";
 
 const EM_ANDAMENTO = new Set(["queued", "running"]);
 
+/** O papel da imagem, como a lojista o escolheu. */
+const ROLE_LABEL: Record<string, string> = {
+  banner: "foto grande",
+  place_photo: "a loja",
+  product_photo: "produto",
+  team_photo: "eu ou a equipe",
+  logo: "logotipo",
+  texture: "textura",
+  icon: "ícone",
+  other: "outra",
+};
+
 export default async function PropostasPage({
   params,
   searchParams,
@@ -68,7 +82,10 @@ export default async function PropostasPage({
   const base = `/t/${tenantId}`;
   const { ok, erro, ver } = await searchParams;
 
-  const lista = await api<DraftList>(`${path}/landing/drafts`);
+  const [lista, material] = await Promise.all([
+    api<DraftList>(`${path}/landing/drafts`),
+    api<Media[]>(`${path}/media?owner_type=landing`),
+  ]);
   const montando = lista.drafts.some((d) => EM_ANDAMENTO.has(d.status));
 
   // A proposta aberta: a que ela pediu para ver, ou a primeira pronta.
@@ -90,14 +107,46 @@ export default async function PropostasPage({
         lead="A gente monta a partir do que você contou. Nada vai para o ar sem o seu OK."
         actions={
           <Pill state={lista.quota.left > 0 ? "live" : "off"}>
-            {lista.quota.left > 0
-              ? `${lista.quota.left} de ${lista.quota.limit} neste mês`
-              : "acabaram as deste mês"}
+            {/* "restam N" e não "N de M": a seção logo abaixo já diz quantas foram usadas, e as
+                duas contas lado a lado, cada uma medindo uma ponta, confundem. */}
+            {lista.quota.left > 0 ? `restam ${lista.quota.left}` : "acabaram as deste mês"}
           </Pill>
         }
       />
       <Flash ok={ok} erro={erro} />
       <DraftRefresher active={montando} />
+
+      <Section
+        title="O material da sua loja"
+        description={`${material.length} ${material.length === 1 ? "imagem" : "imagens"}`}
+      >
+        <p className={styles.hint}>
+          Mande foto da loja, dos produtos, da equipe — o que mostrar o seu negócio. Diga o que é
+          cada uma: é assim que a gente sabe qual serve de foto grande e qual não. O logotipo fica
+          em <a href={`${base}/configuracoes#marca`}>Marca</a>, e é de lá que tiramos as cores.
+        </p>
+        {material.length ? (
+          <div className={local.material}>
+            {material.map((media) => (
+              <figure key={media.id} className={local.materialTile}>
+                {media.renditions.length ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={media.renditions[0]!.url} alt={media.alt ?? ""} />
+                ) : (
+                  <div className={local.materialPending}>processando…</div>
+                )}
+                <figcaption>{ROLE_LABEL[media.role ?? ""] ?? "sem descrição"}</figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+        <ImageUploader
+          tenantId={tenantId}
+          ownerType="landing"
+          label="Enviar imagens da loja"
+          askRole
+        />
+      </Section>
 
       <Section
         title="Pedir uma proposta"

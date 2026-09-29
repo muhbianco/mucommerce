@@ -1012,3 +1012,41 @@
     margin-left: 0;
   }
 }
+
+/* ------------------------------------------------------------------ envio de imagem */
+
+/* Seletor de papel e escolha de arquivo em linhas próprias: lado a lado, os dois rótulos correm
+   um no outro e ninguém sabe onde um termina. */
+.uploader {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+/* `stretch` importa: com `flex-start` o rótulo encolhe até o conteúdo, e aí o `max-width: 100%`
+   do campo de arquivo passa a medir o próprio rótulo — ou seja, não limita nada. */
+.uploader > label {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Campo de arquivo tem largura intrínseca do sistema e não encolhe sozinho: sem isto ele
+   estoura o cartão no celular e a página inteira rola de lado. */
+.uploader input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.uploaderLines {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}

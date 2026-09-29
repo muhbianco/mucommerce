@@ -99,6 +99,7 @@ const ERRORS: Record<string, string> = {
   landing_draft_not_ready: "Esta proposta ainda não está pronta.",
   landing_brief_empty: "Conte pelo menos o que a sua loja vende antes de pedir uma proposta.",
   instrucao_vazia: "Diga em uma frase o que você quer mudar.",
+  cor_invalida: "Cor inválida.",
   credential_vault_unavailable: "O cofre de credenciais da plataforma está indisponível. Nada foi salvo — avise a MuhBianco.",
   integration_unavailable: "Serviço indisponível no momento. Nada foi salvo; tente de novo em alguns minutos.",
   dominio_invalido: "Domínio inválido. Escreva só o endereço, como loja.minhaempresa.com.br.",

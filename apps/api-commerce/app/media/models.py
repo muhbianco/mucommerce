@@ -36,8 +36,10 @@ class MediaOwner(StrEnum):
     # Tenant-level images (logo, landing blocks): no owner_id.
     TENANT_BRAND = "tenant_brand"
     LANDING = "landing"
-    # Material que a lojista manda para a gente montar a vitrine dela: logo, fachada, produto,
-    # referência. É insumo, não conteúdo publicado — ver `MediaRole`.
+    # Reservado para material que só serve de referência e nunca é publicado. **Nada escreve
+    # este dono hoje**: o que a lojista manda para montar a vitrine sobe como `landing` com um
+    # `MediaRole`, porque é o dono que o gerador lê e que a conferência de referências aceita.
+    # Fica declarado porque a API já o aceita, e estreitar contrato a ADR 0016 desaconselha.
     BRIEF = "brief"
 
 

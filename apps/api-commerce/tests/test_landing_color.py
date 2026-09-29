@@ -10,7 +10,9 @@ from __future__ import annotations
 import io
 
 import pytest
+from httpx import AsyncClient
 from PIL import Image
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.landing.color import (
     contrast_ratio,
@@ -20,6 +22,10 @@ from app.landing.color import (
     relative_luminance,
     to_hex,
 )
+from app.media.models import MediaAsset, MediaOwner, MediaRole, MediaStatus
+from app.tenancy.context import bind_session_tenant
+from app.tenancy.models import Tenant
+from tests.test_catalog import base, catalog_tenant, member_headers
 
 #: Os mesmos casos do teste do front.
 CASOS_ON_COLOR = [
@@ -119,3 +125,126 @@ class TestPaleta:
     def test_o_texto_da_cor_e_hexadecimal(self) -> None:
         assert to_hex((46, 125, 50)) == "#2e7d32"
         assert to_hex((300, -5, 0)) == "#ff0000", "valores fora da faixa são presos nela"
+
+
+class TestSugestoesNoPainel:
+    """A paleta vira sugestão na tela, e **só** sugestão.
+
+    Aplicar é a lojista apertando um botão: uma loja que já escolheu a cor dela não pode perdê-la
+    porque trocou o logotipo.
+    """
+
+    async def test_logo_processado_aparece_como_sugestao(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        tenant = await catalog_tenant(session_factory, "sugere")
+        headers = await member_headers(client, session_factory, tenant)
+        await _brand_media(
+            session_factory,
+            tenant,
+            palette={"primary": "#2e7d32", "on_primary": "#ffffff", "secondary": "#7d3227"},
+        )
+
+        resposta = await client.get(f"{base(tenant)}/branding/suggestions", headers=headers)
+        assert resposta.status_code == 200
+        [sugestao] = resposta.json()
+        assert sugestao["primary"] == "#2e7d32"
+        # Preto ou branco vem calculado pela mesma conta do tema, nunca escolhido.
+        assert sugestao["on_primary"] == "#ffffff"
+        assert sugestao["secondary"] == "#7d3227"
+
+    async def test_imagem_sem_paleta_nao_vira_sugestao(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        # Foto de produto não gera paleta (a cor dominante de um brownie é marrom), e logotipo
+        # enviado antes disto existir também não tem.
+        tenant = await catalog_tenant(session_factory, "sem-paleta")
+        headers = await member_headers(client, session_factory, tenant)
+        await _brand_media(session_factory, tenant, palette=None)
+
+        resposta = await client.get(f"{base(tenant)}/branding/suggestions", headers=headers)
+        assert resposta.json() == []
+
+    async def test_imagem_ainda_processando_nao_vira_sugestao(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        tenant = await catalog_tenant(session_factory, "processando")
+        headers = await member_headers(client, session_factory, tenant)
+        await _brand_media(
+            session_factory,
+            tenant,
+            palette={"primary": "#2e7d32", "on_primary": "#ffffff", "secondary": None},
+            status=MediaStatus.PROCESSING,
+        )
+        assert (
+            await client.get(f"{base(tenant)}/branding/suggestions", headers=headers)
+        ).json() == []
+
+    async def test_sugerir_nao_escreve_a_marca(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """O teste que protege a cor que a lojista escolheu.
+
+        Se a sugestão escrevesse sozinha, trocar o logotipo repintaria a loja inteira sem
+        ninguém pedir — e ela descobriria pelo cliente.
+        """
+        tenant = await catalog_tenant(session_factory, "nao-escreve")
+        headers = await member_headers(client, session_factory, tenant)
+        await client.put(
+            f"{base(tenant)}/settings/branding",
+            headers=headers,
+            json={"value": {"primary_color": "#111111"}},
+        )
+        await _brand_media(
+            session_factory,
+            tenant,
+            palette={"primary": "#2e7d32", "on_primary": "#ffffff", "secondary": None},
+        )
+
+        await client.get(f"{base(tenant)}/branding/suggestions", headers=headers)
+        atual = await client.get(f"{base(tenant)}/settings", headers=headers)
+        assert atual.json()["branding"]["primary_color"] == "#111111"
+
+    async def test_a_loja_vizinha_nao_ve_o_logo_de_ninguem(
+        self, client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        uma = await catalog_tenant(session_factory, "cor-a")
+        outra = await catalog_tenant(session_factory, "cor-b")
+        await _brand_media(
+            session_factory,
+            uma,
+            palette={"primary": "#2e7d32", "on_primary": "#ffffff", "secondary": None},
+        )
+        vizinha = await member_headers(client, session_factory, outra)
+        assert (
+            await client.get(f"{base(outra)}/branding/suggestions", headers=vizinha)
+        ).json() == []
+
+
+async def _brand_media(
+    session_factory: async_sessionmaker[AsyncSession],
+    tenant: Tenant,
+    *,
+    palette: dict[str, str | None] | None,
+    status: str = MediaStatus.READY,
+) -> str:
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        media = MediaAsset(
+            tenant_id=tenant.id,
+            owner_type=MediaOwner.TENANT_BRAND,
+            owner_id=None,
+            status=status,
+            role=MediaRole.LOGO,
+            upload_key="tenants/x/uploads/logo",
+            declared_mime="image/png",
+            declared_bytes=100,
+            renditions={"w320": {"key": "k", "width": 320, "height": 320, "bytes": 10}},
+            public_prefix="tenants/x/media/y",
+            palette=palette,
+            created_by_actor="system:tests",
+            updated_by_actor="system:tests",
+        )
+        session.add(media)
+        await session.commit()
+        return media.id

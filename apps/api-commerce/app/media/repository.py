@@ -10,13 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.media.models import MediaAsset, MediaStatus
 from app.tenancy.context import CROSS_TENANT_OPTION
 
-#: Quantas imagens cabem por dono. O brief é o que mais recebe — logotipo, fachada, equipe,
-#: produtos, referências —, e doze não davam para contar a história de uma loja.
+#: Quantas imagens cabem por dono. A página inicial é a que mais recebe — logotipo, fachada,
+#: equipe, produtos —, e doze não davam para contar a história de uma loja.
 MEDIA_LIMITS: dict[str, int] = {
     "product": 12,
     "tenant_brand": 12,
-    "landing": 24,
-    "brief": 30,
+    "landing": 30,
 }
 #: Dono que não está no mapa (nenhum hoje) cai aqui.
 MAX_MEDIA_PER_OWNER = 12

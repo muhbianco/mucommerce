@@ -77,7 +77,48 @@
   gap: 0.5rem;
 }
 
+/* A base é pequena de propósito: com 20rem o campo não cabia num celular de 375px e empurrava
+   a página para o lado. Ele cresce sozinho onde há espaço. */
 .refineRow input {
-  flex: 1 1 20rem;
+  flex: 1 1 12rem;
   min-width: 0;
+}
+
+/* ------------------------------------------------------------------ material da loja */
+
+.material {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.materialTile {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--mist);
+}
+
+.materialTile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.materialPending {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4 / 3;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.materialTile figcaption {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: #fff;
 }

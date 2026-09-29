@@ -29,6 +29,10 @@ const WEB_ENV = {
   NEXT_TELEMETRY_DISABLED: "1",
   // The fetch cache persists in .next across runs; each run reseeds the API with new ids.
   STOREFRONT_REVALIDATE_SECONDS: "0",
+  // O contexto da loja é cacheado por host por 60 s em produção (e a UI do painel avisa que a
+  // vitrine pode ficar velha). Numa suíte que muda a marca e confere a loja na linha seguinte,
+  // isso seria um teste medindo o cache, não o comportamento.
+  CONTEXT_CACHE_TTL_MS: "0",
 };
 
 export default defineConfig({

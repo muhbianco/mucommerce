@@ -179,3 +179,61 @@
   font-size: 0.9rem;
   color: var(--muted);
 }
+
+/* ------------------------------------------------------------------ cores do logotipo */
+
+.palettes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.palette {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.paletteThumb {
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+  flex: none;
+  border-radius: 6px;
+  background: var(--mist);
+}
+
+.swatches {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* A amostra é um botão de mentira, com texto dentro: um quadrado mudo não deixa ver se o preço
+   vai ficar legível em cima da cor. */
+.swatch {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.swatchLink {
+  font-size: 0.78rem;
+  text-decoration: underline;
+}
+
+.swatchHex {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
