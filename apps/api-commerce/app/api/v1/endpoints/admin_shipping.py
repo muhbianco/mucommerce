@@ -11,7 +11,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
@@ -46,6 +46,13 @@ class UnmeasuredProduct(BaseModel):
     name: str
 
 
+class OversizedProduct(BaseModel):
+    id: str
+    name: str
+    #: O que estoura, na lingua do lojista ("1,5 m de largura").
+    detail: str
+
+
 class ShippingStatusRead(BaseModel):
     provider: str
     flag_on: bool
@@ -57,6 +64,8 @@ class ShippingStatusRead(BaseModel):
     missing: list[str]
     #: Produtos à venda que não deixam cotar por falta de peso ou medida (no máximo 20).
     unmeasured: list[UnmeasuredProduct] = []
+    #: Produtos medidos, mas acima do que os Correios levam (no máximo 20).
+    oversized: list[OversizedProduct] = []
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
 
@@ -120,6 +129,78 @@ async def _unmeasured(session: AsyncSession, tenant_id: str) -> list[UnmeasuredP
     return [UnmeasuredProduct(id=row[0], name=row[1]) for row in linhas]
 
 
+#: Limite dos Correios para PAC e SEDEX: 1 m por lado, 2 m somados, 30 kg. Jadlog e Azul
+#: aceitam mais, então isto é aviso, não recusa — o que some da tela do cliente é o Correios.
+CORREIOS_LADO_MM = 1000
+CORREIOS_SOMA_MM = 2000
+CORREIOS_PESO_G = 30_000
+
+
+def _oversize_detail(
+    weight: int | None, width: int | None, height: int | None, depth: int | None
+) -> str | None:
+    """Por que este produto nao cabe, dito em metro e quilo em vez de milimetro e grama.
+
+    Nasceu de um cadastro real: o lojista digitou 5000 nos quatro campos, o peso ficou certo
+    (5 kg) e as medidas viraram um cubo de 5 metros. A tela dizia "nenhuma transportadora
+    atende esse endereco", e ele foi conferir o CEP.
+    """
+    lados = {"largura": width or 0, "altura": height or 0, "profundidade": depth or 0}
+    grandes = [
+        f"{nome} de {mm / 1000:.2f} m".replace(".", ",")
+        for nome, mm in lados.items()
+        if mm > CORREIOS_LADO_MM
+    ]
+    if grandes:
+        return ", ".join(grandes)
+    soma = sum(lados.values())
+    if soma > CORREIOS_SOMA_MM:
+        return f"os tres lados somam {soma / 1000:.2f} m".replace(".", ",")
+    if (weight or 0) > CORREIOS_PESO_G:
+        return f"{(weight or 0) / 1000:.1f} kg".replace(".", ",")
+    return None
+
+
+async def _oversized(session: AsyncSession, tenant_id: str) -> list[OversizedProduct]:
+    """Produtos medidos, mas grandes demais para os Correios levarem."""
+    stmt = (
+        select(
+            Product.id,
+            Product.name,
+            Product.weight_grams,
+            Product.width_mm,
+            Product.height_mm,
+            Product.depth_mm,
+        )
+        .where(
+            Product.tenant_id == tenant_id,
+            Product.kind.in_((ProductKind.PHYSICAL, ProductKind.MADE_TO_ORDER)),
+            Product.status == ProductStatus.ACTIVE,
+            Product.archived_at.is_(None),
+            or_(
+                Product.width_mm > CORREIOS_LADO_MM,
+                Product.height_mm > CORREIOS_LADO_MM,
+                Product.depth_mm > CORREIOS_LADO_MM,
+                Product.weight_grams > CORREIOS_PESO_G,
+                (
+                    func.coalesce(Product.width_mm, 0)
+                    + func.coalesce(Product.height_mm, 0)
+                    + func.coalesce(Product.depth_mm, 0)
+                )
+                > CORREIOS_SOMA_MM,
+            ),
+        )
+        .order_by(Product.name)
+        .limit(20)
+    )
+    achados: list[OversizedProduct] = []
+    for row in (await session.execute(stmt)).tuples().all():
+        detalhe = _oversize_detail(row[2], row[3], row[4], row[5])
+        if detalhe:
+            achados.append(OversizedProduct(id=row[0], name=row[1], detail=detalhe))
+    return achados
+
+
 def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
     cfg = fulfillment_settings(tenant.settings).shipping
     provider = registry.get_provider(cfg.provider)
@@ -148,6 +229,7 @@ async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingRe
     token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
     status = _status(tenant, connected=bool(token))
     status.unmeasured = await _unmeasured(session, tenant.id)
+    status.oversized = await _oversized(session, tenant.id)
     return status
 
 

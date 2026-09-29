@@ -284,3 +284,31 @@ def test_frete_gratis_zera_para_o_cliente() -> None:
 def test_modo_desligado_nao_aceita_cotacao() -> None:
     desligada = store({"shipping.fake": True}, {"shipping": {"enabled": False, "provider": "fake"}})
     assert cotar(desligada, escolha()).problems == ("mode_unavailable",)
+
+
+def test_o_motivo_da_recusa_sobrevive_ao_filtro() -> None:
+    """A loja do Silvio: produto cadastrado com 5 m de lado, todas as transportadoras recusam.
+
+    A tela dizia "nenhuma transportadora atende esse endereço", mandando conferir o CEP, quando
+    o Melhor Envio tinha respondido 200 e explicado serviço por serviço que o volume não cabe.
+    Nós descartávamos a explicação junto com a opção.
+    """
+    from app.shipping.provider import ShippingOption
+    from app.shipping.service import _refusals
+
+    recusadas = (
+        ShippingOption("1", "PAC", "Correios", 0, None, error="As dimensões excedem o limite."),
+        ShippingOption("2", "SEDEX", "Correios", 0, None, error="As dimensões excedem o limite."),
+        ShippingOption("3", ".Package", "Jadlog", 0, None, error="Peso acima do permitido"),
+    )
+    # Mesma frase não repete, e o que volta é o texto deles.
+    assert _refusals(recusadas) == ("As dimensões excedem o limite.", "Peso acima do permitido")
+
+    # Quebra de linha e espaço sobrando viram uma frase só; no máximo três motivos.
+    muitas = tuple(
+        ShippingOption(str(i), "S", "C", 0, None, error=f"motivo\n  {i}") for i in range(10)
+    )
+    assert _refusals(muitas) == ("motivo 0", "motivo 1", "motivo 2")
+
+    # Sem erro nenhum (cotação boa) não há o que dizer.
+    assert _refusals((ShippingOption("1", "PAC", "Correios", 1500, 5),)) == ()

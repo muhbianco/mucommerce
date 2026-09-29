@@ -61,6 +61,8 @@ interface ShippingOption {
 interface ShippingQuote {
   options: ShippingOption[];
   problem: string | null;
+  /** O que cada transportadora respondeu ao recusar — texto delas. */
+  refusals?: string[];
 }
 
 interface Cart {
@@ -199,7 +201,7 @@ export default async function CartPage({
       });
     } catch (error) {
       if (!(error instanceof CustomerApiError)) throw error;
-      shippingQuote = { options: [], problem: error.code };
+      shippingQuote = { options: [], problem: error.code, refusals: [] };
     }
   }
 
@@ -462,6 +464,15 @@ export default async function CartPage({
                       {shippingQuote === null ? null : shippingQuote.problem ? (
                         <Notice kind="warn">
                           {SHIPPING_PROBLEM[shippingQuote.problem] ?? "Não foi possível calcular o frete agora."}
+                          {/* O motivo é da transportadora, e costuma ser a resposta inteira:
+                              "as dimensões excedem o limite" manda olhar o produto, não o CEP. */}
+                          {shippingQuote.refusals?.length ? (
+                            <ul>
+                              {shippingQuote.refusals.map((motivo) => (
+                                <li key={motivo}>{motivo}</li>
+                              ))}
+                            </ul>
+                          ) : null}
                         </Notice>
                       ) : shippingQuote.options.length === 0 ? (
                         <Notice kind="warn">{SHIPPING_PROBLEM.no_service}</Notice>

@@ -23,6 +23,7 @@ interface ShippingStatus {
   services: { code: string; name: string; carrier: string; active: boolean }[];
   missing: string[];
   unmeasured: { id: string; name: string }[];
+  oversized: { id: string; name: string; detail: string }[];
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
 }
@@ -123,6 +124,25 @@ export default async function Shipping({
           Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a
           configuração é da equipe da loja — aqui dá para conferir o estado.
         </p>
+      ) : null}
+
+      {status.oversized.length > 0 ? (
+        <Section
+          title="Produtos grandes demais para os Correios"
+          description="PAC e SEDEX levam até 1 m por lado, 2 m somados e 30 kg. Acima disso eles somem da cotação, e sobra pouca ou nenhuma opção para o cliente."
+        >
+          <ul className={styles.steps}>
+            {status.oversized.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link> —{" "}
+                {produto.detail}
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Confira a unidade: o campo é em milímetros, então uma caixa de 30 cm se escreve 300.
+          </p>
+        </Section>
       ) : null}
 
       {status.unmeasured.length > 0 ? (
