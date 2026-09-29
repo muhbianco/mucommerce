@@ -90,6 +90,9 @@ class QuoteOutcome:
     problem: QuoteProblem | None = None
     #: Só em `missing_dimensions`: quais variantes travaram a cotação.
     missing: tuple[str, ...] = ()
+    #: Só em `no_service`: o que cada transportadora respondeu ao recusar. Sem isto, "nenhuma
+    #: atende" manda o cliente conferir o endereço quando o problema é o tamanho do pacote.
+    refusals: tuple[str, ...] = ()
 
 
 class ShippingQuoteService:
@@ -128,7 +131,7 @@ class ShippingQuoteService:
         )
         opcoes = tuple(self._sign(cfg, opcao, carrinho) for opcao in bruto if opcao.usable)
         if not opcoes:
-            return QuoteOutcome(problem="no_service")
+            return QuoteOutcome(problem="no_service", refusals=_refusals(bruto))
         return QuoteOutcome(options=tuple(sorted(opcoes, key=lambda o: o.price_cents)))
 
     # ------------------------------------------------------------------ interno
@@ -307,6 +310,20 @@ def _as_dict(option: ShippingOption) -> dict[str, Any]:
         "delivery_days": option.delivery_days,
         "error": option.error,
     }
+
+
+def _refusals(options: Sequence[ShippingOption]) -> tuple[str, ...]:
+    """O que as transportadoras responderam ao recusar, sem repetir e sem virar parede de texto.
+
+    A recusa costuma ser a resposta inteira ("as dimensões excedem o limite"), e era justamente
+    ela que a gente descartava junto com a opção. Texto de terceiro: entra como dado, cortado.
+    """
+    vistos: list[str] = []
+    for opcao in options:
+        motivo = " ".join((opcao.error or "").split())[:200]
+        if motivo and motivo not in vistos:
+            vistos.append(motivo)
+    return tuple(vistos[:3])
 
 
 def _digits(value: str) -> str:

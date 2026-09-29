@@ -254,6 +254,8 @@ class ShippingOptionsRead(BaseModel):
     options: list[ShippingOptionRead] = []
     #: `None` = deu certo. Senão diz por que não há frete agora, para a tela falar a verdade.
     problem: str | None = None
+    #: O que as transportadoras responderam ao recusar (texto delas, no máximo três).
+    refusals: list[str] = []
 
 
 @router.post(
@@ -280,4 +282,5 @@ async def shipping_options(
     return ShippingOptionsRead(
         options=[ShippingOptionRead(**opcao.as_dict()) for opcao in resultado.options],
         problem=resultado.problem,
+        refusals=list(resultado.refusals),
     )
