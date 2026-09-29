@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.payments.models import PaymentStatus
 from app.payments.provider import (
     ChargeRequest,
@@ -42,6 +43,8 @@ from app.payments.provider import (
     WebhookHint,
     WebhookVerdict,
 )
+
+logger = get_logger(__name__)
 
 MP_ID = re.compile(r"^[0-9]{1,24}$")
 # Pix expiry window accepted by MP: 30 minutes to 30 days from now.
@@ -275,6 +278,13 @@ class MercadoPagoProvider:
                 f"Mercado Pago answered {status}", http_status=status, code="unavailable"
             )
         if status >= 400:
+            # O corpo e o unico lugar onde o provedor diz *por que* recusou. Sem ele sobra o
+            # numero, e 401 nao conta se e token errado, conta sem o produto habilitado ou
+            # credencial de teste em producao. Vai so a resposta deles: token nunca em log.
+            logger.warning(
+                "Mercado Pago recusou",
+                extra={"mp_status": status, "mp_path": path, "mp_body": response.text[:500]},
+            )
             raise ProviderError(
                 str(data.get("message") or f"Mercado Pago refused ({status})")[:200],
                 http_status=status,
