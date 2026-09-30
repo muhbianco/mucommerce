@@ -190,6 +190,19 @@ Devolução por item com estoque proporcional, SMTP do lojista para os e-mails d
 de atendimento num lugar só: o desenho, os cuidados e a ordem estão em
 [11-proximos-passos-loja](11-proximos-passos-loja.md).
 
+## Fechado em 30/09/2026: a loja dentro do assistente pessoal
+
+O assistente pessoal passou a consultar e operar a loja do cliente como caixa fechada — leitura
+responde direto, escrita mostra resumo e espera a confirmação do dono, e a loja sai da conta que
+está falando, nunca de um parâmetro. Desenho, garantias e o que ficou de fora em
+[12-assistente-loja](12-assistente-loja.md).
+
+O relatório visual em PDF entrou junto: os blocos da loja em cima da mesma identidade do
+relatório financeiro, com a LLM escolhendo o que entra e em que ordem.
+
+Ainda em aberto dali: devolução por item e despacho pelo assistente, e insight de precificação —
+este último depende da Fase 4, porque sem custo por item não há margem para comentar.
+
 ## Dependências entre fases
 
 ```mermaid
