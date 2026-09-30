@@ -16,25 +16,39 @@ revisou, além do problema de sempre.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated
+from decimal import Decimal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agent.plans import brl, plan_hash, qty
 from app.api.deps import DbSession, require_internal
-from app.catalog.models import Product, ProductStatus, ProductVariant
-from app.core.exceptions import NotFoundError
+from app.catalog.models import Product, ProductStatus, ProductVariant, VariantStatus
+from app.catalog.service import CatalogService
+from app.core.exceptions import (
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 from app.core.logging import get_logger
-from app.core.scopes import TenantRole, scopes_for_tenant_role
+from app.core.scopes import Scope, scopes_for_tenant_role
 from app.identity.models import AdminUser, AdminUserStatus, TenantMembership
 from app.inventory.models import InventoryBalance
+from app.inventory.schemas import AdjustmentCreate, AdjustmentLine
+from app.inventory.service import InventoryService
 from app.orders.models import Order
 from app.orders.service import OrderService
+from app.orders.state_machine import ActorKind, OrderStatus
+from app.payments.cancellation import cancel_order, dispatch_refunds
 from app.production.models import Supply
 from app.production.service import SupplyService
+from app.schemas.common import StrictModel
 from app.tenancy.context import TenantContext, bind_session_tenant
 from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
@@ -62,15 +76,46 @@ class NoStoreError(NotFoundError):
     message = "Esta conta não administra nenhuma loja."
 
 
-async def _store_of(session: AsyncSession, account_id: str) -> TenantContext:
-    """A loja desta conta MuhBianco.
+class PlanChangedError(ConflictError):
+    """A confirmação não corresponde ao efeito que o resumo mostrou.
+
+    Código próprio porque o assistente reage diferente disto: em vez de pedir desculpa genérica,
+    ele mostra o resumo novo. Serve tanto para a loja que andou quanto para uma confirmação
+    inventada — as duas coisas significam "isto não foi conferido".
+    """
+
+    error_code = "plano_mudou"
+    message = "A loja mudou desde o resumo que você conferiu. Peça o resumo de novo."
+
+
+@dataclass(frozen=True, slots=True)
+class AgentStore:
+    """A loja desta conta e o que esta conta pode fazer nela."""
+
+    context: TenantContext
+    role: str
+    scopes: frozenset[str]
+    #: A conta MuhBianco que está falando. Vai para o histórico: "o assistente fez" sem dizer
+    #: por quem é metade da informação.
+    account_id: str
+
+    def require(self, scope: Scope, what: str) -> None:
+        if str(scope) not in self.scopes:
+            raise PermissionDeniedError(f"Seu acesso a esta loja não {what}.", missing=[str(scope)])
+
+
+async def _store_of(session: AsyncSession, account_id: str) -> AgentStore:
+    """A loja desta conta MuhBianco, com o papel dela.
 
     Passa pela associação (`tenant_memberships`), não pela assinatura: quem manda é quem tem
     acesso à loja hoje. Conta sem loja recebe uma recusa que diz isso — o assistente precisa
     saber a diferença entre "não achei" e "você não tem loja" para falar a verdade ao cliente.
+
+    O papel vem junto porque é ele que decide o que pode ser **oferecido**: um acesso que não
+    cancela pedido não deve ouvir "posso cancelar para você" e falhar depois.
     """
     stmt = (
-        select(TenantMembership.tenant_id)
+        select(TenantMembership.tenant_id, TenantMembership.role)
         .join(AdminUser, AdminUser.id == TenantMembership.admin_user_id)
         .where(
             AdminUser.external_account_id == account_id,
@@ -80,22 +125,28 @@ async def _store_of(session: AsyncSession, account_id: str) -> TenantContext:
         .order_by(TenantMembership.created_at)
         .limit(1)
     )
-    tenant_id = await session.scalar(stmt)
-    if tenant_id is None:
+    row = (await session.execute(stmt)).first()
+    if row is None:
         raise NoStoreError
-    context = await TenantResolver(session).resolve_by_id(str(tenant_id))
+    tenant_id, role = str(row[0]), str(row[1])
+    context = await TenantResolver(session).resolve_by_id(tenant_id)
     bind_session_tenant(session, context.id)
-    return context
+    return AgentStore(
+        context=context,
+        role=role,
+        scopes=frozenset(str(scope) for scope in scopes_for_tenant_role(role)),
+        account_id=account_id,
+    )
 
 
 CurrentStore = Annotated[str, Header(alias="X-Account-Id", min_length=1, max_length=64)]
 
 
-async def store_context(session: DbSession, x_account_id: CurrentStore) -> TenantContext:
+async def store_context(session: DbSession, x_account_id: CurrentStore) -> AgentStore:
     return await _store_of(session, x_account_id)
 
 
-Store = Annotated[TenantContext, Depends(store_context)]
+Store = Annotated[AgentStore, Depends(store_context)]
 
 
 # --------------------------------------------------------------------------------- saída
@@ -109,6 +160,8 @@ class StoreRead(BaseModel):
     timezone: str
     #: O que a loja tem ligado. O assistente usa para não oferecer o que não existe.
     features: dict[str, bool]
+    #: O papel desta conta na loja (owner, ops, ...). Decide o que pode ser oferecido.
+    role: str
 
 
 class OrderRead(BaseModel):
@@ -140,6 +193,16 @@ class OrderDetailRead(OrderRead):
     items: list[OrderItemRead]
 
 
+class VariantRead(BaseModel):
+    id: str
+    sku: str
+    name: str
+    status: str
+    price_cents: int
+    #: Saldo desta variante, em unidades. É o `id` daqui que move estoque.
+    on_hand: float
+
+
 class ProductRead(BaseModel):
     id: str
     name: str
@@ -148,6 +211,23 @@ class ProductRead(BaseModel):
     base_price_cents: int
     #: Saldo somado das variantes, em unidades. `None` quando o produto não controla estoque.
     on_hand: float | None
+    variants: list[VariantRead] = []
+
+
+class ActionRead(BaseModel):
+    """O resumo de uma ação, antes ou depois de acontecer.
+
+    Enquanto `aplicado` é falso **nada foi escrito**: o dono lê o resumo, confere e devolve
+    `confirmacao` para valer. É a regra da etapa H, e é o que separa "o assistente propôs" de
+    "o assistente fez".
+    """
+
+    acao: str
+    aplicado: bool
+    resumo: list[str]
+    avisos: list[str] = []
+    #: A assinatura deste efeito. Presente só enquanto falta confirmar.
+    confirmacao: str | None = None
 
 
 class SupplyRead(BaseModel):
@@ -166,13 +246,15 @@ class SupplyRead(BaseModel):
 
 @router.get("/store", response_model=StoreRead, summary="A loja desta conta")
 async def read_store(store: Store) -> StoreRead:
+    context = store.context
     return StoreRead(
-        tenant_id=store.id,
-        name=store.name,
-        slug=store.slug,
-        currency=store.currency,
-        timezone=store.timezone,
-        features={key: value for key, value in store.features.items() if value},
+        tenant_id=context.id,
+        name=context.name,
+        slug=context.slug,
+        currency=context.currency,
+        timezone=context.timezone,
+        features={key: value for key, value in context.features.items() if value},
+        role=store.role,
     )
 
 
@@ -191,19 +273,16 @@ def _order_read(order: Order, *, next_steps: list[str]) -> OrderRead:
     )
 
 
-#: O assistente fala pelo dono da loja; é o papel dele que decide o que pode ser oferecido.
-OWNER_SCOPES = frozenset(str(scope) for scope in scopes_for_tenant_role(TenantRole.OWNER))
+def _next_steps(service: OrderService, order: Order, store: AgentStore) -> list[str]:
+    """O que **esta conta** pode fazer com este pedido agora.
 
-
-def _next_steps(service: OrderService, order: Order) -> list[str]:
-    """O que o dono poderia fazer com este pedido agora.
-
-    Sai do mesmo lugar que governa o painel, então o assistente nunca oferece um passo que a
-    máquina de estados recusaria depois — prometer e falhar é pior do que não oferecer.
+    Sai do mesmo lugar que governa o painel, e com os escopos do papel real: o assistente nunca
+    oferece um passo que a máquina de estados ou a permissão recusaria depois — prometer e
+    falhar é pior do que não oferecer.
     """
     return [
         target
-        for target in service.allowed_transitions(order, OWNER_SCOPES)
+        for target in service.allowed_transitions(order, store.scopes)
         if target != order.status
     ]
 
@@ -215,18 +294,18 @@ async def list_orders(
     status: Annotated[str | None, Query(max_length=24)] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_ROWS)] = 20,
 ) -> list[OrderRead]:
-    service = OrderService(session, store, Actor.system("agent"))
+    service = OrderService(session, store.context, _actor(store))
     rows = await service.list_for_store(limit=limit, status=status)
-    return [_order_read(order, next_steps=_next_steps(service, order)) for order in rows[:limit]]
+    return [
+        _order_read(order, next_steps=_next_steps(service, order, store)) for order in rows[:limit]
+    ]
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailRead, summary="Um pedido inteiro")
 async def read_order(session: DbSession, store: Store, order_id: str) -> OrderDetailRead:
-    service = OrderService(session, store, Actor.system("agent"))
-    order = await session.scalar(select(Order).where(Order.id == order_id))
-    if order is None:
-        raise NotFoundError("Pedido não encontrado.")
-    base = _order_read(order, next_steps=_next_steps(service, order))
+    service = OrderService(session, store.context, _actor(store))
+    order = await _order(session, order_id)
+    base = _order_read(order, next_steps=_next_steps(service, order, store))
     itens = await service.items(order.id)
     return OrderDetailRead(
         **base.model_dump(),
@@ -262,7 +341,7 @@ async def list_products(
     produtos = list((await session.execute(stmt)).scalars())
     if not produtos:
         return []
-    saldos = await _stock_by_product(session, [p.id for p in produtos])
+    variantes = await _variants_of(session, [p.id for p in produtos])
     return [
         ProductRead(
             id=produto.id,
@@ -270,23 +349,41 @@ async def list_products(
             sku=produto.sku,
             status=produto.status,
             base_price_cents=produto.base_price_cents,
-            on_hand=saldos.get(produto.id),
+            on_hand=(
+                sum(v.on_hand for v in variantes[produto.id]) if produto.id in variantes else None
+            ),
+            variants=variantes.get(produto.id, []),
         )
         for produto in produtos
     ]
 
 
-async def _stock_by_product(session: AsyncSession, product_ids: list[str]) -> dict[str, float]:
-    """Saldo somado das variantes de cada produto, em unidades."""
+async def _variants_of(
+    session: AsyncSession, product_ids: list[str]
+) -> dict[str, list[VariantRead]]:
+    """Variantes vendáveis de cada produto, com saldo. É o `id` delas que move estoque."""
     stmt = (
-        select(ProductVariant.product_id, InventoryBalance.on_hand_milli)
-        .join(InventoryBalance, InventoryBalance.variant_id == ProductVariant.id)
-        .where(ProductVariant.product_id.in_(product_ids))
+        select(ProductVariant, InventoryBalance.on_hand_milli)
+        .outerjoin(InventoryBalance, InventoryBalance.variant_id == ProductVariant.id)
+        .where(
+            ProductVariant.product_id.in_(product_ids),
+            ProductVariant.status != VariantStatus.INACTIVE,
+        )
+        .order_by(ProductVariant.product_id, ProductVariant.position)
     )
-    total: dict[str, float] = {}
-    for product_id, milli in (await session.execute(stmt)).tuples():
-        total[str(product_id)] = total.get(str(product_id), 0.0) + int(milli) / 1000
-    return total
+    out: dict[str, list[VariantRead]] = {}
+    for variant, milli in (await session.execute(stmt)).tuples():
+        out.setdefault(str(variant.product_id), []).append(
+            VariantRead(
+                id=variant.id,
+                sku=variant.sku,
+                name=variant.name,
+                status=variant.status,
+                price_cents=variant.price_cents or 0,
+                on_hand=int(milli or 0) / 1000,
+            )
+        )
+    return out
 
 
 @router.get("/supplies", response_model=list[SupplyRead], summary="Insumos, saldo e custo")
@@ -296,7 +393,7 @@ async def list_supplies(
     only_low: Annotated[bool, Query()] = False,
     limit: Annotated[int, Query(ge=1, le=MAX_ROWS)] = 30,
 ) -> list[SupplyRead]:
-    service = SupplyService(session, store, Actor.system("agent"))
+    service = SupplyService(session, store.context, _actor(store))
     if only_low:
         linhas = (await service.low_stock())[:limit]
     else:
@@ -315,3 +412,302 @@ def _supply_read(supply: Supply) -> SupplyRead:
         unit_cost=supply.avg_cost_micro / 1_000_000 if supply.avg_cost_micro else None,
         low=minimo is not None and supply.on_hand_milli <= minimo,
     )
+
+
+# --------------------------------------------------------------- confirmar antes de fazer
+
+
+def _actor(store: AgentStore) -> Actor:
+    """Quem assina a escrita no histórico: o assistente, pela conta que pediu."""
+    return Actor(id=f"agent:{store.account_id}"[:120])
+
+
+async def _order(session: AsyncSession, order_id: str, *, lock: bool = False) -> Order:
+    stmt = select(Order).where(Order.id == order_id)
+    if lock:
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+    order = await session.scalar(stmt)
+    if order is None:
+        raise NotFoundError("Pedido não encontrado.")
+    return order
+
+
+def _pending(acao: str, efeito: dict[str, Any], resumo: list[str], avisos: list[str]) -> ActionRead:
+    return ActionRead(
+        acao=acao,
+        aplicado=False,
+        resumo=resumo,
+        avisos=avisos,
+        confirmacao=plan_hash(acao, efeito),
+    )
+
+
+def _authorized(acao: str, efeito: dict[str, Any], confirmacao: str | None) -> bool:
+    """Esta confirmação autoriza **este** efeito?
+
+    Confirmação ausente: nada foi autorizado ainda (o chamador devolve o resumo). Confirmação
+    que não bate: a loja mudou entre o resumo e o aceite — recusar é a única resposta honesta,
+    porque o que o dono leu não é mais o que aconteceria.
+    """
+    if confirmacao is None:
+        return False
+    if confirmacao != plan_hash(acao, efeito):
+        raise PlanChangedError
+    return True
+
+
+class ConfirmIn(StrictModel):
+    #: A assinatura devolvida no resumo. Sem ela a rota só planeja.
+    confirmacao: Annotated[str, Field(min_length=8, max_length=64)] | None = None
+
+
+# ----------------------------------------------------------------------- mover pedido
+
+#: Cancelar devolve dinheiro, então não é uma transição comum: tem entrada própria.
+CANCEL = str(OrderStatus.CANCELLED)
+
+
+class AdvanceIn(ConfirmIn):
+    para: OrderStatus
+    motivo: Annotated[str, Field(max_length=200)] | None = None
+    #: Só para cancelamento: devolver os itens à prateleira.
+    repor_estoque: bool = True
+
+
+@router.post(
+    "/orders/{order_id}/advance",
+    response_model=ActionRead,
+    summary="Move o pedido (resumo primeiro, confirmação depois)",
+)
+async def advance_order(
+    session: DbSession, store: Store, order_id: str, body: AdvanceIn
+) -> ActionRead:
+    store.require(Scope.ORDERS_TRANSITION, "movimenta pedidos")
+    service = OrderService(session, store.context, _actor(store))
+    order = await _order(session, order_id, lock=body.confirmacao is not None)
+    destino = str(body.para)
+    if destino not in _next_steps(service, order, store):
+        raise ValidationError(
+            f"Este pedido não pode ir para {destino} agora.",
+            fields=["para"],
+            allowed=_next_steps(service, order, store),
+        )
+    cliente = str((order.customer_snapshot or {}).get("name") or "") or "sem nome"
+    cancelando = destino == CANCEL
+    if cancelando:
+        store.require(Scope.ORDERS_CANCEL, "cancela pedidos")
+
+    efeito: dict[str, Any] = {
+        "pedido": order.id,
+        "de": order.status,
+        "para": destino,
+        "versao": order.version,
+        "repor_estoque": body.repor_estoque if cancelando else None,
+    }
+    resumo = [
+        f"Pedido: #{order.number} — {cliente}",
+        f"Total: {brl(order.total_cents)}",
+        f"Situação hoje: {order.status}",
+        f"Vai para: {destino}",
+    ]
+    avisos: list[str] = []
+    if body.motivo:
+        resumo.append(f"Motivo: {body.motivo}")
+    if cancelando:
+        if order.paid_at is not None:
+            avisos.append(
+                f"Cancelar devolve {brl(order.total_cents)} ao cliente. Isso não se desfaz."
+            )
+        resumo.append(
+            "Estoque: os itens voltam para a prateleira"
+            if body.repor_estoque
+            else "Estoque: os itens NÃO voltam para a prateleira"
+        )
+    acao = "cancelar_pedido" if cancelando else "mover_pedido"
+    if not _authorized(acao, efeito, body.confirmacao):
+        return _pending(acao, efeito, resumo, avisos)
+
+    refunds = []
+    if cancelando:
+        refunds = await cancel_order(
+            session,
+            store.context,
+            _actor(store),
+            order,
+            ActorKind.OPERATOR,
+            reason=body.motivo or "cancelado pelo assistente",
+            scopes=store.scopes,
+            restock=body.repor_estoque,
+        )
+    else:
+        await service.transition(
+            order,
+            destino,
+            reason=body.motivo,
+            scopes=store.scopes,
+            expected_version=order.version,
+        )
+    await session.commit()
+    await dispatch_refunds(session, store.context, refunds)
+    logger.info(
+        "assistente moveu pedido",
+        extra={"tenant_id": store.context.id, "order_id": order.id, "to": destino},
+    )
+    return ActionRead(acao=acao, aplicado=True, resumo=resumo, avisos=avisos)
+
+
+# ---------------------------------------------------------------------- mexer no estoque
+
+#: `entrada` é reposição (compra/produção); `ajuste` corrige o saldo; `perda` é quebra/vencido.
+StockKind = Literal["entrada", "ajuste", "perda"]
+_KIND = {"entrada": "receipt", "ajuste": "adjustment", "perda": "loss"}
+
+
+class StockIn(ConfirmIn):
+    variante_id: Annotated[str, Field(min_length=36, max_length=36)]
+    #: `entrada`/`perda`: quanto (>0). `ajuste`: o quanto somar ou subtrair (≠0).
+    quantidade: Annotated[Decimal, Field(decimal_places=3)]
+    tipo: StockKind = "entrada"
+    motivo: Annotated[str, Field(min_length=1, max_length=200)]
+    #: Só em entrada: custo de compra por unidade, para o histórico de custo.
+    custo_unitario_centavos: Annotated[int, Field(ge=0)] | None = None
+
+
+@router.post(
+    "/stock",
+    response_model=ActionRead,
+    summary="Repõe, ajusta ou baixa estoque (resumo primeiro, confirmação depois)",
+)
+async def move_stock(session: DbSession, store: Store, body: StockIn) -> ActionRead:
+    store.require(Scope.INVENTORY_ADJUST, "mexe no estoque")
+    variant = await session.scalar(
+        select(ProductVariant).where(ProductVariant.id == body.variante_id)
+    )
+    if variant is None:
+        raise NotFoundError("Variante não encontrada.")
+    product = await session.scalar(select(Product).where(Product.id == variant.product_id))
+    balance = await session.scalar(
+        select(InventoryBalance).where(InventoryBalance.variant_id == variant.id)
+    )
+    antes = int(balance.on_hand_milli) if balance is not None else 0
+    quantidade = body.quantidade
+    if body.tipo == "ajuste" and quantidade == 0:
+        raise ValidationError("Ajuste de zero não muda nada.", fields=["quantidade"])
+    if body.tipo != "ajuste" and quantidade <= 0:
+        raise ValidationError("Informe uma quantidade maior que zero.", fields=["quantidade"])
+    delta = int(quantidade * 1000) * (-1 if body.tipo == "perda" else 1)
+    depois = antes + delta
+    if depois < 0:
+        raise ValidationError(
+            f"A loja tem {qty(antes)} em estoque; não dá para baixar {qty(abs(delta))}.",
+            fields=["quantidade"],
+        )
+
+    efeito = {
+        "variante": variant.id,
+        "tipo": body.tipo,
+        "de_milli": antes,
+        "para_milli": depois,
+        "custo": body.custo_unitario_centavos,
+    }
+    resumo = [
+        f"Produto: {product.name if product else variant.name} ({variant.sku})",
+        f"Operação: {body.tipo}",
+        f"Estoque: {qty(antes)} → {qty(depois)}",
+        f"Motivo: {body.motivo}",
+    ]
+    avisos: list[str] = []
+    if body.custo_unitario_centavos is not None:
+        resumo.append(f"Custo por unidade: {brl(body.custo_unitario_centavos)}")
+    if balance is not None and int(balance.reserved_milli) > 0:
+        avisos.append(f"{qty(int(balance.reserved_milli))} estão reservados por pedidos em aberto.")
+    if not _authorized("mexer_estoque", efeito, body.confirmacao):
+        return _pending("mexer_estoque", efeito, resumo, avisos)
+
+    service = InventoryService(session, store.context, _actor(store))
+    await service.adjust(
+        AdjustmentCreate(
+            kind=_KIND[body.tipo],
+            reason=body.motivo,
+            lines=[
+                AdjustmentLine(
+                    variant_id=variant.id,
+                    quantity=abs(quantidade) if body.tipo != "ajuste" else quantidade,
+                    unit_cost_cents=body.custo_unitario_centavos,
+                )
+            ],
+        )
+    )
+    await session.commit()
+    logger.info(
+        "assistente mexeu no estoque",
+        extra={"tenant_id": store.context.id, "variant_id": variant.id, "kind": body.tipo},
+    )
+    return ActionRead(acao="mexer_estoque", aplicado=True, resumo=resumo, avisos=avisos)
+
+
+# ------------------------------------------------------------------ pausar / retomar
+
+
+class PauseIn(ConfirmIn):
+    motivo: Annotated[str, Field(max_length=200)] | None = None
+
+
+@router.post(
+    "/products/{product_id}/pause",
+    response_model=ActionRead,
+    summary="Tira o produto de venda sem apagar nada",
+)
+async def pause_product(
+    session: DbSession, store: Store, product_id: str, body: PauseIn
+) -> ActionRead:
+    return await _pause(session, store, product_id, body, pausar=True)
+
+
+@router.post(
+    "/products/{product_id}/resume",
+    response_model=ActionRead,
+    summary="Devolve o produto para a venda",
+)
+async def resume_product(
+    session: DbSession, store: Store, product_id: str, body: PauseIn
+) -> ActionRead:
+    return await _pause(session, store, product_id, body, pausar=False)
+
+
+async def _pause(
+    session: AsyncSession, store: AgentStore, product_id: str, body: PauseIn, *, pausar: bool
+) -> ActionRead:
+    store.require(Scope.CATALOG_WRITE, "mexe na vitrine")
+    product = await session.scalar(select(Product).where(Product.id == product_id))
+    if product is None:
+        raise NotFoundError("Produto não encontrado.")
+    destino = ProductStatus.PAUSED if pausar else ProductStatus.ACTIVE
+    if product.status == destino:
+        return ActionRead(
+            acao="pausar_produto" if pausar else "retomar_produto",
+            aplicado=True,
+            resumo=[f"Produto: {product.name}", f"Já estava {destino}."],
+        )
+    acao = "pausar_produto" if pausar else "retomar_produto"
+    efeito = {"produto": product.id, "de": product.status, "para": str(destino)}
+    resumo = [
+        f"Produto: {product.name} ({product.sku})",
+        ("Sai da venda (continua visível como indisponível)" if pausar else "Volta para a venda"),
+    ]
+    if body.motivo:
+        resumo.append(f"Motivo: {body.motivo}")
+    if not _authorized(acao, efeito, body.confirmacao):
+        return _pending(acao, efeito, resumo, [])
+
+    service = CatalogService(session, store.context, _actor(store))
+    if pausar:
+        await service.pause_product(product.id, reason=body.motivo)
+    else:
+        await service.resume_product(product.id)
+    await session.commit()
+    logger.info(
+        "assistente mexeu na vitrine",
+        extra={"tenant_id": store.context.id, "product_id": product.id, "acao": acao},
+    )
+    return ActionRead(acao=acao, aplicado=True, resumo=resumo)
