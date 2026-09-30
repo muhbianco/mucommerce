@@ -17,13 +17,13 @@ revisou, além do problema de sempre.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.plans import brl, plan_hash, qty
@@ -42,7 +42,8 @@ from app.identity.models import AdminUser, AdminUserStatus, TenantMembership
 from app.inventory.models import InventoryBalance
 from app.inventory.schemas import AdjustmentCreate, AdjustmentLine
 from app.inventory.service import InventoryService
-from app.orders.models import Order
+from app.models.base import utcnow
+from app.orders.models import Order, OrderItem
 from app.orders.service import OrderService
 from app.orders.state_machine import ActorKind, OrderStatus
 from app.payments.cancellation import cancel_order, dispatch_refunds
@@ -711,3 +712,137 @@ async def _pause(
         extra={"tenant_id": store.context.id, "product_id": product.id, "acao": acao},
     )
     return ActionRead(acao=acao, aplicado=True, resumo=resumo)
+
+
+# ----------------------------------------------------------------- o resumo do período
+
+#: Janela máxima de um resumo. Um ano cabe num relatório; dez anos é varredura de tabela.
+MAX_WINDOW = timedelta(days=366)
+DEFAULT_WINDOW = timedelta(days=30)
+#: Quantos produtos entram no "mais vendidos". Cabe numa página e responde a pergunta.
+TOP_PRODUCTS = 10
+
+
+class SoldProductRead(BaseModel):
+    name: str
+    quantity: float
+    total_cents: int
+
+
+class SummaryRead(BaseModel):
+    """O período em números, tudo somado pela loja e não pelo modelo.
+
+    Existe para o assistente falar de faturamento sem inventar conta: ele não deve somar
+    pedidos numa lista, porque lista tem teto e soma de lista truncada é número errado.
+    """
+
+    de: date
+    ate: date
+    pedidos: int
+    pedidos_pagos: int
+    pedidos_cancelados: int
+    faturado_cents: int
+    ticket_medio_cents: int
+    devolvido_cents: int
+    frete_cents: int
+    desconto_cents: int
+    mais_vendidos: list[SoldProductRead]
+    insumos_em_falta: int
+
+
+def _window(de: date | None, ate: date | None) -> tuple[datetime, datetime, date, date]:
+    """A janela pedida, ou os últimos 30 dias. Invertida ou gigante é recusada, não corrigida."""
+    fim = ate or utcnow().date()
+    inicio = de or (fim - DEFAULT_WINDOW)
+    if inicio > fim:
+        raise ValidationError("A data inicial é depois da final.", fields=["de", "ate"])
+    if fim - inicio > MAX_WINDOW:
+        raise ValidationError("Peça no máximo um ano por vez.", fields=["de", "ate"])
+    return (
+        datetime.combine(inicio, time.min, tzinfo=UTC),
+        datetime.combine(fim, time.max, tzinfo=UTC),
+        inicio,
+        fim,
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=SummaryRead,
+    summary="O período em números (faturamento, pedidos, mais vendidos)",
+)
+async def read_summary(
+    session: DbSession,
+    store: Store,
+    de: Annotated[date | None, Query()] = None,
+    ate: Annotated[date | None, Query()] = None,
+) -> SummaryRead:
+    comeco, termino, dia_inicio, dia_fim = _window(de, ate)
+    janela = (Order.placed_at >= comeco, Order.placed_at <= termino)
+    pago = Order.paid_at.is_not(None)
+
+    totais = (
+        await session.execute(
+            select(
+                func.count(Order.id),
+                func.sum(case((pago, 1), else_=0)),
+                func.sum(case((Order.status == OrderStatus.CANCELLED, 1), else_=0)),
+                func.sum(case((pago, Order.total_cents), else_=0)),
+                func.sum(case((pago, Order.delivery_fee_cents), else_=0)),
+                func.sum(case((pago, Order.discount_cents), else_=0)),
+                func.sum(Order.refunded_cents),
+            ).where(*janela)
+        )
+    ).one()
+    pedidos = int(totais[0] or 0)
+    pagos = int(totais[1] or 0)
+    faturado = int(totais[3] or 0)
+
+    vendidos = (
+        await session.execute(
+            select(
+                OrderItem.product_name,
+                func.sum(OrderItem.quantity_milli),
+                func.sum(OrderItem.total_cents),
+            )
+            .join(Order, Order.id == OrderItem.order_id)
+            .where(*janela, pago)
+            .group_by(OrderItem.product_name)
+            .order_by(func.sum(OrderItem.total_cents).desc())
+            .limit(TOP_PRODUCTS)
+        )
+    ).all()
+
+    em_falta = int(
+        await session.scalar(
+            select(func.count(Supply.id)).where(
+                Supply.active.is_(True),
+                Supply.min_level_milli.is_not(None),
+                Supply.on_hand_milli <= Supply.min_level_milli,
+            )
+        )
+        or 0
+    )
+
+    return SummaryRead(
+        de=dia_inicio,
+        ate=dia_fim,
+        pedidos=pedidos,
+        pedidos_pagos=pagos,
+        pedidos_cancelados=int(totais[2] or 0),
+        faturado_cents=faturado,
+        # Ticket médio sobre pedidos pagos: dividir pelo total incluiria quem nunca pagou.
+        ticket_medio_cents=(faturado // pagos if pagos else 0),
+        devolvido_cents=int(totais[6] or 0),
+        frete_cents=int(totais[4] or 0),
+        desconto_cents=int(totais[5] or 0),
+        mais_vendidos=[
+            SoldProductRead(
+                name=str(nome),
+                quantity=int(milli or 0) / 1000,
+                total_cents=int(cents or 0),
+            )
+            for nome, milli, cents in vendidos
+        ],
+        insumos_em_falta=em_falta,
+    )
