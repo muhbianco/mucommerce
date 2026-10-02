@@ -558,6 +558,61 @@
   color: var(--brand-on-primary);
 }
 
+/* Filtro longo atrás de um clique: fechado custa uma linha, aberto é a lista de sempre. */
+.folded {
+  margin: 0 0 1.25rem;
+}
+
+.folded .chips {
+  margin: 0.75rem 0 0;
+}
+
+.storefront .foldedSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--store-radius-pill);
+  border: 1px solid var(--store-line);
+  background: var(--store-surface);
+  color: var(--store-ink-soft);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  /* Sem isto o triângulo do navegador aparece junto do nosso. */
+  list-style: none;
+}
+
+.storefront .foldedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.storefront .foldedSummary::after {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.15rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.storefront .folded[open] > .foldedSummary::after {
+  transform: translateY(1px) rotate(-135deg);
+}
+
+.storefront .foldedSummary:hover {
+  border-color: var(--store-ink);
+  color: var(--store-ink);
+}
+
+.foldedCount {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--store-muted);
+}
+
 .breadcrumb {
   font-size: 0.85rem;
   color: var(--store-muted);

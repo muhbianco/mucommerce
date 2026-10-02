@@ -300,6 +300,38 @@ export function Chips({ children, label }: { children: ReactNode; label: string 
   );
 }
 
+/**
+ * Chips atrás de um clique, para filtro que é longo e não é o que a pessoa veio ver.
+ *
+ * Uma loja com 19 tags empurrava o primeiro produto para fora da tela no celular: oito linhas
+ * de etiqueta antes da primeira foto. `details` nativo resolve sem JavaScript e sem quebrar
+ * quem está sem ele — e abre sozinho quando há filtro ligado, senão a pessoa não vê o que
+ * está filtrando nem como desligar.
+ */
+export function FoldedChips({
+  children,
+  label,
+  count,
+  open = false,
+}: {
+  children: ReactNode;
+  label: string;
+  count: number;
+  open?: boolean;
+}) {
+  return (
+    <details className={styles.folded} open={open}>
+      <summary className={styles.foldedSummary}>
+        {label}
+        <span className={styles.foldedCount}>{count}</span>
+      </summary>
+      <nav className={styles.chips} aria-label={label}>
+        {children}
+      </nav>
+    </details>
+  );
+}
+
 export function Chip({
   href,
   children,

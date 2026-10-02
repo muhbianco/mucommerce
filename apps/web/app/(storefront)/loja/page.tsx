@@ -5,12 +5,12 @@ import { notFound } from "next/navigation";
 import { getStorefrontContext } from "@/lib/server-context";
 import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
-import { type CategoryRef, isIndexable, type ProductPage, storeOrigin, type TagRef } from "@/lib/storefront";
+import { isIndexable, type ProductPage, storeOrigin, type TagRef } from "@/lib/storefront";
 
 import { ProductCard } from "../_store/product-card";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
-import { Chip, Chips, EmptyState, Grid, PageHead } from "../_store/ui";
+import { Chip, EmptyState, FoldedChips, Grid, PageHead } from "../_store/ui";
 
 export async function generateMetadata({
   searchParams,
@@ -40,18 +40,17 @@ export default async function Store({
   const { q, cursor, tag } = await searchParams;
   const query = q && q.trim().length >= 2 ? q.trim().slice(0, 100) : undefined;
   const selectedTag = tag ? tag.slice(0, 80) : undefined;
-  const [products, categories, tags] = await Promise.all([
+  // Categorias não entram aqui: quem as desenha é a faixa do StoreShell, que já as busca.
+  const [products, tags] = await Promise.all([
     storefrontApi<ProductPage>(context, "/catalog/products", {
       q: query,
       tag: selectedTag,
       cursor: cursor?.slice(0, 256),
       limit: "24",
     }),
-    storefrontApi<CategoryRef[]>(context, "/catalog/categories"),
     storefrontApi<TagRef[]>(context, "/catalog/tags"),
   ]);
   const page = requireCatalog(products, "/loja");
-  const roots = categories.kind === "ok" ? categories.data.filter((c) => !c.parent_id) : [];
   const tagList = tags.kind === "ok" ? tags.data : [];
   const next = new URLSearchParams();
   if (query) next.set("q", query);
@@ -64,18 +63,12 @@ export default async function Store({
         title={query ? `Resultados para "${query}"` : "Produtos"}
         lead={query || selectedTag ? `${page.items.length} ${page.items.length === 1 ? "item" : "itens"}` : undefined}
       />
-      {/* A busca mora no cabeçalho, em toda página. Repetir aqui daria duas caixas iguais. */}
-      {roots.length ? (
-        <Chips label="Categorias">
-          {roots.map((category) => (
-            <Chip key={category.id} href={`/loja/categoria/${category.slug}`}>
-              {category.name}
-            </Chip>
-          ))}
-        </Chips>
-      ) : null}
+      {/* Busca e categorias moram no cabeçalho, em toda página: repetir aqui era uma caixa
+          igual e uma fileira igual à faixa logo acima. O filtro por tag fica, mas dobrado —
+          numa loja com 19 etiquetas ele empurrava o primeiro produto para fora da tela do
+          celular. */}
       {tagList.length ? (
-        <Chips label="Filtrar por tag">
+        <FoldedChips label="Filtrar por tag" count={tagList.length} open={Boolean(selectedTag)}>
           {tagList.map((item) => (
             <Chip
               key={item.slug}
@@ -85,7 +78,7 @@ export default async function Store({
               {item.name}
             </Chip>
           ))}
-        </Chips>
+        </FoldedChips>
       ) : null}
       {page.items.length === 0 ? (
         <EmptyState
