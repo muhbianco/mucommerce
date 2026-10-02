@@ -29,7 +29,9 @@ import styles from "../../../_store/store.module.css";
 import {
   AvailabilityPill,
   Breadcrumb,
+  Chip,
   DiscountBadge,
+  FoldedChips,
   Installments,
   LowStockPill,
   Notice,
@@ -227,20 +229,24 @@ export default async function ProductPage({
             <div className={styles.description}>{product.description_md}</div>
           </Section>
         ) : null}
-        {product.tags.length ? (
-          <nav className={styles.chips} aria-label="Etiquetas">
-            {product.tags.map((tag) => (
-              <Link key={tag.slug} href={`/loja?tag=${encodeURIComponent(tag.slug)}`} className={styles.chip}>
-                {tag.name}
-              </Link>
-            ))}
-          </nav>
-        ) : null}
       </Split>
 
       <Suspense fallback={null}>
         <RelatedProducts context={context} category={category ?? null} excludeId={product.id} />
       </Suspense>
+
+      {/* No fim da página, e dobrada. Etiqueta é navegação, não é o que a pessoa veio ver: no
+          celular a coluna do texto vem antes da lateral, então 19 etiquetas ficavam entre a
+          foto e o preço — o cliente rolava a tela inteira para achar o botão de comprar. */}
+      {product.tags.length ? (
+        <FoldedChips label="Etiquetas" count={product.tags.length}>
+          {product.tags.map((tag) => (
+            <Chip key={tag.slug} href={`/loja?tag=${encodeURIComponent(tag.slug)}`}>
+              {tag.name}
+            </Chip>
+          ))}
+        </FoldedChips>
+      ) : null}
     </StoreShell>
   );
 }
