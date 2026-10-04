@@ -93,9 +93,10 @@ def item(
 def unico(
     classes: Sequence[ItemClass], packages: Sequence[PackageSpec] = TODAS, **kw: int
 ) -> ParcelPlan:
+    """O plano da estratégia `consolidate` (sempre a primeira, sem top-K)."""
     resultado = plan_candidates(classes, packages, PackingRules(**kw))
     assert resultado.problem is None, resultado
-    assert len(resultado.candidates) == 1
+    assert resultado.candidates[0].strategy == "consolidate"
     return resultado.candidates[0]
 
 
@@ -148,7 +149,7 @@ def test_a_sobra_em_guilhotina_aproveita_o_espaco() -> None:
 def test_peso_limita_a_capacidade() -> None:
     leve = caixa("L", Dims(400, 300, 200), tare=500, max_g=3000)
     pesado = item("tijolo", Dims(100, 100, 50), 1000, 1, allowed=["L"])
-    assert unit_capacity(pesado, leve, 0) == 2  # 2,5 kg úteis
+    assert unit_capacity(pesado, leve, PackingRules()) == 2  # 2,5 kg úteis
 
 
 def test_este_lado_para_cima_nao_deita() -> None:
@@ -156,13 +157,15 @@ def test_este_lado_para_cima_nao_deita() -> None:
     alto = Dims(100, 100, 200)
     deita = item("vaso", alto, 300, 1, allowed=["B"])
     de_pe = item("vaso", alto, 300, 1, allowed=["B"], rotation=Rotation.UPRIGHT)
-    assert unit_capacity(deita, baixa, 0) >= 1
-    assert unit_capacity(de_pe, baixa, 0) == 0
+    assert unit_capacity(deita, baixa, PackingRules()) >= 1
+    assert unit_capacity(de_pe, baixa, PackingRules()) == 0
 
 
 def test_folga_tira_espaco() -> None:
     rab = item("rab", RABIOLA, 150, 1)
-    assert unit_capacity(rab, M, 10) < unit_capacity(rab, M, 0)
+    assert unit_capacity(rab, M, PackingRules(padding_mm=10)) < unit_capacity(
+        rab, M, PackingRules()
+    )
 
 
 # ----------------------------------------------------------------------------- planos
@@ -298,3 +301,145 @@ def test_hash_estavel_e_sensivel(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(canonical, "ENGINE_VERSION", "pack-test")
     assert plan_hash(base.parcels) != base.hash, "mudou o motor, vence a cotação"
+
+
+# ----------------------------------------------------------------------------- F2b: flexível
+
+
+def flexivel(
+    units: int, *, declared: dict[str, int] | None = None, allowed: Sequence[str] = ("P", "M", "G")
+) -> ItemClass:
+    base = item("rab", RABIOLA, 150, units, allowed=allowed, declared=declared)
+    return ItemClass(**{**{f: getattr(base, f) for f in base.__slots__}, "flexible": True})
+
+
+def test_flexivel_sem_declaracao_aproveita_o_volume() -> None:
+    """Rabiola larga demais para a grade (2 cabem duras) mas que amassa: o volume manda."""
+    caixa_baixa = caixa("B", Dims(200, 200, 100))
+    dura = item("rab", Dims(110, 110, 50), 100, 1, allowed=["B"])
+    mole = ItemClass(**{**{f: getattr(dura, f) for f in dura.__slots__}, "flexible": True})
+    assert unit_capacity(dura, caixa_baixa, PackingRules()) == 2
+    # 4 L x 85% / 0,605 L = 5
+    assert unit_capacity(mole, caixa_baixa, PackingRules()) == 5
+
+
+def test_declarada_no_flexivel_tem_prioridade_e_trava_em_200() -> None:
+    assert unit_capacity(flexivel(1, declared={"M": 25}), M, PackingRules()) == 25
+    # "cabem 50" passaria de 200% (278%): o motor prende em 36 (= 2 x 9 L / 0,5 L), mesmo que
+    # a declaração tenha entrado antes de a embalagem encolher.
+    assert unit_capacity(flexivel(1, declared={"M": 50}), M, PackingRules()) == 36
+    rigida = item("rab", RABIOLA, 150, 1, declared={"M": 25})
+    assert unit_capacity(rigida, M, PackingRules()) == 18, "rígido: a declaração só reduz"
+
+
+def test_vinte_e_cinco_rabiolas_flexiveis_numa_m_marcada_como_declarada() -> None:
+    classes = [flexivel(25, declared={"M": 25}, allowed=["M"])]
+    plano = unico(classes)
+    assert [v.package_id for v in plano.parcels] == ["M"]
+    assert plano.parcels[0].declared, "o pedido mostra o selo de capacidade declarada"
+    assert plano.parcels[0].layout == (), "flexível não tem posição, tem volume"
+
+
+def test_flexivel_preenche_o_que_sobrou_no_misturado() -> None:
+    classes = [
+        item("carretel", Dims(80, 80, 80), 300, 1),
+        ItemClass(**{**{f: getattr(flexivel(6), f) for f in flexivel(6).__slots__}}),
+    ]
+    plano = unico(classes)
+    assert len(plano.parcels) == 1
+    volume = plano.parcels[0]
+    rigidos = [p for p in volume.layout if p.key == "carretel"]
+    assert len(rigidos) == 1 and len(volume.layout) == 1, "só o rígido tem posição"
+
+
+# ----------------------------------------------------------------------------- F2b: tubo
+
+
+TUBO = caixa("T", Dims(650, 80, 80), kind=PackageKind.TUBE, position=4)
+
+
+def test_tubo_recebe_pecas_em_fila_pelo_eixo() -> None:
+    poster = item("poster", Dims(300, 50, 50), 100, 1, allowed=["T"])
+    assert unit_capacity(poster, TUBO, PackingRules()) == 2  # 650 // 300; seção 50²+50² ≤ 80²
+    de_pe = item("vaso", Dims(300, 50, 50), 100, 1, allowed=["T"], rotation=Rotation.UPRIGHT)
+    assert unit_capacity(de_pe, TUBO, PackingRules()) == 0, "só vai em tubo o que pode deitar"
+    grosso = item("rolo", Dims(300, 70, 70), 100, 1, allowed=["T"])
+    assert unit_capacity(grosso, TUBO, PackingRules()) == 0, "70²+70² > 80²: não passa no círculo"
+
+
+def test_quem_so_aceita_tubo_vai_no_tubo_mesmo_num_carrinho_misturado() -> None:
+    classes = [
+        item("poster", Dims(300, 50, 50), 100, 3, allowed=["T"]),
+        item("rab", RABIOLA, 150, 2),
+    ]
+    plano = unico(classes, (*TODAS, TUBO))
+    tubos = [v for v in plano.parcels if v.package_id == "T"]
+    assert sum(v.units for v in tubos) == 3
+    assert all(not v.oversize for v in plano.parcels)
+    por_chave = {c.key: c for c in classes}
+    for v in tubos:
+        assert verify_placement(TUBO.space(0), v.layout, por_chave, PackageKind.TUBE)
+
+
+# ----------------------------------------------------------------------------- F2b: estratégias
+
+
+GIGANTE = caixa("XG", Dims(1200, 600, 400), tare=1500, max_g=60_000, position=5)
+
+
+def test_correios_fit_fica_dentro_do_limite_dos_correios() -> None:
+    classes = [item("caixote", Dims(200, 200, 200), 2000, 6, allowed=["XG", "G"])]
+    resultado = plan_candidates(classes, (*TODAS, GIGANTE), PackingRules())
+    por_estrategia = {p.strategy: p for p in resultado.candidates}
+    assert [v.package_id for v in por_estrategia["consolidate"].parcels] == ["XG"]
+    correios = por_estrategia["correios_fit"]
+    assert all(v.package_id == "G" for v in correios.parcels), "a XG passa de 1 m por lado"
+    assert all(v.gross_g <= 30_000 for v in correios.parcels)
+
+
+def test_cubagem_gratis_so_com_embalagem_de_ate_30_litros() -> None:
+    so_grandes = plan_candidates(
+        [item("rab", RABIOLA, 150, 4, allowed=["XG"])], (GIGANTE,), PackingRules()
+    )
+    assert {s.strategy: s.reason for s in so_grandes.stats}["cubic_free"] == "no_package"
+    com_p = plan_candidates([item("rab", RABIOLA, 150, 4)], TODAS, PackingRules())
+    assert "cubic_free" in {s.strategy for s in com_p.stats if s.reason != "no_package"}
+
+
+def test_por_produto_separa_os_produtos() -> None:
+    classes = [
+        item("rab", RABIOLA, 150, 2, product="p1"),
+        item("pipa", Dims(200, 150, 20), 80, 2, product="p2"),
+    ]
+    resultado = plan_candidates(classes, TODAS, PackingRules())
+    stats = {s.strategy: s for s in resultado.stats}
+    assert stats["per_product"].parcels == 2
+    por_produto = next((p for p in resultado.candidates if p.strategy == "per_product"), None)
+    if por_produto is not None:  # some se repetir o plano de outra estratégia (mesmo hash)
+        assert all(len(v.contents) == 1 for v in por_produto.parcels)
+
+
+def test_top_k_e_deterministico_e_limitado() -> None:
+    classes = [
+        item("caixote", Dims(200, 200, 200), 2000, 6, allowed=["XG", "G"]),
+        item("rab", RABIOLA, 150, 5),
+    ]
+    pacotes = (*TODAS, GIGANTE)
+    primeiro = plan_candidates(classes, pacotes, PackingRules(), top_k=2)
+    segundo = plan_candidates(
+        list(reversed(classes)), tuple(reversed(pacotes)), PackingRules(), top_k=2
+    )
+    assert 1 <= len(primeiro.candidates) <= 2
+    assert [p.hash for p in primeiro.candidates] == [p.hash for p in segundo.candidates]
+    todos = plan_candidates(classes, pacotes, PackingRules())
+    assert {p.hash for p in primeiro.candidates} <= {p.hash for p in todos.candidates}
+
+
+def test_estimativa_dos_correios() -> None:
+    from app.shipping.packing.scoring import CORREIOS, JADLOG_PACKAGE, billable_g, parcel_cost
+
+    # 30 x 20 x 15 cm = 9 L -> 1,5 kg cúbico: até 5 kg, os Correios cobram o peso real.
+    assert billable_g(600, Dims(300, 200, 150), CORREIOS) == 600
+    assert billable_g(600, Dims(300, 200, 150), JADLOG_PACKAGE) == 2701  # divisor 3333
+    assert parcel_cost(31_000, Dims(300, 200, 150), 0, CORREIOS) is None, "acima de 30 kg"
+    assert parcel_cost(1000, Dims(1100, 200, 150), 0, CORREIOS) is None, "lado acima de 1 m"

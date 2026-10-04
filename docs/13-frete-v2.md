@@ -698,19 +698,22 @@ Dependências:
 | F0 | feito (branch `frete-v2`) | divmod/ceil no vendido a peso, linhas não físicas fora, serviços na chave do cache, barra de frete grátis pós-cupom |
 | F1 | feito (branch `frete-v2`) | 0035–0037, `shipping_packages`, `product_package_rules`, medidas por variação, API de embalagens, regra forte do `max_units` |
 | F2a | feito (branch `frete-v2`) | núcleo do motor: grade com guilhotina, extreme points, verify, consolidate + encolher, degradado, hash; fuzz 5000 sementes verde |
-| F2b | a fazer | flexível + declarada com prioridade, tubo, estratégias extras, estimativa e top‑K |
+| F2b | feito (branch `frete-v2`) | flexível (volume, não posição) e declarada com prioridade presa a 200%, tubo (fila pelo eixo), `correios_fit`, `cubic_free`, `per_product`, estimativa local e top‑K; first-fit reaproveitado entre estratégias |
 | F2.5 | aguardando o dono | conta sandbox do Melhor Envio + token fora do repo (ver §10) |
 
-Benchmark do núcleo (`python -m scripts.bench_packing 3000`, máquina de dev, 04/10/2026):
+Benchmark do motor com as quatro estratégias (`python -m scripts.bench_packing 3000`, máquina de
+dev, 04/10/2026):
 
 | Perfil | p50 | p95 | p99 | máx |
 |---|---|---|---|---|
-| comum (fuzz) | 0,18 ms | 0,53 ms | 0,75 ms | 1,1 ms |
-| miúdo (peças pequenas em quantidade) | 0,37 ms | 2,0 ms | 3,4 ms | 7,1 ms |
-| grande (30 embalagens, 120 unidades misturadas) | 73 ms | 74 ms | 76 ms | 75 ms |
+| comum (fuzz) | 0,48 ms | 1,7 ms | 2,4 ms | 4,0 ms |
+| miúdo (peças pequenas em quantidade) | 1,2 ms | 5,2 ms | 7,9 ms | 14 ms |
+| grande (30 embalagens, 120 unidades misturadas) | 133 ms | 138 ms | 142 ms | 141 ms |
 
-O caso grande consolida em 2 volumes sem degradar (orçamento de 500 mil checagens; encolher
-tem orçamento próprio de 200 mil e, estourado, só para de encolher).
+O caso grande é o extremo sintético e consolida em 2 volumes sem degradar. O encolher tem
+orçamento próprio de 200 mil checagens (baixar para 80 mil economiza ~20 ms e deixa o volume do
+caso grande em 225 L em vez de 125 L — não compensa); tentar caixas da maior para a menor ficou
+pior em tempo e em volume. O motor roda em `asyncio.to_thread` na cotação.
 
 ---
 

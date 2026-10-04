@@ -132,6 +132,17 @@ def derived_outer(inner: Dims, kind: PackageKind) -> Dims:
     return Dims(inner.length + parede, inner.width + parede, inner.height + parede)
 
 
+def declared_effective(units: int, unit: Dims, inner: Dims) -> int:
+    """A declaração do flexível presa à trava de compressão: N x volume ≤ 200% do interno.
+
+    O motor aplica isto em toda cotação, mesmo que a API já tenha validado: uma embalagem
+    encolhida depois deixaria a declaração antiga acima do limite, e o motor nunca confia nela.
+    """
+    if unit.volume <= 0:
+        return 0
+    return max(0, min(units, MAX_DECLARED_PERCENT * inner.volume // (100 * unit.volume)))
+
+
 def declared_percent(*, units: int, unit: Dims, inner: Dims) -> int:
     """Quanto N unidades declaradas ocupam do volume interno, em %, arredondado para cima."""
     if inner.volume <= 0:
@@ -215,9 +226,16 @@ class ItemClass:
     #: Capacidade declarada por embalagem (`product_package_rules.max_units`).
     declared: Mapping[str, int] = field(default_factory=dict)
 
-    def sort_key(self) -> tuple[int, int, int, str]:
-        """Maiores primeiro (first-fit decreasing); empate pela chave, para ser determinístico."""
-        return (-self.dims.volume, -max(self.dims.sorted_desc()), -self.weight_g, self.key)
+    def sort_key(self) -> tuple[int, int, int, int, str]:
+        """Rígidos primeiro, maiores primeiro (first-fit decreasing); flexíveis depois, porque
+        ocupam volume e não posição — preenchem o que sobrou. Empate pela chave."""
+        return (
+            1 if self.flexible else 0,
+            -self.dims.volume,
+            -max(self.dims.sorted_desc()),
+            -self.weight_g,
+            self.key,
+        )
 
 
 @dataclass(frozen=True, slots=True)
