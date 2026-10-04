@@ -67,6 +67,7 @@ def snapshot(
                 "kind": volume.kind,
                 "own": volume.own,
                 "oversize": volume.oversize,
+                "custom": volume.custom,
                 "declared": volume.declared,
                 "outer_mm": [volume.outer.length, volume.outer.width, volume.outer.height],
                 "inner_mm": (
@@ -101,6 +102,39 @@ def snapshot(
         "degraded": plan.degraded,
         "parcels": volumes,
     }
+
+
+class MissingDimensions(ValueError):
+    """Item sem peso ou sem as três medidas: não dá para montar os volumes, e chutar sai caro.
+
+    Carrega quais variantes travaram, para a tela dizer o que falta em vez de "erro".
+    """
+
+    def __init__(self, message: str, variants: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.variants = variants
+
+
+async def current_parcels(
+    session: AsyncSession, tenant: TenantContext, lines: Sequence[LineIn], *, now: Any
+) -> tuple[Parcel, ...]:
+    """Pedido sem plano congelado (de antes do frete v2): o plano com os dados de hoje.
+
+    É a rede de segurança do despacho e da prévia; pedido feito pelo checkout atual sempre tem
+    `parcel_plan`. Sai a primeira combinação da estimativa local (a mesma régua da cotação).
+    """
+    cfg = fulfillment_settings(tenant.settings).shipping
+    entradas = await load_packing_inputs(session, lines, cfg.packing, now=now)
+    if entradas.missing:
+        raise MissingDimensions("variantes sem medida", entradas.missing)
+    if not entradas.classes:
+        return ()
+    candidatos = await asyncio.to_thread(
+        plan_candidates, entradas.classes, entradas.packages, entradas.rules, top_k=1
+    )
+    if not candidatos.candidates:
+        return ()
+    return tuple(to_parcel(v) for v in candidatos.candidates[0].parcels)
 
 
 def parcels_from_snapshot(snap: dict[str, Any]) -> tuple[Parcel, ...]:
@@ -138,7 +172,8 @@ async def resolve_frozen_plan(
         return None
     cfg = fulfillment_settings(tenant.settings).shipping.packing
     entradas = await load_packing_inputs(session, lines, cfg, now=now)
-    if entradas.missing or not entradas.classes or not entradas.packages:
+    # Sem embalagem cadastrada o plano é de caixa sob medida: reconstrói do mesmo jeito.
+    if entradas.missing or not entradas.classes:
         return None
     candidatos = await asyncio.to_thread(
         plan_candidates, entradas.classes, entradas.packages, entradas.rules

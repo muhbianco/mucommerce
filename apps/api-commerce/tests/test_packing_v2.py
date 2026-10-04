@@ -219,11 +219,16 @@ def test_restrito_respeita_a_lista() -> None:
     assert [v.package_id for v in plano.parcels] == ["G"]
 
 
-def test_maior_que_toda_embalagem_viaja_sozinho() -> None:
+def test_maior_que_toda_embalagem_ganha_caixa_sob_medida_so_dela() -> None:
+    """1,5 m passa de toda embalagem e do limite dos Correios: cada unidade numa caixa sob
+    medida do tamanho dela (a Jadlog leva; os Correios recusam na cotação, com o motivo)."""
     classes = [item("bicicleta", Dims(1500, 800, 300), 12000, 2)]
     plano = unico(classes)
     assert len(plano.parcels) == 2
-    assert all(v.oversize and v.package_id is None for v in plano.parcels)
+    for volume in plano.parcels:
+        assert volume.custom and volume.package_id is None and not volume.oversize
+        assert volume.inner is not None and volume.inner.sorted_desc() == (1500, 800, 300)
+        assert volume.outer.sorted_desc() == (1508, 808, 308)  # parede de 4 mm por lado
 
 
 def test_declarada_no_rigido_so_reduz() -> None:

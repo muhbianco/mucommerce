@@ -35,7 +35,7 @@ export default async function PackageDetail({
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   const scopes = tenantScopes(me, context.tenant_id);
   const f = context.features;
-  if (!f.checkout || !f["shipping.packing_v2"] || !scopes.can("catalog:read")) notFound();
+  if (!f.checkout || !scopes.can("catalog:read")) notFound();
   if (!/^[0-9a-f-]{36}$/.test(packageId)) notFound();
   const path = `/admin/tenants/${context.tenant_id}/shipping`;
   let pkg: ShippingPackage;

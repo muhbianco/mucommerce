@@ -36,6 +36,7 @@ export function PackingList({ plan, orderNumber }: { plan: FrozenPlan; orderNumb
                     .join(" · ")}
                 </span>
                 <span className={local.parcelBadges}>
+                  {volume.custom ? <Pill state="info">caixa sob medida</Pill> : null}
                   {volume.own ? <Pill state="info">vai na embalagem dele</Pill> : null}
                   {volume.oversize ? <Pill state="warn">maior que suas embalagens</Pill> : null}
                   {volume.declared ? <Pill state="info">capacidade declarada pela loja</Pill> : null}
@@ -70,6 +71,8 @@ function embalagem(name: string, kind: string, own: boolean): string {
 }
 
 function dica(volume: FrozenPlan["parcels"][number]): string {
+  if (volume.custom && volume.inner_mm)
+    return `Monte ou corte a caixa com ${dimsLabel(volume.inner_mm)} por dentro: a etiqueta foi cotada com essa medida.`;
   if (volume.own) return "Cole a etiqueta direto na embalagem do produto.";
   if (volume.oversize) return "Não coube em nenhuma embalagem sua: vai sozinho, com a medida dele.";
   if (volume.declared)

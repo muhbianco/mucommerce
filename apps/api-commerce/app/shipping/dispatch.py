@@ -38,9 +38,9 @@ from app.shipping.declaration import (
     order_declaration,
     parcel_declarations,
 )
+from app.shipping.inputs import LineIn
 from app.shipping.models import OrderShipment, ShipmentStatus
-from app.shipping.packing import MissingDimensions
-from app.shipping.plan import parcels_from_snapshot
+from app.shipping.plan import MissingDimensions, current_parcels, parcels_from_snapshot
 from app.shipping.provider import (
     DeclaredItem,
     InsufficientBalanceError,
@@ -50,7 +50,7 @@ from app.shipping.provider import (
     ShippingParty,
     ShippingProviderError,
 )
-from app.shipping.service import QuoteLine, ShippingQuoteService, customer_price, parcels_for
+from app.shipping.service import ShippingQuoteService, customer_price
 from app.tenancy.context import TenantContext
 from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import ShippingOrigin, ShippingSettings, fulfillment_settings
@@ -187,7 +187,7 @@ class ShipmentService:
         else:
             etiquetas = 1
             try:
-                volumes = await self._legacy_parcels(order, cfg)
+                volumes = await self._current_parcels(order)
             except ValidationError:
                 return ShipmentPreview(etiquetas, cobrado, problem="missing_dimensions")
         destino = str((escolhido.get("address") or {}).get("postal_code") or "")
@@ -361,7 +361,7 @@ class ShipmentService:
             # com a medida de hoje. Vale com a flag ligada ou não (desligar não muda pedido feito).
             volumes = parcels_from_snapshot(congelado)
         else:
-            volumes = await self._legacy_parcels(order, cfg)
+            volumes = await self._current_parcels(order)
         if not volumes:
             raise ValidationError("Pedido sem volume para enviar.")
         novos = [
@@ -418,14 +418,15 @@ class ShipmentService:
             await self._order_lines(order.id), congelado.get("parcels") or []
         )
 
-    async def _legacy_parcels(self, order: Order, cfg: ShippingSettings) -> tuple[Parcel, ...]:
-        """Pedido do motor v1 (sem plano congelado): recalcula como sempre fez."""
+    async def _current_parcels(self, order: Order) -> tuple[Parcel, ...]:
+        """Pedido sem plano congelado (de antes do frete v2): monta com os dados de hoje."""
         itens = await self._items(order.id)
         try:
-            return await parcels_for(
+            return await current_parcels(
                 self.session,
-                [QuoteLine(i.variant_id, i.quantity_milli) for i in itens],
-                cfg,
+                self.tenant,
+                [LineIn(i.variant_id, i.quantity_milli) for i in itens],
+                now=self.now,
             )
         except MissingDimensions as exc:
             raise ValidationError(

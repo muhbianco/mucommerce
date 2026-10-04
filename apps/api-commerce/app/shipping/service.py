@@ -8,32 +8,28 @@ Princípio do caminho do checkout: **nunca travar e nunca mentir**. Timeout curt
 chamada cara, e quando a transportadora não responde o cliente vê "frete indisponível agora",
 não uma lista vazia que parece "não entregamos aí".
 
-Frete v2 (flag `shipping.packing_v2`, docs/13-frete-v2.md): o motor de embalagem monta o plano
-de volumes, a transportadora cota esse plano (uma chamada, com o seguro por volume) e cada
-opção sai assinada junto com o hash do plano — é ele que o `place` reconstrói e o despacho usa.
-Sem embalagem ativa, o v2 não se aplica e a cotação segue pelo v1.
+O motor de embalagem (docs/13-frete-v2.md) monta o plano de volumes — com as embalagens da
+loja, ou em caixa sob medida quando ela não cadastrou nenhuma —, a transportadora cota esse plano
+(uma chamada, com o seguro por volume) e cada opção sai assinada junto com o hash do plano: é ele
+que o `place` reconstrói e o despacho usa.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.models import PHYSICAL_KINDS, Product, ProductVariant
 from app.core.cache import TtlCache
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.credentials import CredentialStore
 from app.shipping import registry, signing
 from app.shipping.inputs import LineIn, load_packing_inputs
-from app.shipping.packing import Box, MissingDimensions, PackItem, item_from_variant, pack
 from app.shipping.packing.candidates import plan_candidates
 from app.shipping.packing.model import ParcelPlan
 from app.shipping.plan import label_mode, to_parcel
@@ -139,45 +135,23 @@ class ShippingQuoteService:
             # Lista escolhida e nada ativo é "não ofereço nenhum", não "ofereço todos": sem
             # filtro, a transportadora devolveria tudo.
             return QuoteOutcome(problem="shipping_disabled")
-        if self.tenant.feature("shipping.packing_v2"):
-            resultado = await self._options_v2(provider, credenciais, cfg, destino, lines)
-            if resultado is not None:
-                return resultado
-        try:
-            volumes = await self._parcels(lines, cfg)
-        except MissingDimensions as exc:
-            return QuoteOutcome(problem="missing_dimensions", missing=exc.variants)
-        if not volumes:
-            return QuoteOutcome(problem="shipping_disabled")
+        return await self._planned(provider, credenciais, cfg, destino, lines)
 
-        bruto = await self._ask(provider, credenciais, cfg, destino, volumes)
-        if bruto is None:
-            return QuoteOutcome(problem="unavailable")
-        carrinho = signing.cart_signature(
-            tenant_id=self.tenant.id,
-            destination_postal_code=destino,
-            lines=[(line.variant_id, line.quantity_milli) for line in lines],
-        )
-        opcoes = tuple(self._sign(cfg, opcao, carrinho) for opcao in bruto if opcao.usable)
-        if not opcoes:
-            return QuoteOutcome(problem="no_service", refusals=_refusals(bruto))
-        return QuoteOutcome(options=tuple(sorted(opcoes, key=lambda o: o.price_cents)))
+    # ------------------------------------------------------------------ plano de volumes
 
-    # ------------------------------------------------------------------ frete v2
-
-    async def _options_v2(
+    async def _planned(
         self,
         provider: Any,
         credentials: ShippingCredentials,
         cfg: ShippingSettings,
         destino: str,
         lines: Sequence[QuoteLine],
-    ) -> QuoteOutcome | None:
+    ) -> QuoteOutcome:
         """Planeja, cota as melhores combinações e assina, por serviço, a mais barata.
 
         Até `max_candidates` combinações (top-K da estimativa local), cotadas em paralelo com
         uma chamada cada — o sandbox mostrou que uma cotação com N volumes já traz o preço da
-        remessa inteira. `None` = o v2 não se aplica aqui (sem embalagem ativa): segue o v1.
+        remessa inteira. Sem embalagem cadastrada, as combinações são de caixa sob medida.
         """
         regras = cfg.packing
         entradas = await load_packing_inputs(
@@ -190,9 +164,6 @@ class ShippingQuoteService:
             return QuoteOutcome(problem="missing_dimensions", missing=entradas.missing)
         if not entradas.classes:
             return QuoteOutcome(problem="shipping_disabled")
-        if not entradas.packages:
-            logger.info("Frete v2 sem embalagem ativa; cotação pelo v1")
-            return None
         candidatos = await asyncio.to_thread(
             plan_candidates,
             entradas.classes,
@@ -314,11 +285,6 @@ class ShippingQuoteService:
             public_config={},
             sandbox=settings.environment != "production",
         )
-
-    async def _parcels(
-        self, lines: Sequence[QuoteLine], cfg: ShippingSettings
-    ) -> tuple[Parcel, ...]:
-        return await parcels_for(self.session, lines, cfg)
 
     async def _ask(
         self,
@@ -456,81 +422,6 @@ def choose_offers(
     return OfferChoice(ofertas, tuple(recusas), falhou)
 
 
-async def parcels_for(
-    session: AsyncSession, lines: Sequence[QuoteLine], cfg: ShippingSettings
-) -> tuple[Parcel, ...]:
-    """Volumes de um conjunto de linhas (carrinho ou pedido).
-
-    Mesma conta na cotação e no despacho: se divergir, a loja cobra um frete e paga outro.
-    """
-    if not lines:
-        return ()
-    variantes = await variants_for(session, [line.variant_id for line in lines])
-    caixas = _boxes(cfg)
-    # Um grupo por embalagem: produtos que viajam em caixas diferentes não podem ser somados na
-    # mesma conta de volume. A chave `None` é a caixa padrão, de quem não escolheu nenhuma.
-    por_caixa: dict[str | None, list[PackItem]] = defaultdict(list)
-    faltando: list[str] = []
-    for line in lines:
-        par = variantes.get(line.variant_id)
-        if par is None:
-            continue
-        variante, produto = par
-        # Ingresso, serviço e digital não viajam: entrar aqui sem medida travava o frete do
-        # carrinho inteiro com `missing_dimensions`, por causa de uma linha que nem vai na caixa.
-        if produto.kind not in PHYSICAL_KINDS:
-            continue
-        # Para cima, nunca para o mais próximo: `round` é bancário (2,5 kg virava 2 peças) e
-        # frete cotado a menos sai do bolso da loja no despacho.
-        unidades = max(1, -(-line.quantity_milli // 1000))
-        try:
-            itens = item_from_variant(
-                # Peso e medidas são do produto: hoje o catálogo não guarda medida por
-                # variante, então P e GG pesam igual para a transportadora.
-                weight_grams=produto.weight_grams,
-                width_mm=produto.width_mm,
-                height_mm=produto.height_mm,
-                depth_mm=produto.depth_mm,
-                value_cents=_unit_price(variante, produto) * unidades,
-                quantity=unidades,
-            )
-        except MissingDimensions:
-            faltando.append(variante.id)
-            continue
-        # Embalagem apagada depois de o produto apontar para ela cai na padrão. Recusar a
-        # cotação por causa disso puniria o cliente por uma edição da loja.
-        escolhida = produto.shipping_box_id if produto.shipping_box_id in caixas else None
-        por_caixa[escolhida].extend(itens)
-    if faltando:
-        raise MissingDimensions("variantes sem medida", tuple(faltando))
-    volumes: list[Parcel] = []
-    for box_id, itens in por_caixa.items():
-        volumes.extend(pack(itens, caixas.get(box_id) if box_id else _box(cfg)))
-    return tuple(volumes)
-
-
-async def variants_for(
-    session: AsyncSession, ids: Sequence[str]
-) -> dict[str, tuple[ProductVariant, Product]]:
-    if not ids:
-        return {}
-    stmt = (
-        select(ProductVariant, Product)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .where(ProductVariant.id.in_(list(dict.fromkeys(ids))))
-    )
-    return {v.id: (v, p) for v, p in (await session.execute(stmt)).tuples()}
-
-
-def _unit_price(variant: ProductVariant, product: Product) -> int:
-    """Valor declarado por unidade: preço da variante, senão o do produto.
-
-    É estimativa de seguro, não cobrança: promoção e modificador não entram para não fazer o
-    frete oscilar com campanha de preço.
-    """
-    return int(variant.price_cents or product.base_price_cents or 0)
-
-
 def customer_price(carrier_cents: int, material_cents: int, cfg: ShippingSettings) -> int:
     """O que o cliente paga: frete da transportadora + material (se a loja cobra), com o
     acréscimo da loja por cima. Material entra antes do acréscimo: ele é custo dela."""
@@ -545,33 +436,6 @@ def _plus(days: int | None, handling: int) -> int | None:
 def _with_markup(price_cents: int, cfg: ShippingSettings) -> int:
     """Acréscimo da loja (embalagem, mão de obra). Entra antes da assinatura, senão não vale."""
     return round(price_cents * (100 + cfg.markup_percent) / 100) + cfg.markup_cents
-
-
-def _boxes(cfg: ShippingSettings) -> dict[str, Box]:
-    """As embalagens cadastradas, por id. A caixa padrão não entra: ela não tem id próprio."""
-    return {
-        b.id: Box(
-            width_mm=b.width_mm,
-            height_mm=b.height_mm,
-            depth_mm=b.depth_mm,
-            max_weight_grams=b.max_weight_grams,
-            empty_weight_grams=b.empty_weight_grams,
-        )
-        for b in cfg.boxes
-        if b.id
-    }
-
-
-def _box(cfg: ShippingSettings) -> Box | None:
-    if cfg.box is None:
-        return None
-    return Box(
-        width_mm=cfg.box.width_mm,
-        height_mm=cfg.box.height_mm,
-        depth_mm=cfg.box.depth_mm,
-        max_weight_grams=cfg.box.max_weight_grams,
-        empty_weight_grams=cfg.box.empty_weight_grams,
-    )
 
 
 def _cache_key(

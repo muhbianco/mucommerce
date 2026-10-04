@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import os
 import random
+from typing import Any
 
 import pytest
 
 from app.shipping.packing.candidates import plan_candidates
+from app.shipping.packing.custom import tare_g
 from app.shipping.packing.model import (
     OPS_PER_STRATEGY,
     Dims,
@@ -38,6 +40,7 @@ from app.shipping.packing.placement import (
     verify_placement,
     volume_cost,
 )
+from app.shipping.packing.scoring import CORREIOS, within_limits
 
 SEEDS = int(os.environ.get("FUZZ_SEEDS", "200"))
 
@@ -119,6 +122,21 @@ def _itens(
     return itens
 
 
+def _caixa_sob_medida(volume: Any, por_chave: dict[str, Any], regras: PackingRules) -> None:
+    """Caixa sob medida: toda unidade com posição dentro dela (menos a folga), parede e tara do
+    papelão, e dentro do limite dos Correios — salvo uma unidade que sozinha já passa dele."""
+    assert volume.custom and volume.inner is not None
+    espaco = volume.inner.inset(regras.padding_mm)
+    assert len(volume.layout) == volume.units, "na caixa sob medida toda unidade tem posição"
+    assert verify_placement(espaco, volume.layout, por_chave, PackageKind.BOX)
+    assert volume.outer == derived_outer(volume.inner, PackageKind.BOX)
+    assert volume.tare_g == tare_g(volume.outer)
+    conteudo = sum(por_chave[k].weight_g * n for k, n in volume.contents)
+    assert volume.gross_g == volume.tare_g + conteudo
+    dentro = within_limits(volume.outer, CORREIOS) and volume.gross_g <= 30_000
+    assert dentro or volume.units == 1, "só uma unidade sozinha passa do limite"
+
+
 @pytest.mark.parametrize("seed", range(SEEDS), ids=lambda s: f"seed_{s}")
 def test_invariantes(seed: int) -> None:
     # Três perfis: o comum; peças miúdas em quantidade (misturado e teto de 120 unidades); e o
@@ -145,8 +163,14 @@ def test_invariantes(seed: int) -> None:
         for volume in plano.parcels:
             for chave, n in volume.contents:
                 contagem[chave] = contagem.get(chave, 0) + n
+            produtos = {por_chave[k].product_id for k, _ in volume.contents}
+            if any(por_chave[k].ship_alone for k, _ in volume.contents):
+                assert len(produtos) == 1
             if volume.package_id is None:
-                assert volume.units == 1, "solto é uma unidade por volume"
+                if volume.own:
+                    assert volume.units == 1, "na embalagem dele é uma unidade por volume"
+                    continue
+                _caixa_sob_medida(volume, por_chave, regras)
                 continue
             pacote = por_id[volume.package_id]
             espaco = pacote.space(regras.padding_mm)
@@ -177,9 +201,6 @@ def test_invariantes(seed: int) -> None:
                 and pacote.kind != PackageKind.TUBE
                 for k, _ in volume.contents
             )
-            produtos = {por_chave[k].product_id for k, _ in volume.contents}
-            if any(por_chave[k].ship_alone for k, _ in volume.contents):
-                assert len(produtos) == 1
         assert contagem == {i.key: i.units for i in itens}
 
     embaralhados = list(itens)

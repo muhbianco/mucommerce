@@ -419,6 +419,9 @@ class SimParcel(BaseModel):
     oversize: bool
     declared: bool
     items: list[SimItem]
+    #: Caixa sob medida (nenhuma embalagem cadastrada serve): a loja monta com `inner_mm`.
+    custom: bool = False
+    inner_mm: list[int] | None = None
 
 
 class SimQuote(BaseModel):
@@ -741,6 +744,8 @@ def _sim_parcel(volume: PlannedParcel, rotulos: dict[str, tuple[str, str]]) -> S
         own=volume.own,
         oversize=volume.oversize,
         declared=volume.declared,
+        custom=volume.custom,
+        inner_mm=list(volume.inner.sorted_desc()) if volume.inner is not None else None,
         items=[
             SimItem(
                 key=chave,

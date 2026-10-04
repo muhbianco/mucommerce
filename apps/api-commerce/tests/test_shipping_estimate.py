@@ -137,20 +137,6 @@ async def test_loja_que_nao_vende_online_nao_estima(
     assert resposta.status_code == 404
 
 
-async def test_sem_a_flag_do_frete_v2_nao_ha_estimativa(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """A estimativa entra junto com o frete v2, loja a loja (F8)."""
-    tenant, owner, _me = await loja(client, session_factory, v2=False, caixas=())
-    item = await product(client, session_factory, tenant, owner, name="Item")
-    resposta = await client.post(
-        ESTIMATE,
-        json={"postal_code": DESTINO, "lines": [{"variant_id": item["variants"][0]["id"]}]},
-        headers=as_shopper(tenant, None),
-    )
-    assert resposta.status_code == 404
-
-
 async def test_loja_fechada_pede_login(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:

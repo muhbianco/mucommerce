@@ -22,6 +22,9 @@ Como um carrinho vira volumes, dentro de cada estratégia:
 5. Passou do teto de unidades misturadas ou do orçamento de checagens → **modo degradado**:
    cada item empacotado sozinho pela grade. Coerente e determinístico; pode usar mais volumes
    (frete mais caro), nunca menos do que cabe (frete mais barato que a etiqueta).
+6. O que não cabe em nenhuma embalagem permitida — ou tudo, quando a loja não cadastrou
+   embalagem — vai em **caixa sob medida** (`custom.py`): a menor caixa que contém o que foi
+   vendido, dentro dos limites dos Correios. Cadastrar embalagem é opcional.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from app.shipping.packing.canonical import canonical, plan_hash
+from app.shipping.packing.custom import custom_parcels
 from app.shipping.packing.model import (
     CUBIC_DIVISOR,
     MAX_MIXED_FILL_PERCENT,
@@ -173,7 +177,9 @@ def plan_candidates(
     ffd: FfdCache = {}
     for estrategia in strategies:
         disponiveis = [p for p in embalagens if estrategia.include(p)]
-        if estrategia.name != CONSOLIDATE and not disponiveis:
+        # Sem embalagem cadastrada, tudo vai em caixa sob medida: valem "tudo junto" e "uma por
+        # produto"; as estratégias que só filtram embalagens não teriam o que escolher.
+        if estrategia.name not in {CONSOLIDATE, PER_PRODUCT} and not disponiveis:
             stats.append(StrategyStats(estrategia.name, 0, False, 0, "no_package"))
             continue
         budget = Budget(ops_budget)
@@ -247,11 +253,13 @@ def _pack_group(
     ffd: FfdCache,
 ) -> list[PlannedParcel]:
     # Quem só aceita tubo vai pela fila da grade, item por item: o misturado não usa tubo, e
-    # sem isto o pôster viajaria solto, sem a embalagem que a loja escolheu para ele.
+    # sem isto o pôster viajaria solto, sem a embalagem que a loja escolheu para ele. Item sem
+    # embalagem nenhuma fica no grupo (vai junto com os outros na caixa sob medida).
     so_tubo = [
         i
         for i in grupo
-        if not any(p.id in i.allowed and p.kind != PackageKind.TUBE for p in embalagens)
+        if any(p.id in i.allowed and p.kind == PackageKind.TUBE for p in embalagens)
+        and not any(p.id in i.allowed and p.kind != PackageKind.TUBE for p in embalagens)
     ]
     volumes: list[PlannedParcel] = []
     for item in so_tubo:
@@ -282,10 +290,11 @@ def _pack_homogeneous(
         if (cap := unit_capacity(item, p, rules, estrategia.cap_g(p))) > 0
     ]
     if not capacidades:
-        if item.units > rules.max_parcels:
+        # Nenhuma embalagem permitida serve (ou a loja não cadastrou): caixa sob medida.
+        volumes = custom_parcels([(item, item.units)], rules)
+        if len(volumes) > rules.max_parcels:
             raise _TooManyParcels
-        # Maior que toda embalagem permitida: cada unidade viaja sozinha, com a medida dela.
-        return [_own_parcel(item, oversize=True) for _ in range(item.units)]
+        return volumes
 
     def custo(p: PackageSpec, n: int) -> int:
         return estrategia.cost(p, p.tare_g + n * item.weight_g)
@@ -377,21 +386,23 @@ def _first_fit(
     por_chave = {i.key: i for i in grupo}
     unidades = [item for item in ordem for _ in range(item.units)]
     abertos: list[OpenParcel] = []
-    soltos: list[PlannedParcel] = []
+    # O que não cabe em nenhuma embalagem permitida vai junto, no fim, em caixa sob medida.
+    sem_caixa: dict[str, int] = {}
     for unidade in unidades:
         if any(aberto.try_add(unidade, budget) for aberto in abertos):
             continue
         caixa = _largest_fitting(estrategia, unidade, caixas, rules)
         if caixa is None:
-            soltos.append(_own_parcel(unidade, oversize=True))
+            sem_caixa[unidade.key] = sem_caixa.get(unidade.key, 0) + 1
             continue
         aberto = OpenParcel(caixa, rules, estrategia.cap_g(caixa))
         if not aberto.try_add(unidade, budget):
-            soltos.append(_own_parcel(unidade, oversize=True))
+            sem_caixa[unidade.key] = sem_caixa.get(unidade.key, 0) + 1
             continue
         abertos.append(aberto)
-        if len(abertos) + len(soltos) > rules.max_parcels:
+        if len(abertos) > rules.max_parcels:
             raise _TooManyParcels
+    soltos = custom_parcels([(por_chave[k], n) for k, n in sorted(sem_caixa.items())], rules)
     if len(abertos) + len(soltos) > rules.max_parcels:
         raise _TooManyParcels
     for aberto in abertos:

@@ -59,10 +59,8 @@ export default async function TenantLayout({
     scopes.can("settings:write") && f.coupons && { href: `${base}/cupons`, label: "Cupons" },
     scopes.can("payments:read") && f.checkout && { href: `${base}/pagamentos`, label: "Pagamentos" },
     scopes.can("shipping:config") && f.checkout && { href: `${base}/envio`, label: "Envio" },
-    // Frete v2: quem embala conhece as caixas (catalog:*), então ops também enxerga.
-    scopes.can("catalog:read") &&
-      f.checkout &&
-      f["shipping.packing_v2"] && { href: `${base}/embalagens`, label: "Embalagens" },
+    // Quem embala conhece as caixas (catalog:*), então ops também enxerga.
+    scopes.can("catalog:read") && f.checkout && { href: `${base}/embalagens`, label: "Embalagens" },
     scopes.can("domains:write") && { href: `${base}/dominios`, label: "Endereços" },
     scopes.can("settings:write") && { href: `${base}/modulos`, label: "Módulos" },
     scopes.can("settings:write") && { href: `${base}/vitrine`, label: "Página inicial" },

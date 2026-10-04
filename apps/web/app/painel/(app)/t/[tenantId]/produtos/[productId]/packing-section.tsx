@@ -63,7 +63,7 @@ export function PackingSection({
       <h4 id="envio" className={pk.subhead}>
         Envio e embalagem
       </h4>
-      <input type="hidden" name="packing_v2" value="1" />
+      <input type="hidden" name="packing_section" value="1" />
       <div className={styles.fields}>
         <label className={styles.field}>
           Peso
@@ -106,7 +106,10 @@ export function PackingSection({
             <span className={pk.modeTitle}>
               <strong>Automático</strong> (recomendado)
             </span>
-            <span className={styles.fieldHint}>O sistema escolhe a combinação mais barata entre as suas embalagens.</span>
+            <span className={styles.fieldHint}>
+              O sistema escolhe a combinação mais barata entre as suas embalagens — ou calcula uma caixa
+              sob medida, se você não cadastrou nenhuma.
+            </span>
           </span>
         </label>
         <label className={pk.mode}>
@@ -258,7 +261,8 @@ export function PackingSection({
           </ul>
         ) : (
           <p className={styles.hint}>
-            Nenhuma embalagem cadastrada. <Link href={`${base}/embalagens`}>Cadastre em Embalagens</Link>.
+            Sem embalagem cadastrada: ele vai numa <strong>caixa sob medida</strong>, do tamanho do pedido.
+            Cadastrar é opcional — <Link href={`${base}/embalagens`}>Embalagens</Link>.
           </p>
         )}
         {medido ? (

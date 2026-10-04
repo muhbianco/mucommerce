@@ -66,16 +66,9 @@ export async function updateProduct(form: FormData): Promise<void> {
         stock_policy: text(form, "stock_policy"),
         sold_by: text(form, "sold_by"),
         unit_label: text(form, "unit_label") || "un",
-        ...(text(form, "packing_v2") === "1"
-          ? packingFields(form)
-          : {
-              weight_grams: measure(form, "weight_grams"),
-              width_mm: measure(form, "width_mm"),
-              height_mm: measure(form, "height_mm"),
-              depth_mm: measure(form, "depth_mm"),
-              // Vazio = caixa padrão da loja. `null` é o que apaga a escolha; `undefined` a manteria.
-              shipping_box_id: optional(form, "shipping_box_id"),
-            }),
+        // A seção "Envio e embalagem" manda peso, medidas e como embalar; sem ela no formulário
+        // (produto que não é enviado), nada disso é tocado.
+        ...(text(form, "packing_section") === "1" ? packingFields(form) : {}),
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
         tags: tagNames(form),
@@ -136,18 +129,6 @@ function packingFields(form: FormData): Record<string, unknown> {
       });
   }
   return fields;
-}
-
-/**
- * Peso e medida da caixa. Vazio vira `null` de proposito: e assim que o produto declara que
- * nao tem medida, e a cotacao recusa em vez de inventar volume.
- */
-function measure(form: FormData, name: string): number | null {
-  const raw = text(form, name);
-  if (!raw) return null;
-  const value = Number(raw.replace(",", "."));
-  if (!Number.isFinite(value) || value < 0) throw new FormError("medida_invalida");
-  return Math.round(value);
 }
 
 /**

@@ -155,7 +155,7 @@ def declared_percent(*, units: int, unit: Dims, inner: Dims) -> int:
 
 #: Versão do comportamento do motor. Entra no hash do plano: mudou a conta, muda a versão, e a
 #: cotação aberta com a conta antiga vence sozinha no `place` (o cliente recota).
-ENGINE_VERSION = "pack-2026.10.1"
+ENGINE_VERSION = "pack-2026.10.2"
 
 #: Unidades misturadas (de produtos diferentes) num grupo antes de cair no modo degradado.
 MAX_MIXED_UNITS = 120
@@ -286,6 +286,8 @@ class PlannedParcel:
     own: bool = False
     #: Maior que toda embalagem permitida: viaja sozinho, com a medida dele.
     oversize: bool = False
+    #: Caixa sob medida: nenhuma embalagem cadastrada serve, a loja monta a caixa nestas medidas.
+    custom: bool = False
     #: Dependeu de capacidade declarada pela loja (não calculada).
     declared: bool = False
     #: Onde cada unidade ficou (para conferir e para a dica de arrumação). Fora do hash.

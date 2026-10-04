@@ -27,6 +27,7 @@ def parcel_sort_key(parcel: PlannedParcel) -> tuple[object, ...]:
         parcel.contents,
         parcel.own,
         parcel.oversize,
+        parcel.custom,
     )
 
 
@@ -47,6 +48,7 @@ def plan_hash(parcels: Sequence[PlannedParcel]) -> str:
                 "mat": p.material_cents,
                 "own": p.own,
                 "over": p.oversize,
+                "custom": p.custom,
                 "decl": p.declared,
                 "items": [[key, n] for key, n in p.contents],
             }

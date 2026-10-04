@@ -56,7 +56,6 @@ async def loja(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     *,
-    v2: bool = True,
     caixas: tuple[dict[str, Any], ...] = (CAIXA_P, CAIXA_M),
     packing: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, str], dict[str, str]]:
@@ -65,7 +64,7 @@ async def loja(
         fulfillment = {**FULFILLMENT, "shipping": {**FULFILLMENT["shipping"], "packing": packing}}
     tenant = await selling_store(
         session_factory,
-        flags={"pickup": True, "shipping.packing_v2": v2},
+        flags={"pickup": True},
         settings={"fulfillment": fulfillment},
     )
     owner = await member_headers(client, session_factory, tenant)
@@ -255,22 +254,21 @@ async def test_teto_de_volumes_da_loja(
     assert cotacao["problem"] == "too_many_parcels"
 
 
-async def test_flag_desligada_segue_pelo_v1(
+async def test_sem_embalagem_cadastrada_cota_em_caixa_sob_medida(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    tenant, owner, me = await loja(client, session_factory, v2=False)
-    _, cotacao, _ = await rabiolas(client, session_factory, tenant, owner, me, 4)
-    assert cotacao["problem"] is None
-    assert all(o["plan"] == "" for o in cotacao["options"])
-
-
-async def test_v2_sem_embalagem_ativa_cai_no_v1(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
+    """Cadastrar embalagem é opcional: sem nenhuma, as 4 rabiolas vão numa caixa sob medida
+    (a menor que contém as 4), com o plano assinado como qualquer outro."""
     tenant, owner, me = await loja(client, session_factory, caixas=())
     _, cotacao, _ = await rabiolas(client, session_factory, tenant, owner, me, 4)
     assert cotacao["problem"] is None
-    assert all(o["plan"] == "" for o in cotacao["options"])
+    assert all(PLANO.match(o["plan"]) for o in cotacao["options"])
+    # A transportadora recebeu um volume só, do tamanho das 4 rabiolas mais a parede (4 mm).
+    (volume,) = fake_shipping.CALLS[-1].parcels
+    # 10 x 10 x 20 cm por dentro (a de menor volume entre as empatadas no preço) + 4 mm de parede;
+    # 4 x 150 g + 57 g de papelão.
+    assert sorted((volume.width_mm, volume.height_mm, volume.depth_mm)) == [108, 108, 208]
+    assert volume.weight_grams == 657
 
 
 # ----------------------------------------------------------------------------- F3b

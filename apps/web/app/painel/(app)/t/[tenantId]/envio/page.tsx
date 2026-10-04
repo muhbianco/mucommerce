@@ -9,7 +9,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
 import { KeyValues, PageHeader, Pill, Section } from "../ui";
-import { connectAccount, saveBoxes, saveOrigin, saveRules, saveServices, testAccount } from "./actions";
+import { connectAccount, saveOrigin, saveRules, saveServices, testAccount } from "./actions";
 import local from "./envio.module.css";
 
 export const metadata: Metadata = { title: "Envio por transportadora" };
@@ -25,10 +25,9 @@ interface ShippingStatus {
   missing: string[];
   unmeasured: { id: string; name: string }[];
   oversized: { id: string; name: string; detail: string }[];
-  box_oversize: string | null;
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
-  /** Frete v2: o que falta nas embalagens (só com a flag `shipping.packing_v2`). */
+  /** As embalagens da loja (opcionais: sem elas, o pedido sai em caixa sob medida). */
   packing?: {
     packages_active: number;
     has_default: boolean;
@@ -100,20 +99,9 @@ interface Origin {
   email?: string | null;
 }
 
-interface Box {
-  width_mm?: number;
-  height_mm?: number;
-  depth_mm?: number;
-  max_weight_grams?: number;
-  empty_weight_grams?: number;
-}
-
 interface ShippingSettings {
   enabled?: boolean;
   origin?: Origin | null;
-  box?: Box | null;
-  /** As demais embalagens, cada uma com `id` e `name`. O produto aponta para uma delas. */
-  boxes?: (Box & { id?: string; name?: string })[];
   markup_percent?: number;
   markup_cents?: number;
   free_above_cents?: number | null;
@@ -159,13 +147,7 @@ export default async function Shipping({
   // CPF tem 11 dígitos, CNPJ 14: é assim que a etiqueta sai (o mesmo teste do provedor).
   const documento = (origin.document ?? "").replace(/\D/g, "");
   const origemPR = (origin.state ?? "").trim().toUpperCase() === "PR";
-  const box = cfg.box ?? {};
-  // Uma linha em branco no fim, para acrescentar sem precisar de botão que exija JavaScript.
-  type Caixa = NonNullable<ShippingSettings["boxes"]>[number];
-  const caixas: Caixa[] = [...(cfg.boxes ?? []), {} as Caixa];
   const pronto = status.connected && status.has_origin && status.flag_on;
-  // Frete v2: as caixas moram em Embalagens; esta tela fica com conta, origem e preço.
-  const v2 = Boolean(context.features["shipping.packing_v2"]);
   const embalagens = `/t/${context.tenant_id}/embalagens`;
   const carrier = PROVIDER_LABEL[status.provider] ?? status.provider;
   // A lista vem da conta na transportadora (cache de 10 min no servidor); sem conta, nem pergunta.
@@ -201,10 +183,10 @@ export default async function Shipping({
         </p>
       ) : null}
 
-      {v2 && status.packing && status.packing.unfit.length > 0 ? (
+      {status.packing && status.packing.unfit.length > 0 ? (
         <Section
           title="Produtos que não cabem em nenhuma embalagem"
-          description="Eles viajam soltos, com a medida deles — e cada unidade vira um frete."
+          description="Eles vão em caixa sob medida, do tamanho do pedido: você monta a caixa na hora de despachar."
         >
           <ul className={styles.steps}>
             {status.packing.unfit.map((produto) => (
@@ -214,13 +196,13 @@ export default async function Shipping({
             ))}
           </ul>
           <p className={styles.hint}>
-            Cadastre uma embalagem maior em <Link href={embalagens}>Embalagens</Link>, ou marque no
-            produto que ele vai na embalagem dele.
+            Se você tem uma caixa onde eles cabem, cadastre em <Link href={embalagens}>Embalagens</Link>; ou
+            marque no produto que ele vai na embalagem dele.
           </p>
         </Section>
       ) : null}
 
-      {v2 && status.packing && status.packing.orphans.length > 0 ? (
+      {status.packing && status.packing.orphans.length > 0 ? (
         <Section
           title="Produtos sem embalagem ativa"
           description="Eles só aceitavam embalagens que foram arquivadas; enquanto isso, o sistema escolhe sozinho."
@@ -232,20 +214,6 @@ export default async function Shipping({
               </li>
             ))}
           </ul>
-        </Section>
-      ) : null}
-
-      {!v2 && status.box_oversize ? (
-        <Section
-          title="A caixa padrão não passa nos Correios"
-          description="Ela entra em toda cotação, então uma caixa grande demais derruba o frete da loja inteira — inclusive o de quem comprou um item pequeno."
-        >
-          <p className={styles.note}>Sua caixa está com {status.box_oversize}.</p>
-          <p className={styles.hint}>
-            PAC e SEDEX levam até 1 m por lado, 2 m somados e 30 kg. Confira a unidade nos campos
-            abaixo: são milímetros, então uma caixa de 30 cm se escreve 300. E o peso vazio é o da
-            embalagem sozinha — quase sempre alguns gramas, não quilos.
-          </p>
         </Section>
       ) : null}
 
@@ -508,12 +476,8 @@ export default async function Shipping({
       </Section>
 
       <Section
-        title={v2 ? "Preço do frete" : "Caixa e preço"}
-        description={
-          v2
-            ? "O acréscimo cobre embalagem e trabalho. As caixas ficam em Embalagens."
-            : "A caixa padrão define o volume cotado; o acréscimo cobre embalagem e trabalho."
-        }
+        title="Preço do frete"
+        description="O acréscimo cobre embalagem e trabalho."
       >
         <form action={saveRules}>
           <input type="hidden" name="tenant_id" value={tenantId} />
@@ -528,43 +492,6 @@ export default async function Shipping({
             </span>
           </label>
           <div className={styles.fields}>
-            {v2 ? null : (
-              <>
-            <label className={styles.field}>
-              Largura da caixa (mm)
-              <input name="box_width_mm" type="number" min={10} max={2000} defaultValue={box.width_mm ?? 200} />
-            </label>
-            <label className={styles.field}>
-              Altura (mm)
-              <input name="box_height_mm" type="number" min={10} max={2000} defaultValue={box.height_mm ?? 150} />
-            </label>
-            <label className={styles.field}>
-              Profundidade (mm)
-              <input name="box_depth_mm" type="number" min={10} max={2000} defaultValue={box.depth_mm ?? 100} />
-            </label>
-            <label className={styles.field}>
-              Peso máximo da caixa (g)
-              <input
-                name="box_max_weight_grams"
-                type="number"
-                min={100}
-                max={100000}
-                defaultValue={box.max_weight_grams ?? 30000}
-              />
-            </label>
-            <label className={styles.field}>
-              Peso da caixa vazia (g)
-              <input
-                name="box_empty_weight_grams"
-                type="number"
-                min={0}
-                max={10000}
-                defaultValue={box.empty_weight_grams ?? 0}
-              />
-              <span className={styles.fieldHint}>A transportadora cobra o peso real, com embalagem.</span>
-            </label>
-              </>
-            )}
             <label className={styles.field}>
               Acréscimo sobre o frete (%)
               <input name="markup_percent" type="number" min={0} max={100} defaultValue={cfg.markup_percent ?? 0} />
@@ -592,68 +519,14 @@ export default async function Shipping({
         </form>
       </Section>
 
-{v2 ? (
-        <Section title="Embalagens" description="As caixas, envelopes e tubos da loja.">
-          <p className={styles.hint}>
-            As embalagens agora têm tela própria: lá você cadastra a padrão e as outras, e testa como o
-            sistema monta as caixas de um pedido. <Link href={embalagens}>Abrir Embalagens</Link>
-          </p>
-        </Section>
-      ) : (
-            <Section
-        title="Outras embalagens"
-        description="Cadastre as caixas que você usa de verdade e diga, em cada produto, em qual delas ele viaja."
-      >
+      <Section title="Embalagens" description="Opcional.">
         <p className={styles.hint}>
-          Quem não escolher nenhuma usa a caixa padrão acima. O empacotador respeita a medida e o
-          peso da embalagem escolhida e abre outra igual quando enche — então dez unidades que
-          cabem juntas viajam juntas, e não como dez fretes.
+          Sem embalagem cadastrada, cada pedido sai numa <strong>caixa sob medida</strong>: o sistema
+          calcula a menor caixa que leva o que foi vendido, e você monta a caixa nessas medidas. Se
+          você usa caixas de tamanho fixo, cadastre em <Link href={embalagens}>Embalagens</Link> — lá
+          também dá para testar como um pedido seria montado.
         </p>
-        <form action={saveBoxes}>
-          <input type="hidden" name="tenant_id" value={tenantId} />
-          {caixas.map((caixa, i) => (
-            <div key={caixa?.id ?? `nova-${i}`} className={styles.fields}>
-              {/* O id volta escondido: é por ele que o produto aponta, e perdê-lo numa edição
-                  faria todo produto atrelado cair na caixa padrão sem avisar. */}
-              <input type="hidden" name="box_id" value={caixa?.id ?? ""} />
-              <label className={styles.field}>
-                Nome
-                <input name="box_name" maxLength={60} defaultValue={caixa?.name ?? ""} placeholder="Caixa grande" />
-              </label>
-              <label className={styles.field}>
-                Largura (mm)
-                <input name="box_w" type="number" min={0} max={2000} defaultValue={caixa?.width_mm ?? ""} />
-              </label>
-              <label className={styles.field}>
-                Altura (mm)
-                <input name="box_h" type="number" min={0} max={2000} defaultValue={caixa?.height_mm ?? ""} />
-              </label>
-              <label className={styles.field}>
-                Profundidade (mm)
-                <input name="box_d" type="number" min={0} max={2000} defaultValue={caixa?.depth_mm ?? ""} />
-              </label>
-              <label className={styles.field}>
-                Peso máximo (g)
-                <input name="box_max" type="number" min={0} max={100000} defaultValue={caixa?.max_weight_grams ?? ""} />
-              </label>
-              <label className={styles.field}>
-                Caixa vazia (g)
-                <input name="box_tara" type="number" min={0} max={10000} defaultValue={caixa?.empty_weight_grams ?? ""} />
-              </label>
-            </div>
-          ))}
-          <p className={styles.hint}>
-            Para apagar uma embalagem, limpe o nome dela e salve. Produto que apontava para ela
-            volta a usar a caixa padrão.
-          </p>
-          <div className={styles.formActions}>
-            <button type="submit" className={styles.button}>
-              Salvar embalagens
-            </button>
-          </div>
-        </form>
       </Section>
-      )}
 
       <Section title="Como o pedido anda" description="O que acontece depois que alguém compra.">
         <ol className={styles.steps}>

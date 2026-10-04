@@ -25,7 +25,7 @@ export default async function NewPackage({
   const { ok, erro } = await searchParams;
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   const f = context.features;
-  if (!f.checkout || !f["shipping.packing_v2"] || !tenantScopes(me, context.tenant_id).can("catalog:write")) {
+  if (!f.checkout || !tenantScopes(me, context.tenant_id).can("catalog:write")) {
     notFound();
   }
   return (

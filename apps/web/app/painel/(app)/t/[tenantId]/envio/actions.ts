@@ -70,56 +70,16 @@ export async function saveOrigin(form: FormData): Promise<void> {
   }));
 }
 
-/**
- * Caixa padrão do empacotamento (motor v1) e as regras de preço do frete.
- *
- * Com o frete v2 a caixa sai desta tela (vai para Embalagens) e o formulário não traz mais os
- * campos dela: aí a caixa guardada fica como está, para o v1 continuar valendo num rollback.
- */
+/** As regras de preço do frete (as embalagens ficam na tela de Embalagens). */
 export async function saveRules(form: FormData): Promise<void> {
-  const temCaixa = form.has("box_width_mm");
   await saveMerged(form, "envio_regras", (shipping) => ({
     ...shipping,
     enabled: checked(form, "enabled"),
-    box: temCaixa
-      ? {
-          width_mm: int(form, "box_width_mm", 200),
-          height_mm: int(form, "box_height_mm", 150),
-          depth_mm: int(form, "box_depth_mm", 100),
-          max_weight_grams: int(form, "box_max_weight_grams", 30000),
-          empty_weight_grams: int(form, "box_empty_weight_grams", 0),
-        }
-      : shipping.box,
     markup_percent: int(form, "markup_percent", 0),
     markup_cents: money(form, "markup") ?? 0,
     free_above_cents: money(form, "free_above"),
     handling_days: int(form, "handling_days", 0),
   }));
-}
-
-/**
- * As embalagens da loja, além da caixa padrão.
- *
- * O formulário posta linhas paralelas (`box_name`, `box_w`, …) e a lista é remontada na ordem.
- * O `id` viaja escondido e **precisa** voltar: é por ele que o produto aponta para a embalagem,
- * e perdê-lo numa edição faria todo produto atrelado cair na caixa padrão em silêncio.
- */
-export async function saveBoxes(form: FormData): Promise<void> {
-  const nomes = form.getAll("box_name").map(String);
-  const ids = form.getAll("box_id").map(String);
-  const boxes = nomes
-    .map((name, i) => ({
-      id: ids[i] || undefined,
-      name: name.trim(),
-      width_mm: Number(form.getAll("box_w")[i] ?? 0),
-      height_mm: Number(form.getAll("box_h")[i] ?? 0),
-      depth_mm: Number(form.getAll("box_d")[i] ?? 0),
-      max_weight_grams: Number(form.getAll("box_max")[i] ?? 0),
-      empty_weight_grams: Number(form.getAll("box_tara")[i] ?? 0),
-    }))
-    // Linha em branco é a que a lojista deixou sem preencher, não um pedido de apagar tudo.
-    .filter((b) => b.name && b.width_mm > 0 && b.height_mm > 0 && b.depth_mm > 0);
-  await saveMerged(form, "envio_regras", (shipping) => ({ ...shipping, boxes }));
 }
 
 /**

@@ -245,7 +245,7 @@ class ShippingSettings(_Setting):
     free_above_cents: Cents | None = None
     #: Dias de preparo somados ao prazo da transportadora.
     handling_days: Annotated[int, Field(ge=0, le=30)] = 0
-    #: Frete v2: regras do motor de embalagem (só valem com a flag `shipping.packing_v2`).
+    #: Regras do motor de embalagem (folga, flexíveis, combinações, teto de volumes).
     packing: PackingSettings = PackingSettings()
 
 

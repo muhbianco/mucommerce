@@ -170,17 +170,6 @@ MODULES: tuple[Module, ...] = (
         locked_reason="É um serviço à parte: contrate em muhbianco.com.br/conta.",
     ),
     Module(
-        key="shipping.packing_v2",
-        label="Frete com embalagens inteligentes",
-        summary=(
-            "O sistema escolhe a combinação de caixas que deixa o frete mais barato, e a "
-            "etiqueta sai igual à cotação."
-        ),
-        where="embalagens",
-        locked_reason="Em teste: a MuhBianco liga por loja.",
-        requires=("shipping.melhorenvio",),
-    ),
-    Module(
         key="manufacturing",
         label="Produção e insumos",
         summary="Fichas técnicas, insumos e custo por produto.",

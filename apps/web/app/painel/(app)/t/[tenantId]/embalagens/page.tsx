@@ -71,7 +71,7 @@ export default async function Packages({
   const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
   const scopes = tenantScopes(me, context.tenant_id);
   const f = context.features;
-  if (!f.checkout || !f["shipping.packing_v2"] || !scopes.can("catalog:read")) notFound();
+  if (!f.checkout || !scopes.can("catalog:read")) notFound();
   const canWrite = scopes.can("catalog:write");
   const canRules = scopes.can("settings:write");
   const base = `/t/${context.tenant_id}`;
@@ -144,7 +144,7 @@ export default async function Packages({
       <PageHeader
         eyebrow="Envio"
         title="Embalagens"
-        lead="As caixas, envelopes e tubos que você usa de verdade. Para cada pedido, o sistema monta a combinação de caixas que deixa o frete mais barato."
+        lead="Opcional. Sem embalagem cadastrada, cada pedido sai numa caixa sob medida — a menor que leva o que foi vendido. Se você usa caixas de tamanho fixo, cadastre aqui: o sistema monta a combinação que deixa o frete mais barato."
         actions={
           canWrite && packages.length ? (
             <Link href={`${base}/embalagens/nova`} className={styles.button}>
@@ -158,7 +158,7 @@ export default async function Packages({
       {!packages.length ? (
         <Section
           title="Sua embalagem padrão"
-          description="É a caixa que você mais usa. A loja precisa de uma para calcular o frete."
+          description="Opcional: sem ela, o frete sai em caixa sob medida. Cadastre se você tem uma caixa que usa sempre."
         >
           <p className={styles.hint}>Comece por um tamanho comum e ajuste as medidas para as da sua caixa:</p>
           <nav className={local.presets} aria-label="Tamanhos para começar">
@@ -366,7 +366,7 @@ export default async function Packages({
         )}
       </Section>
 
-      {packages.length ? (
+      {vendaveis.length ? (
         <Section
           id="simulador"
           title="Testar frete"
@@ -438,9 +438,16 @@ function SimResult({ result, nomes }: { result: SimulateOut; nomes: Map<string, 
             {plano.parcels.map((v, i) => (
               <li key={i}>
                 <strong>
-                  {v.oversize ? "Maior que suas embalagens" : v.own ? "Na embalagem do produto" : v.package_name}
+                  {v.custom
+                    ? "Caixa sob medida"
+                    : v.oversize
+                      ? "Maior que suas embalagens"
+                      : v.own
+                        ? "Na embalagem do produto"
+                        : v.package_name}
                 </strong>{" "}
-                — {dimsLabel(v.outer_mm)} por fora · {weightLabel(v.gross_grams)}
+                — {v.custom && v.inner_mm ? `monte com ${dimsLabel(v.inner_mm)} por dentro · ` : ""}
+                {dimsLabel(v.outer_mm)} por fora · {weightLabel(v.gross_grams)}
                 {v.billable_correios_grams > v.gross_grams
                   ? ` (cobrado como ${weightLabel(v.billable_correios_grams)} nos Correios)`
                   : ""}

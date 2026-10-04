@@ -1,5 +1,5 @@
-"""Envio por transportadora (etapa J, ADR 0015): empacotamento, assinatura da cotação e a
-avaliação do modo `shipping` no fulfillment.
+"""Envio por transportadora (etapa J, ADR 0015): assinatura da cotação e a avaliação do modo
+`shipping` no fulfillment. O empacotamento tem testes próprios (test_packing_*).
 
 Tudo aqui é puro — sem rede e sem banco. O que fala com o provedor tem teste próprio.
 """
@@ -10,24 +10,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import pytest
-
 from app.fulfillment.service import FulfillmentChoice, evaluate, offered_modes
 from app.shipping import signing
-from app.shipping.packing import (
-    Box,
-    MissingDimensions,
-    PackItem,
-    item_from_variant,
-    pack,
-)
 from app.shipping.selection import ShippingSelection
 from app.tenancy.context import TenantContext
 from app.tenancy.settings_normalizers import normalize_fulfillment
 from app.tenancy.settings_schemas import FulfillmentV2
 
 AGORA = datetime(2026, 9, 28, 12, 0, tzinfo=UTC)
-CAIXA = Box(width_mm=300, height_mm=200, depth_mm=200, max_weight_grams=10_000)
 ORIGEM = {
     "name": "Loja",
     "postal_code": "01001000",
@@ -37,85 +27,6 @@ ORIGEM = {
     "city": "São Paulo",
     "state": "SP",
 }
-
-
-# ------------------------------------------------------------------------- empacotamento
-
-
-def item(peso: int = 500, lado: int = 100, valor: int = 1000) -> PackItem:
-    return PackItem(
-        weight_grams=peso, width_mm=lado, height_mm=lado, depth_mm=lado, value_cents=valor
-    )
-
-
-def test_tudo_que_cabe_vai_numa_caixa_so() -> None:
-    volumes = pack([item(), item(), item()], CAIXA)
-    assert len(volumes) == 1
-    assert volumes[0].weight_grams == 1500
-    assert (volumes[0].width_mm, volumes[0].height_mm) == (300, 200)
-
-
-def test_peso_estoura_e_abre_caixa_nova() -> None:
-    volumes = pack([item(peso=6000), item(peso=6000)], CAIXA)
-    assert len(volumes) == 2
-    assert all(v.weight_grams == 6000 for v in volumes)
-
-
-def test_tara_da_caixa_entra_no_peso() -> None:
-    caixa = Box(
-        width_mm=300, height_mm=200, depth_mm=200, max_weight_grams=10_000, empty_weight_grams=200
-    )
-    assert pack([item(peso=1000)], caixa)[0].weight_grams == 1200
-
-
-def test_peca_que_nao_cabe_no_peso_util_nao_abre_caixa_estourada() -> None:
-    """A peneira e o enchimento precisam concordar sobre o que é "cabe em peso".
-
-    Enquanto a peneira olhava o teto cheio e o enchimento o teto menos a tara, uma peça no meio
-    do caminho passava na peneira e abria uma caixa sozinha acima do próprio limite declarado —
-    a loja prometia 300 g na caixa e despachava 400.
-    """
-    caixa = Box(
-        width_mm=300, height_mm=200, depth_mm=200, max_weight_grams=300, empty_weight_grams=100
-    )
-    # 250 g está abaixo do teto (300) e acima do útil (200): não cabe.
-    volumes = pack([item(peso=250, lado=50)], caixa)
-    assert len(volumes) == 1
-    # Vai como volume próprio, com as medidas da peça, e sem a tara de uma caixa que não existe.
-    assert (volumes[0].width_mm, volumes[0].weight_grams) == (50, 250)
-
-
-def test_peca_grande_viaja_sozinha_com_as_medidas_dela() -> None:
-    gigante = PackItem(weight_grams=4000, width_mm=900, height_mm=400, depth_mm=300)
-    volumes = pack([gigante, item()], CAIXA)
-    assert len(volumes) == 2
-    proprio = next(v for v in volumes if v.width_mm == 900)
-    assert (proprio.height_mm, proprio.depth_mm, proprio.weight_grams) == (400, 300, 4000)
-
-
-def test_peca_cabe_girada() -> None:
-    """Caixa 300x200x200 engole uma peça 200x300x150: o que importa são as medidas ordenadas."""
-    deitada = PackItem(weight_grams=100, width_mm=200, height_mm=300, depth_mm=150)
-    assert pack([deitada], CAIXA)[0].width_mm == 300
-
-
-def test_carrinho_vazio_nao_gera_volume() -> None:
-    assert pack([], CAIXA) == ()
-
-
-def test_variante_sem_medida_recusa_em_vez_de_chutar() -> None:
-    with pytest.raises(MissingDimensions):
-        item_from_variant(
-            weight_grams=500, width_mm=None, height_mm=80, depth_mm=60, value_cents=100, quantity=1
-        )
-
-
-def test_valor_declarado_nao_perde_centavo_na_divisao() -> None:
-    itens = item_from_variant(
-        weight_grams=100, width_mm=50, height_mm=50, depth_mm=50, value_cents=5000, quantity=3
-    )
-    assert sum(i.value_cents for i in itens) == 5000
-    assert pack(itens, CAIXA)[0].value_cents == 5000
 
 
 # ---------------------------------------------------------------------------- assinatura

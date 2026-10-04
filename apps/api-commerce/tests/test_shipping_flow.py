@@ -22,7 +22,6 @@ from app.shipping.dispatch import ShipmentService
 from app.shipping.jobs import run_track_shipments
 from app.shipping.models import ShipmentStatus
 from app.shipping.providers import fake as fake_shipping
-from app.shipping.service import QuoteLine
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
@@ -318,141 +317,6 @@ async def test_a_tela_de_envio_separa_sem_medida_de_medida_grande_demais(
     ]
 
 
-async def test_caixa_padrao_grande_demais_aparece_na_tela(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """A caixa entra em toda cotação: grande demais, ela derruba o frete da loja inteira.
-
-    Foi o segundo tropeço da mesma unidade na loja do Silvio — corrigidas as medidas do
-    produto, a caixa continuou com 2 m por 1,5 m por 1 m e 10 kg de tara, e nada dizia isso.
-    """
-    tenant, owner, _ = await loja(client, session_factory)
-    base = f"/api/v1/admin/tenants/{tenant.id}"
-
-    # A caixa do `loja()` é de tamanho normal: nada a avisar.
-    assert (await client.get(f"{base}/shipping", headers=owner)).json()["box_oversize"] is None
-
-    atual = (await client.get(f"{base}/settings", headers=owner)).json()["fulfillment"]
-    envio = dict(atual["shipping"])
-    envio["box"] = {
-        "width_mm": 2000,
-        "height_mm": 1500,
-        "depth_mm": 1000,
-        "max_weight_grams": 30000,
-        "empty_weight_grams": 10000,
-    }
-    salvo = await client.put(
-        f"{base}/settings/fulfillment",
-        json={"value": {**atual, "shipping": envio}},
-        headers=owner,
-    )
-    assert salvo.status_code == 200, salvo.text
-
-    status = (await client.get(f"{base}/shipping", headers=owner)).json()
-    assert status["box_oversize"] == "largura de 2,00 m, altura de 1,50 m"
-
-
-async def test_o_produto_viaja_na_embalagem_que_a_loja_escolheu(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """Mais de uma embalagem cadastrada, e o produto aponta para a dele.
-
-    É o caso da rabiola: a caixa padrão da loja é pequena, e um produto grande que apontasse
-    para ela viraria um volume por unidade — dez unidades, dez fretes. Com a embalagem certa
-    atrelada, as unidades enchem a caixa e só abre outra quando acaba o espaço.
-    """
-    from app.shipping.service import parcels_for
-    from app.tenancy.settings_schemas import fulfillment_settings
-
-    grande = {
-        "name": "Caixa grande",
-        "width_mm": 600,
-        "height_mm": 400,
-        "depth_mm": 400,
-        "max_weight_grams": 30_000,
-    }
-    com_caixas = {
-        **FULFILLMENT,
-        "shipping": {**FULFILLMENT["shipping"], "boxes": [grande]},
-    }
-    tenant = await selling_store(
-        session_factory, flags={"pickup": True}, settings={"fulfillment": com_caixas}
-    )
-    owner = await member_headers(client, session_factory, tenant)
-
-    async with session_factory() as session:
-        bind_session_tenant(session, tenant.id)
-        context = await TenantResolver(session).resolve_by_id(tenant.id)
-        cfg = fulfillment_settings(context.settings).shipping
-        box_id = cfg.boxes[0].id
-    assert box_id, "o normalizador atribui o id da embalagem na escrita"
-
-    # 250x200x200 mm: nao cabe na caixa padrao (300x200x200, por um lado so), cabe na grande.
-    criado = await product(
-        client,
-        session_factory,
-        tenant,
-        owner,
-        weight_grams=1000,
-        width_mm=250,
-        height_mm=200,
-        depth_mm=200,
-        shipping_box_id=box_id,
-    )
-    variant_id = criado["variants"][0]["id"]
-
-    async with session_factory() as session:
-        bind_session_tenant(session, tenant.id)
-        volumes = await parcels_for(session, [QuoteLine(variant_id, 4000)], cfg)
-
-    # Quatro unidades numa caixa grande só, com as medidas dela — não quatro volumes soltos.
-    assert len(volumes) == 1
-    assert (volumes[0].width_mm, volumes[0].height_mm) == (600, 400)
-    assert volumes[0].weight_grams == 4000
-
-
-async def test_embalagem_apagada_cai_na_caixa_padrao_em_vez_de_recusar(
-    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
-) -> None:
-    """A loja apagou a embalagem depois de o produto apontar para ela.
-
-    Recusar a cotação puniria o cliente por uma edição da loja; cair na caixa padrão é o pior
-    que pode acontecer e ainda é uma venda.
-    """
-    from app.catalog.models import Product
-    from app.shipping.service import parcels_for
-    from app.tenancy.settings_schemas import fulfillment_settings
-
-    tenant, owner, _ = await loja(client, session_factory)
-    criado = await product(
-        client,
-        session_factory,
-        tenant,
-        owner,
-        weight_grams=800,
-        width_mm=150,
-        height_mm=100,
-        depth_mm=80,
-    )
-    variant_id = criado["variants"][0]["id"]
-    # A API não aceita mais apontar para embalagem inexistente; aqui ela "sumiu" depois.
-    async with session_factory() as session:
-        bind_session_tenant(session, tenant.id)
-        linha = await session.get(Product, criado["id"])
-        assert linha is not None
-        linha.shipping_box_id = "01a00000-0000-7000-8000-000000000000"
-        await session.commit()
-
-    async with session_factory() as session:
-        bind_session_tenant(session, tenant.id)
-        context = await TenantResolver(session).resolve_by_id(tenant.id)
-        cfg = fulfillment_settings(context.settings).shipping
-        volumes = await parcels_for(session, [QuoteLine(variant_id, 2000)], cfg)
-
-    assert len(volumes) == 1
-    assert (volumes[0].width_mm, volumes[0].height_mm) == (300, 200)
-
-
 async def test_linha_que_nao_viaja_nao_trava_o_frete(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -461,7 +325,7 @@ async def test_linha_que_nao_viaja_nao_trava_o_frete(
     Antes o serviço entrava no empacotador e a cotação inteira voltava `missing_dimensions` —
     por causa de uma linha que nem vai na caixa.
     """
-    from app.shipping.service import parcels_for
+    from app.shipping.inputs import LineIn, load_packing_inputs
     from app.tenancy.settings_schemas import fulfillment_settings
 
     tenant, owner, _ = await loja(client, session_factory)
@@ -480,25 +344,27 @@ async def test_linha_que_nao_viaja_nao_trava_o_frete(
     async with session_factory() as session:
         bind_session_tenant(session, tenant.id)
         context = await TenantResolver(session).resolve_by_id(tenant.id)
-        cfg = fulfillment_settings(context.settings).shipping
-        volumes = await parcels_for(
+        entradas = await load_packing_inputs(
             session,
             [
-                QuoteLine(medido["variants"][0]["id"], 1000),
-                QuoteLine(servico["variants"][0]["id"], 1000),
+                LineIn(medido["variants"][0]["id"], 1000),
+                LineIn(servico["variants"][0]["id"], 1000),
             ],
-            cfg,
+            fulfillment_settings(context.settings).shipping.packing,
+            now=utcnow(),
         )
 
-    assert len(volumes) == 1
-    assert volumes[0].weight_grams == 800
+    assert entradas.missing == ()
+    assert [(c.variant_id, c.units, c.weight_g) for c in entradas.classes] == [
+        (medido["variants"][0]["id"], 1, 800)
+    ]
 
 
 async def test_quantidade_fracionada_arredonda_para_cima(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """2,5 unidades viram 3 peças na conta do frete, nunca 2 (o `round` bancário dava 2)."""
-    from app.shipping.service import parcels_for
+    """2,5 unidades pesam 2,5 kg na conta do frete, nunca 2 (o `round` bancário dava 2)."""
+    from app.shipping.inputs import LineIn, load_packing_inputs
     from app.tenancy.settings_schemas import fulfillment_settings
 
     tenant, owner, _ = await loja(client, session_factory)
@@ -517,7 +383,12 @@ async def test_quantidade_fracionada_arredonda_para_cima(
     async with session_factory() as session:
         bind_session_tenant(session, tenant.id)
         context = await TenantResolver(session).resolve_by_id(tenant.id)
-        cfg = fulfillment_settings(context.settings).shipping
-        volumes = await parcels_for(session, [QuoteLine(variant_id, 2500)], cfg)
+        entradas = await load_packing_inputs(
+            session,
+            [LineIn(variant_id, 2500)],
+            fulfillment_settings(context.settings).shipping.packing,
+            now=utcnow(),
+        )
 
-    assert sum(v.weight_grams for v in volumes) == 3000
+    assert sum(c.weight_g * c.units for c in entradas.classes) >= 2500
+    assert sum(c.units for c in entradas.classes) == 3, "2 peças inteiras e 1 parcial"

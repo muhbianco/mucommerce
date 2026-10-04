@@ -67,6 +67,9 @@ export interface SimParcel {
   oversize: boolean;
   declared: boolean;
   items: { key: string; name: string; sku: string; units: number }[];
+  /** Caixa sob medida: nenhuma embalagem cadastrada serve; a loja monta com `inner_mm`. */
+  custom?: boolean;
+  inner_mm?: number[] | null;
 }
 
 export interface SimQuote {
@@ -203,6 +206,8 @@ export interface FrozenParcel {
   own: boolean;
   oversize: boolean;
   declared: boolean;
+  /** Caixa sob medida: a loja monta a caixa com as medidas por dentro (`inner_mm`). */
+  custom?: boolean;
   outer_mm: number[];
   inner_mm: number[] | null;
   weight_grams: number;

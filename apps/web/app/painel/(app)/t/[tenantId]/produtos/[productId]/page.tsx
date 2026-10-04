@@ -10,23 +10,6 @@ import { tenantScopes } from "@/lib/panel/scopes";
 import { type PillState, PRODUCT_STATE, stateOf } from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
-/** Uma embalagem da loja, como a setting de envio a guarda. */
-interface Caixa {
-  id?: string;
-  name?: string;
-  width_mm: number;
-  height_mm: number;
-  depth_mm: number;
-  max_weight_grams?: number;
-  empty_weight_grams?: number;
-}
-
-/** Cabe na caixa girando a peça? Compara as três medidas ordenadas, como o empacotador faz. */
-function cabeGirando(peca: number[], caixa: number[]): boolean {
-  const p = [...peca].sort((a, b) => a - b);
-  const c = [...caixa].sort((a, b) => a - b);
-  return p.every((mm, i) => mm <= (c[i] ?? 0));
-}
 import {
   type Category,
   type EventLot,
@@ -195,38 +178,6 @@ export default async function ProductPage({
     api<Category[]>(`${path}/categories`),
     api<TagRef[]>(`${path}/tags`),
   ]);
-  // A caixa padrão da loja, para avisar quando o produto não cabe nela. Espelha
-  // `app/shipping/packing.py#Box.fits`: compara as medidas ordenadas (o item pode girar) e o
-  // peso. Os dois lados precisam concordar, senão o aviso mente.
-  const embalagens = (
-    (context.settings.fulfillment as { shipping?: { boxes?: Caixa[] } } | undefined)?.shipping
-      ?.boxes ?? []
-  ).filter((c): c is Caixa & { id: string } => Boolean(c?.id && c?.name));
-  // O aviso compara com a embalagem que o produto escolheu, não com a padrão: senão ele mentiria
-  // exatamente para quem resolveu o problema atrelando uma caixa maior.
-  const escolhida = embalagens.find((c) => c.id === product.shipping_box_id) ?? null;
-  const caixa = escolhida ?? (
-    (context.settings.fulfillment as { shipping?: { box?: Record<string, number> } } | undefined)
-      ?.shipping?.box ?? null
-  ) as Partial<Caixa> | null;
-  const medidas = [product.width_mm, product.height_mm, product.depth_mm];
-  const temMedidas = medidas.every((mm): mm is number => typeof mm === "number" && mm > 0);
-  const caixaMm = caixa ? [caixa.width_mm, caixa.height_mm, caixa.depth_mm] : [];
-  const temCaixa = caixaMm.every((mm): mm is number => typeof mm === "number" && mm > 0);
-  // Peso **útil**: o teto menos a embalagem vazia. É a mesma conta de `Box.usable_grams`; usar o
-  // teto cheio aqui daria "cabe" para uma peça que o empacotador manda viajar sozinha.
-  const pesoUtil = Math.max(0, (caixa?.max_weight_grams ?? 0) - (caixa?.empty_weight_grams ?? 0));
-  const soltoNaCotacao =
-    temMedidas &&
-    temCaixa &&
-    (!cabeGirando(medidas as number[], caixaMm as number[]) ||
-      (product.weight_grams ?? 0) > pesoUtil);
-  const caixaNome = escolhida?.name ? `embalagem “${escolhida.name}”` : "caixa padrão";
-  const caixaResumo = temCaixa ? `${caixaMm.map((mm) => (mm as number) / 10).join(" × ")} cm` : "";
-  // Peso cúbico da transportadora: comprimento × largura × altura em cm, dividido por 6000.
-  const cubadoKg = temMedidas
-    ? ((medidas as number[]).reduce((a, b) => a * (b / 10), 1) / 6000).toFixed(1).replace(".", ",")
-    : "";
 
   const otherTags = tags.filter((tag) => !product.tags.some((mine) => mine.slug === tag.slug));
   const isTicket = product.kind === "ticket";
@@ -239,11 +190,12 @@ export default async function ProductPage({
     }
   }
   const canWrite = scopes.can("catalog:write") && product.status !== "archived";
-  // Frete v2: embalagens e "onde cabe" vêm do servidor (o mesmo motor da cotação).
-  const v2 = Boolean(context.features["shipping.packing_v2"] && context.features.checkout);
+  // Embalagens e "onde cabe" vêm do servidor (o mesmo motor da cotação); só há embalagem em loja
+  // que vende online. Sem embalagem cadastrada, o pedido sai em caixa sob medida.
+  const comEnvio = Boolean(context.features.checkout);
   let pacotes: ShippingPackage[] = [];
   let capacidades: PackageCapacity[] | null = null;
-  if (v2) {
+  if (comEnvio) {
     pacotes = await api<ShippingPackage[]>(`${path}/shipping/packages`);
     const { weight_grams, width_mm, height_mm, depth_mm } = product;
     if (weight_grams && width_mm && height_mm && depth_mm) {
@@ -297,7 +249,7 @@ export default async function ProductPage({
     ["basico", "Informações básicas"],
     ["preco", "Preço"],
     ["venda", "Como você vende"],
-    ...(v2 ? ([["envio", "Envio e embalagem"]] as [string, string][]) : []),
+    ["envio", "Envio e embalagem"],
     ["organizacao", "Organização na loja"],
     ["link", "Link e Google"],
     ...(isTicket ? [] : ([["opcoes", "Opções"]] as [string, string][])),
@@ -665,99 +617,13 @@ export default async function ProductPage({
                   </label>
                 </div>
 
-                {v2 ? (
-                  <PackingSection
+                <PackingSection
                     product={product}
                     packages={pacotes}
                     capacities={capacidades}
                     base={base}
                     disabled={!canWrite}
                   />
-                ) : (
-                  <>
-                <h4 className={local.subhead}>Peso e medidas da caixa</h4>
-                {soltoNaCotacao ? (
-                  // Item que não cabe na caixa padrão viaja **sozinho**, um volume por unidade:
-                  // dez unidades viram dez fretes. É o que transforma um pedido de R$ 300 numa
-                  // cotação de mil e pouco, e nada dizia isso à lojista.
-                  <p className={styles.error} role="status">
-                    Este produto não cabe na {caixaNome} ({caixaResumo}), então cada unidade é
-                    cotada como um volume separado — dez unidades viram dez fretes. Escolha outra
-                    embalagem abaixo, cadastre uma maior em <a href={`${base}/envio`}>Envio</a>, ou
-                    confira se as medidas estão em milímetros.
-                    {cubadoKg ? ` Hoje cada unidade pesa ${cubadoKg} kg de peso cúbico.` : ""}
-                  </p>
-                ) : null}
-                <p className={styles.fieldHint}>
-                  Medidas em <strong>milímetros</strong>: uma caixa de 30 × 20 × 8 cm se escreve
-                  300 × 200 × 80. A transportadora cobra pelo volume, e sem as quatro o carrinho
-                  não mostra frete nenhum para este produto — nem erro, só a opção sumindo. Deixe
-                  vazio se ele não é enviado (serviço, digital, ingresso).
-                </p>
-                {embalagens.length ? (
-                  <label className={styles.field}>
-                    Embalagem
-                    <select name="shipping_box_id" defaultValue={product.shipping_box_id ?? ""}>
-                      <option value="">Caixa padrão da loja</option>
-                      {embalagens.map((caixa) => (
-                        <option key={caixa.id} value={caixa.id}>
-                          {caixa.name} ({[caixa.width_mm, caixa.height_mm, caixa.depth_mm]
-                            .map((mm) => mm / 10)
-                            .join(" × ")} cm)
-                        </option>
-                      ))}
-                    </select>
-                    <span className={styles.fieldHint}>
-                      Em qual caixa este produto viaja. O empacotador respeita a medida e o peso
-                      dela, e abre outra igual quando enche — então as unidades que cabem juntas
-                      viajam juntas. Cadastre em <a href={`${base}/envio`}>Envio</a>.
-                    </span>
-                  </label>
-                ) : null}
-                <div className={styles.fields}>
-                  <label className={styles.field}>
-                    Peso com embalagem (g)
-                    <input
-                      name="weight_grams"
-                      type="number"
-                      min={0}
-                      max={1000000}
-                      defaultValue={product.weight_grams ?? ""}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    Largura (mm)
-                    <input
-                      name="width_mm"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      defaultValue={product.width_mm ?? ""}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    Altura (mm)
-                    <input
-                      name="height_mm"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      defaultValue={product.height_mm ?? ""}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    Profundidade (mm)
-                    <input
-                      name="depth_mm"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      defaultValue={product.depth_mm ?? ""}
-                    />
-                  </label>
-                </div>
-                  </>
-                )}
               </Section>
 
               <Section id="organizacao" title="Organização na loja">
@@ -1154,7 +1020,7 @@ export default async function ProductPage({
                         disabled={!canWrite}
                       />
                     </label>
-                    {v2 && product.has_variants ? (
+                    {product.has_variants ? (
                       <details
                         className={local.variantMeasures}
                         open={Boolean(variant.weight_grams || variant.width_mm)}

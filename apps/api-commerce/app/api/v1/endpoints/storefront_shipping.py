@@ -72,8 +72,7 @@ class ShippingEstimateRead(BaseModel):
 async def estimate_shipping(
     session: DbSession, tenant: CatalogReader, body: ShippingEstimateIn
 ) -> ShippingEstimateRead:
-    # Junto com o frete v2 (liberação por loja na F8): loja sem a flag não tem estimativa.
-    if not (tenant.feature("checkout") and tenant.feature("shipping.packing_v2")):
+    if not tenant.feature("checkout"):
         raise NotFoundError("Recurso não encontrado.")
     teto = await rate_limiter.hit(f"shipping_estimate_store:{tenant.id}", PER_STORE, 60)
     if not teto.allowed:

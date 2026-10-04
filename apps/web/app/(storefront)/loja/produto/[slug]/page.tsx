@@ -106,13 +106,9 @@ export default async function ProductPage({
   const category = product.categories[0];
   const sells = Boolean(context.features.checkout);
   const back = `/loja/produto/${product.slug}`;
-  // Frete por CEP (F6): só para o que vai pela transportadora, numa loja que envia e que já
-  // está no frete v2 (a estimativa é liberada junto com ele, loja a loja).
+  // Frete por CEP (F6): só para o que vai pela transportadora, numa loja que envia.
   const estimaFrete =
-    sells &&
-    ["physical", "made_to_order"].includes(product.kind) &&
-    Boolean(context.fulfillment.shipping?.enabled) &&
-    Boolean(context.features["shipping.packing_v2"]);
+    sells && ["physical", "made_to_order"].includes(product.kind) && Boolean(context.fulfillment.shipping?.enabled);
   const varianteFrete =
     product.variants.find((v) => v.id === variante) ??
     product.variants.find((v) => v.availability === "available") ??

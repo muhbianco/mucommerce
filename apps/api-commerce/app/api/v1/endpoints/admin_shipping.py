@@ -63,7 +63,7 @@ class OversizedProduct(BaseModel):
 
 
 class PackingStatus(BaseModel):
-    """Frete v2 (flag `shipping.packing_v2`): o que falta nas embalagens."""
+    """As embalagens da loja (opcionais: sem elas, o frete sai em caixa sob medida)."""
 
     packages_active: int
     has_default: bool
@@ -86,10 +86,6 @@ class ShippingStatusRead(BaseModel):
     unmeasured: list[UnmeasuredProduct] = []
     #: Produtos medidos, mas acima do que os Correios levam (no máximo 20).
     oversized: list[OversizedProduct] = []
-    #: Por que a caixa padrão da loja não passa nos Correios, quando não passa. Vale mais que
-    #: a lista de produtos: a caixa entra em toda cotação, então uma caixa grande demais
-    #: derruba o frete da loja inteira, inclusive o de quem comprou um item pequeno.
-    box_oversize: str | None = None
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
     packing: PackingStatus | None = None
@@ -307,14 +303,9 @@ def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
         enabled=cfg.enabled,
         connected=connected,
         has_origin=cfg.origin is not None,
-        has_box=cfg.box is not None,
+        has_box=False,
         services=[s.model_dump() for s in cfg.services],
         missing=faltando,
-        box_oversize=_oversize_detail(
-            cfg.box.empty_weight_grams, cfg.box.width_mm, cfg.box.height_mm, cfg.box.depth_mm
-        )
-        if cfg.box is not None
-        else None,
     )
 
 
@@ -325,12 +316,9 @@ async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingRe
     status = _status(tenant, connected=bool(token))
     status.unmeasured = await _unmeasured(session, tenant.id)
     status.oversized = await _oversized(session, tenant.id)
-    if tenant.feature("shipping.packing_v2"):
-        status.packing = await _packing_status(session, tenant)
-        # No v2 a caixa é a embalagem padrão da tabela, não a do JSON.
-        status.has_box = status.packing.has_default
-        if not status.packing.has_default:
-            status.missing.append("config:embalagem")
+    status.packing = await _packing_status(session, tenant)
+    # Embalagem é opcional: sem nenhuma, o frete sai em caixa sob medida (não é pendência).
+    status.has_box = status.packing.has_default
     return status
 
 

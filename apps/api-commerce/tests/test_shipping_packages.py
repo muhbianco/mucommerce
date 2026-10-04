@@ -585,14 +585,15 @@ async def test_vendido_a_peso_vira_pecas_inteiras_e_uma_parcial(
     assert pecas == {variante: (2, 1000), f"{variante}~500": (1, 500)}
 
 
-async def test_status_do_envio_no_v2_lista_o_que_falta_nas_embalagens(
+async def test_status_do_envio_lista_o_que_falta_nas_embalagens(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    tenant = await selling_store(session_factory, flags={"shipping.packing_v2": True})
+    tenant = await selling_store(session_factory)
     owner = await member_headers(client, session_factory, tenant)
     status_vazio = (await client.get(f"{base(tenant)}/shipping", headers=owner)).json()
     assert status_vazio["packing"]["has_default"] is False
-    assert "config:embalagem" in status_vazio["missing"]
+    # Embalagem é opcional (sem ela, caixa sob medida): não é pendência para cotar.
+    assert "config:embalagem" not in status_vazio["missing"]
 
     m = await nova(client, tenant, owner)
     extra = await nova(client, tenant, owner, name="Extra")

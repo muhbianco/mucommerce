@@ -487,11 +487,7 @@ export default async function CartPage({
                       {prazo(chosen.shipping.delivery_days ?? null)}
                     </Notice>
                   ) : null}
-                  {options.addresses.length === 0 && !context.features["shipping.packing_v2"] ? (
-                    <p>
-                      Para calcular o frete, <Link href={NOVO_ENDERECO}>cadastre um endereço</Link>.
-                    </p>
-                  ) : options.addresses.length === 0 ? (
+                  {options.addresses.length === 0 ? (
                     // Sem endereço ainda: o CEP já dá uma ideia do frete (F6). Escolher e fechar o
                     // pedido continua pedindo o endereço, que é onde a cotação assinada nasce.
                     <ShippingEstimate
