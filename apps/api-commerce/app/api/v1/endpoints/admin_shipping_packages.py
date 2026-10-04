@@ -54,8 +54,9 @@ from app.shipping.packing.scoring import (
 from app.tenancy.context import TenantContext
 from app.tenancy.settings_schemas import PackingSettings, fulfillment_settings
 
-#: Acima de 70 cm em algum lado os Correios cobram a taxa de não mecanizáveis (central de ajuda
-#: do Melhor Envio, conferida em 04/10/2026) — e ela não aparece na cotação.
+#: Acima de 70 cm em algum lado os Correios cobram como não mecanizável (central de ajuda do
+#: Melhor Envio). No sandbox (04/10/2026) o acréscimo já vem na cotação: PAC 64,74 → 85,22 de 69
+#: para 75 cm com o mesmo peso. A prévia avisa porque encarece, não porque fica de fora.
 NONMECH_SIDE_MM = 700
 CORREIOS_MAX_GRAMS = 30_000
 #: Quantos produtos a prévia da embalagem mostra ("cabem 18 rabiolas").

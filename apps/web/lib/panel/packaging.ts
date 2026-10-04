@@ -147,9 +147,9 @@ export const PACKAGE_PRESETS: PackagePreset[] = [
 export const PREVIEW_WARNING: Record<string, string> = {
   correios_limits: "Passa do limite dos Correios (100 cm por lado, 200 cm somados): PAC e SEDEX somem da cotação.",
   nonmech_side:
-    "Algum lado passa de 70 cm: os Correios cobram a taxa de não mecanizável, que não aparece na cotação.",
+    "Algum lado passa de 70 cm: os Correios tratam como não mecanizável e o frete sobe bastante (no teste, o PAC foi de R$ 64,74 para R$ 85,22 ao passar de 69 para 75 cm).",
   nonmech_shape:
-    "Tubo é formato cilíndrico: os Correios cobram a taxa de não mecanizável, e a cotação mede como caixa.",
+    "Tubo é formato cilíndrico: a cotação mede como caixa, e os Correios podem cobrar a taxa de não mecanizável na postagem.",
   over_30kg: "Aguenta mais de 30 kg, mas os Correios só levam até 30 kg por volume.",
 };
 
