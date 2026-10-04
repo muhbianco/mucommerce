@@ -14,6 +14,7 @@ from app.shipping.provider import (
     CredentialTest,
     InsufficientBalanceError,
     QuoteRequest,
+    ServiceInfo,
     ShipmentRequest,
     ShipmentResult,
     ShippingCapabilities,
@@ -157,3 +158,29 @@ class FakeShippingProvider:
 
     async def test_credentials(self, credentials: ShippingCredentials) -> CredentialTest:
         return CredentialTest(ok=bool(credentials.secrets.get("token")), detail="fake")
+
+    async def list_services(self, credentials: ShippingCredentials) -> tuple[ServiceInfo, ...]:
+        # Os mesmos dois da cotação: o Econômico como os Correios (uma etiqueta por volume), o
+        # Expresso como a Jadlog (junta volumes, exige nota fiscal).
+        return (
+            ServiceInfo(
+                code="fake_economico",
+                name="Fake Econômico",
+                carrier="Fake",
+                kind="normal",
+                available=True,
+                max_insurance_cents=300_000,
+                max_weight_grams=30_000,
+            ),
+            ServiceInfo(
+                code="fake_expresso",
+                name="Fake Expresso",
+                carrier="Fake",
+                kind="express",
+                available=True,
+                grouped_volumes=True,
+                requires_invoice=True,
+                max_insurance_cents=2_990_000,
+                max_weight_grams=120_000,
+            ),
+        )

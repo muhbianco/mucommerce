@@ -200,6 +200,26 @@ class CredentialTest:
     detail: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class ServiceInfo:
+    """Um serviço que a conta da loja pode oferecer, como a transportadora o descreve."""
+
+    code: str
+    name: str
+    carrier: str
+    #: Como a transportadora classifica: "normal", "express" ou "economic".
+    kind: str
+    available: bool
+    #: Junta vários volumes numa etiqueta (Jadlog); senão, uma etiqueta por volume (Correios).
+    grouped_volumes: bool = False
+    #: A compra da etiqueta exige nota fiscal (Jadlog, no Melhor Envio).
+    requires_invoice: bool = False
+    #: Teto do valor declarado (seguro); acima disso o volume vai segurado só até aqui.
+    max_insurance_cents: int | None = None
+    #: Peso máximo por volume, em gramas.
+    max_weight_grams: int | None = None
+
+
 class ShippingProvider(Protocol):
     name: str
 
@@ -225,3 +245,7 @@ class ShippingProvider(Protocol):
     async def cancel(self, credentials: ShippingCredentials, provider_shipment_id: str) -> bool: ...
 
     async def test_credentials(self, credentials: ShippingCredentials) -> CredentialTest: ...
+
+    async def list_services(self, credentials: ShippingCredentials) -> tuple[ServiceInfo, ...]:
+        """Os serviços que a conta da loja pode oferecer (tela "Serviços oferecidos")."""
+        ...

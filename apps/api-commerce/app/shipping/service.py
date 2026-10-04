@@ -135,6 +135,10 @@ class ShippingQuoteService:
         credenciais = await self._credentials(cfg)
         if credenciais is None:
             return QuoteOutcome(problem="not_configured")
+        if cfg.services and not any(s.active for s in cfg.services):
+            # Lista escolhida e nada ativo é "não ofereço nenhum", não "ofereço todos": sem
+            # filtro, a transportadora devolveria tudo.
+            return QuoteOutcome(problem="shipping_disabled")
         if self.tenant.feature("shipping.packing_v2"):
             resultado = await self._options_v2(provider, credenciais, cfg, destino, lines)
             if resultado is not None:

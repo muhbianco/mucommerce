@@ -1,0 +1,21 @@
+/* Tela de Envio: só o que o kit do painel não tem. Usa as variáveis de `.shell`. */
+
+/* Lista de serviços oferecidos: um por linha, sem a moldura padrão do fieldset. */
+.services {
+  border: 0;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.services legend {
+  padding: 0;
+  margin-bottom: 0.6rem;
+}
+
+/* Os detalhes do serviço numa linha própria, embaixo do nome (no kit, a dica do `.check` fica
+   colada ao texto). */
+.facts {
+  display: block;
+}

@@ -6,17 +6,20 @@ loja. Despachar, não — quem embala é o operador, então basta `orders:transi
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Path, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.catalog.models import PHYSICAL_KINDS, Product, ProductKind, ProductStatus
-from app.core.exceptions import NotFoundError
+from app.core.cache import TtlCache
+from app.core.exceptions import NotFoundError, ShippingUnavailableError, ValidationError
+from app.core.logging import get_logger
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope, scopes_for_tenant_role
 from app.identity.repository import AdminUserRepository
@@ -29,10 +32,12 @@ from app.shipping.inputs import active_packages, package_spec, packing_rules
 from app.shipping.models import OrderShipment, ProductPackageRule, ShipmentEvent, ShippingPackage
 from app.shipping.packing.model import Dims, ItemClass, PackingMode, Rotation
 from app.shipping.packing.placement import unit_capacity
-from app.shipping.provider import ShippingCredentials
+from app.shipping.provider import ServiceInfo, ShippingCredentials, ShippingProviderError
 from app.tenancy.context import TenantContext
+from app.tenancy.service import TenantService
 from app.tenancy.settings_schemas import fulfillment_settings
 
+logger = get_logger(__name__)
 router = APIRouter(prefix="/admin/tenants/{tenant_id}/shipping", tags=["Painel — Envio"])
 
 ShippingOwner = Annotated[
@@ -87,6 +92,38 @@ class ShippingStatusRead(BaseModel):
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
     packing: PackingStatus | None = None
+
+
+class ServiceOptionRead(BaseModel):
+    """Um serviço da conta da loja na transportadora, e se a loja o oferece no checkout."""
+
+    code: str
+    name: str
+    carrier: str
+    kind: str
+    available: bool
+    grouped_volumes: bool
+    requires_invoice: bool
+    max_insurance_cents: int | None
+    max_weight_grams: int | None
+    offered: bool
+
+
+class ShippingServicesRead(BaseModel):
+    services: list[ServiceOptionRead] = []
+    #: A loja nunca escolheu: oferece todos os que a transportadora devolver (o padrão).
+    all_offered: bool
+    #: `None` = a lista veio. Senão: `not_connected`, `provider_unavailable` ou `unavailable`.
+    problem: str | None = None
+
+
+class ServicesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: Os códigos que a loja oferece; pelo menos um (desligar o envio é em "Preço do frete").
+    codes: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=24)]], Field(min_length=1, max_length=20)
+    ]
 
 
 class CredentialIn(BaseModel):
@@ -427,6 +464,121 @@ async def test_credentials(session: DbSession, user: CurrentAdmin, tenant: Shipp
     estado.last_test_ok = resultado.ok
     estado.last_test_detail = resultado.detail
     return estado
+
+
+#: A lista de serviços muda raramente; a tela de Envio não pergunta à transportadora a cada visita.
+_SERVICES_TTL = 600
+_services_cache = TtlCache("shipping-services")
+
+
+async def _service_catalog(
+    session: AsyncSession, tenant: TenantContext
+) -> tuple[tuple[ServiceInfo, ...] | None, str | None]:
+    """Os serviços da conta da loja: `(lista, None)` ou `(None, motivo)`."""
+    from app.core.config import settings
+
+    cfg = fulfillment_settings(tenant.settings).shipping
+    provider = registry.get_provider(cfg.provider)
+    if provider is None or not registry.flag_on(tenant, cfg.provider):
+        return None, "provider_unavailable"
+    token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
+    if not token:
+        return None, "not_connected"
+    sandbox = settings.environment != "production"
+    chave = f"{tenant.id}:{cfg.provider}:{int(sandbox)}"
+    guardado = await _services_cache.get(chave)
+    if isinstance(guardado, list):
+        return tuple(ServiceInfo(**item) for item in guardado), None
+    try:
+        lista = await provider.list_services(
+            ShippingCredentials(secrets={"access_token": token}, public_config={}, sandbox=sandbox)
+        )
+    except ShippingProviderError as exc:
+        logger.warning(
+            "Lista de serviços indisponível",
+            extra={"provider": cfg.provider, "erro": type(exc).__name__},
+        )
+        return None, "unavailable"
+    await _services_cache.set(chave, [asdict(s) for s in lista], _SERVICES_TTL)
+    return lista, None
+
+
+@router.get(
+    "/services",
+    response_model=ShippingServicesRead,
+    summary="Serviços da conta na transportadora e quais a loja oferece",
+)
+async def read_services(session: DbSession, user: CurrentAdmin, tenant: ShippingReader) -> Any:
+    cfg = fulfillment_settings(tenant.settings).shipping
+    oferecidos = {s.code for s in cfg.services if s.active}
+    todos = not cfg.services
+    lista, problema = await _service_catalog(session, tenant)
+    return ShippingServicesRead(
+        services=[
+            ServiceOptionRead(**asdict(s), offered=todos or s.code in oferecidos)
+            for s in lista or ()
+        ],
+        all_offered=todos,
+        problem=problema,
+    )
+
+
+@router.put(
+    "/services",
+    response_model=ShippingServicesRead,
+    summary="Escolhe os serviços que a loja oferece no checkout (só o dono)",
+    dependencies=[Depends(rate_limit("shipping_services", 20, 60))],
+)
+async def save_services(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: ShippingOwner,
+    body: ServicesIn,
+) -> Any:
+    """Grava só códigos que a transportadora devolveu para esta conta, na ordem dela."""
+    lista, problema = await _service_catalog(session, tenant)
+    if problema == "not_connected":
+        raise ValidationError(
+            "Conecte a conta da transportadora antes de escolher os serviços.",
+            reason="not_connected",
+        )
+    if problema == "provider_unavailable":
+        raise ValidationError(
+            "A transportadora não está liberada para esta loja.", reason="provider_unavailable"
+        )
+    if lista is None:
+        raise ShippingUnavailableError(
+            "A transportadora não respondeu agora. Nada foi gravado; tente de novo."
+        )
+    por_codigo = {s.code: s for s in lista}
+    pedidos = set(body.codes)
+    desconhecidos = sorted(pedidos - por_codigo.keys())
+    if desconhecidos:
+        raise ValidationError(
+            "Serviço que a transportadora não oferece.",
+            reason="unknown_service",
+            codes=desconhecidos,
+        )
+    indisponiveis = sorted(c for c in pedidos if not por_codigo[c].available)
+    if indisponiveis:
+        raise ValidationError(
+            "Serviço indisponível na sua conta.", reason="service_unavailable", codes=indisponiveis
+        )
+    escolhidos = [
+        {"code": s.code, "name": s.name, "carrier": s.carrier, "active": True}
+        for s in lista
+        if s.code in pedidos
+    ]
+    valor = dict(tenant.settings.get("fulfillment") or {})
+    valor["shipping"] = {**dict(valor.get("shipping") or {}), "services": escolhidos}
+    servico_loja = TenantService(session)
+    linha = await servico_loja.get_or_404(tenant.id)
+    await servico_loja.set_setting(linha, "fulfillment", valor, admin_actor(request, user))
+    return ShippingServicesRead(
+        services=[ServiceOptionRead(**asdict(s), offered=s.code in pedidos) for s in lista],
+        all_offered=False,
+    )
 
 
 orders_router = APIRouter(prefix="/admin/tenants/{tenant_id}/orders", tags=["Painel — Envio"])

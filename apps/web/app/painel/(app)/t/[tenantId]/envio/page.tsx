@@ -9,7 +9,8 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
 import { KeyValues, PageHeader, Pill, Section } from "../ui";
-import { connectAccount, saveBoxes, saveOrigin, saveRules, testAccount } from "./actions";
+import { connectAccount, saveBoxes, saveOrigin, saveRules, saveServices, testAccount } from "./actions";
+import local from "./envio.module.css";
 
 export const metadata: Metadata = { title: "Envio por transportadora" };
 
@@ -34,6 +35,53 @@ interface ShippingStatus {
     unfit: { id: string; name: string }[];
     orphans: { id: string; name: string }[];
   } | null;
+}
+
+interface ServiceOption {
+  code: string;
+  name: string;
+  carrier: string;
+  kind: string;
+  available: boolean;
+  grouped_volumes: boolean;
+  requires_invoice: boolean;
+  max_insurance_cents: number | null;
+  max_weight_grams: number | null;
+  offered: boolean;
+}
+
+interface ServicesRead {
+  services: ServiceOption[];
+  all_offered: boolean;
+  problem: string | null;
+}
+
+const SERVICE_KIND: Record<string, string> = {
+  normal: "padrão",
+  express: "expresso",
+  economic: "econômico, para pacotes pequenos",
+};
+
+const SERVICES_PROBLEM: Record<string, string> = {
+  not_connected: "Conecte a conta da transportadora acima para ver os serviços.",
+  provider_unavailable: "A transportadora ainda não foi liberada para esta loja. Fale com a MuhBianco.",
+  unavailable: "A transportadora não respondeu agora. Recarregue a página em instantes.",
+};
+
+/** "padrão · uma etiqueta por volume · seguro até R$ 3.000 · até 30 kg por volume". */
+function serviceFacts(s: ServiceOption): string {
+  const partes = [SERVICE_KIND[s.kind] ?? s.kind];
+  partes.push(s.grouped_volumes ? "vários volumes numa etiqueta só" : "uma etiqueta por volume");
+  if (s.max_insurance_cents) {
+    partes.push(
+      `seguro até ${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(s.max_insurance_cents / 100)}`,
+    );
+  }
+  if (s.max_weight_grams) {
+    const kg = s.max_weight_grams / 1000;
+    partes.push(`até ${kg.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kg por volume`);
+  }
+  return partes.filter(Boolean).join(" · ");
 }
 
 interface Origin {
@@ -115,6 +163,11 @@ export default async function Shipping({
   const v2 = Boolean(context.features["shipping.packing_v2"]);
   const embalagens = `/t/${context.tenant_id}/embalagens`;
   const carrier = PROVIDER_LABEL[status.provider] ?? status.provider;
+  // A lista vem da conta na transportadora (cache de 10 min no servidor); sem conta, nem pergunta.
+  const servicos =
+    status.connected && status.flag_on
+      ? await api<ServicesRead>(`/admin/tenants/${tenantId}/shipping/services`).catch(() => null)
+      : null;
 
   return (
     <>
@@ -352,6 +405,65 @@ export default async function Shipping({
             </button>
           </div>
         </form>
+      </Section>
+
+      <Section
+        title="Serviços oferecidos"
+        description="Os marcados aparecem para o cliente no checkout, cada um com o preço e o prazo dele."
+      >
+        {!status.connected ? (
+          <p className={styles.hint}>{SERVICES_PROBLEM.not_connected}</p>
+        ) : servicos === null || servicos.problem ? (
+          <>
+            <p className={styles.note}>
+              {SERVICES_PROBLEM[servicos?.problem ?? "unavailable"] ?? SERVICES_PROBLEM.unavailable}
+            </p>
+            {status.services.length ? (
+              <p className={styles.hint}>
+                Hoje a loja oferece: {status.services.filter((s) => s.active).map((s) => s.name).join(", ") || "nenhum"}.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <form action={saveServices}>
+            <input type="hidden" name="tenant_id" value={tenantId} />
+            <fieldset className={local.services} disabled={readOnly}>
+              <legend className={styles.hint}>
+                {servicos.all_offered
+                  ? "Hoje a loja oferece todos os serviços da sua conta. Desmarque os que não quer mostrar."
+                  : "Desmarcado não aparece no checkout. Serviço novo da transportadora só entra quando você marcar."}
+              </legend>
+              {servicos.services.map((s) => (
+                <label key={s.code} className={styles.check} data-service={s.code}>
+                  <input
+                    type="checkbox"
+                    name="service"
+                    value={s.code}
+                    defaultChecked={s.offered && s.available}
+                    disabled={!s.available}
+                  />
+                  <span>
+                    {s.name} · {s.carrier}{" "}
+                    {s.requires_invoice ? <Pill state="warn">pede nota fiscal</Pill> : null}
+                    {!s.available ? <Pill state="off">indisponível na sua conta</Pill> : null}
+                    <span className={`${styles.fieldHint} ${local.facts}`}>{serviceFacts(s)}</span>
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            {servicos.services.some((s) => s.requires_invoice) ? (
+              <p className={styles.hint}>
+                &quot;Pede nota fiscal&quot;: a transportadora exige os dados da NF-e na compra da etiqueta.
+                Sem nota, deixe esse serviço desmarcado.
+              </p>
+            ) : null}
+            <div className={styles.formActions}>
+              <button type="submit" className={styles.button} disabled={readOnly}>
+                Salvar serviços
+              </button>
+            </div>
+          </form>
+        )}
       </Section>
 
       <Section

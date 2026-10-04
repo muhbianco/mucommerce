@@ -38,6 +38,7 @@ from app.shipping.provider import (
     InsufficientBalanceError,
     Parcel,
     QuoteRequest,
+    ServiceInfo,
     ShipmentRequest,
     ShipmentResult,
     ShippingCapabilities,
@@ -62,6 +63,7 @@ _GENERATE = "/api/v2/me/shipment/generate"
 _PRINT = "/api/v2/me/shipment/print"
 _TRACKING = "/api/v2/me/shipment/tracking"
 _BALANCE = "/api/v2/me/balance"
+_SERVICES = "/api/v2/me/shipment/services"
 
 #: Ciclo de vida deles → o nosso. O que não estiver aqui vira "unknown" em vez de chute.
 _STATUS: dict[str, TrackingStatus] = {
@@ -188,6 +190,45 @@ def parse_options(payload: Any) -> tuple[ShippingOption, ...]:
     return tuple(opcoes)
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def parse_services(payload: Any) -> tuple[ServiceInfo, ...]:
+    """`GET /api/v2/me/shipment/services` → serviços (formato conferido no sandbox, F2.5 fato 6).
+
+    `company.has_grouped_volumes` diz se a transportadora junta volumes numa etiqueta (Jadlog 1,
+    Correios 0 — o mesmo que o carrinho mostrou); `requirements` com "invoice" quer dizer nota
+    fiscal na compra; o teto do seguro vem em reais e o peso da caixa em quilos.
+    """
+    if not isinstance(payload, list):
+        return ()
+    servicos: list[ServiceInfo] = []
+    for item in payload:
+        if not isinstance(item, dict) or item.get("id") is None:
+            continue
+        empresa = _dict(item.get("company"))
+        restricoes = _dict(item.get("restrictions"))
+        seguro = _dict(restricoes.get("insurance_value")).get("max")
+        peso = _dict(_dict(_dict(restricoes.get("formats")).get("box")).get("weight")).get("max")
+        peso_g = round(float(peso) * 1000) if isinstance(peso, int | float) else None
+        servicos.append(
+            ServiceInfo(
+                code=str(item["id"]),
+                name=str(item.get("name") or "")[:80],
+                carrier=str(empresa.get("name") or "")[:60],
+                kind=str(item.get("type") or ""),
+                available=item.get("status") == "available"
+                and empresa.get("status", "available") == "available",
+                grouped_volumes=bool(empresa.get("has_grouped_volumes")),
+                requires_invoice="invoice" in (item.get("requirements") or []),
+                max_insurance_cents=_cents(seguro) if seguro is not None else None,
+                max_weight_grams=peso_g,
+            )
+        )
+    return tuple(servicos)
+
+
 def _int(value: Any) -> int | None:
     return int(value) if isinstance(value, (int, float, str)) and str(value).isdigit() else None
 
@@ -288,6 +329,9 @@ class MelhorEnvioProvider:
             return CredentialTest(ok=False, detail=str(exc)[:200])
         saldo = dados.get("balance") if isinstance(dados, dict) else None
         return CredentialTest(ok=True, detail=f"saldo {saldo}" if saldo is not None else "ok")
+
+    async def list_services(self, credentials: ShippingCredentials) -> tuple[ServiceInfo, ...]:
+        return parse_services(await self._request(credentials, "GET", _SERVICES, None))
 
     # ------------------------------------------------------------------ interno
 

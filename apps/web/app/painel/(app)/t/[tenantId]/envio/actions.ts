@@ -122,6 +122,22 @@ export async function saveBoxes(form: FormData): Promise<void> {
   await saveMerged(form, "envio_regras", (shipping) => ({ ...shipping, boxes }));
 }
 
+/**
+ * Os serviços que a loja oferece no checkout. A API confere cada código com a lista da conta
+ * na transportadora; aqui só se recolhe o que foi marcado.
+ */
+export async function saveServices(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/envio`, "envio_servicos", async () => {
+    const codes = form
+      .getAll("service")
+      .map(String)
+      .filter((code) => /^[\w.-]{1,24}$/.test(code));
+    if (codes.length === 0) throw new FormError("servico_obrigatorio");
+    await api(`${path}/shipping/services`, { method: "PUT", json: { codes } });
+  });
+}
+
 /** Conecta a conta da loja na transportadora (só o dono; o token compra etiqueta). */
 export async function connectAccount(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
