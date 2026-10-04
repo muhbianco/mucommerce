@@ -192,6 +192,25 @@ class StorefrontCatalog:
         products = list((await self.session.execute(stmt)).scalars())
         return await self._cards(products)
 
+    async def published_variant_ids(self, variant_ids: Sequence[str]) -> set[str]:
+        """Which of `variant_ids` the storefront shows (live variant of a published product).
+
+        For public endpoints that take variant ids from the visitor: anything else (draft,
+        archived, another store's — the ORM filter already hides those) is left out.
+        """
+        if not variant_ids:
+            return set()
+        stmt = (
+            select(ProductVariant.id)
+            .join(Product, Product.id == ProductVariant.product_id)
+            .where(ProductVariant.id.in_(list(variant_ids)))
+            .where(ProductVariant.status.in_(LIVE_VARIANT_STATUSES))
+            .where(ProductVariant.archived_at.is_(None))
+            .where(Product.status.in_(PUBLISHED_STATUSES))
+            .limit(len(variant_ids))
+        )
+        return set((await self.session.execute(stmt)).scalars())
+
     async def product_by_slug(self, slug: str) -> ProductData | None:
         stmt = (
             select(Product)

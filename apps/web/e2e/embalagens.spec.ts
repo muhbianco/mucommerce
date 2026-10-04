@@ -66,11 +66,15 @@ test("embalagem padrão, Caixa P, rabiola medida e 4 rabiolas numa Caixa P", asy
   await expect(consolidado).toContainText("Caixa P");
   await expect(consolidado).toContainText("4× Rabiola E2E");
 
-  // Com CEP, o simulador tenta cotar de verdade; sem transportadora configurada, diz o que falta.
+  // Com CEP, o simulador cota de verdade (no E2E, a transportadora fake): cada serviço mostra o
+  // preço e a combinação mais barata dele leva o selo.
   await page.locator('input[name="cep"]').fill("20040-020");
   await page.getByRole("button", { name: "Montar as caixas" }).click();
-  await expect(page.getByText(/Para cotar de verdade/)).toBeVisible();
-  await expect(page.locator('[data-strategy="consolidate"]')).toContainText("Caixa P");
+  const cotado = page.locator('[data-strategy="consolidate"]');
+  await expect(cotado).toContainText("Caixa P");
+  await expect(cotado).toContainText("Fake Econômico");
+  await expect(cotado).toContainText(/R\$\s?\d/);
+  await expect(page.getByText("Mais barata neste serviço").first()).toBeVisible();
 });
 
 test("capacidade declarada: rígido só limita, flexível declara até o dobro, 50 é recusado", async ({ page }) => {

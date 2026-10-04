@@ -2480,3 +2480,110 @@
   padding: 0 1rem 1rem;
   border-top: 1px solid var(--store-line);
 }
+
+/* ------------------------------------------------------------------ frete por CEP (F6) */
+
+.estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--store-line);
+  /* O cabeçalho da loja é fixo: rolar até `#frete` não pode esconder o título embaixo dele. */
+  scroll-margin-top: 8rem;
+}
+
+/* Dentro de um bloco que já tem título e divisória (o carrinho), sem linha própria. */
+.estimate[data-bare] {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.estimateTitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.estimateForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.estimateForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--store-ink-soft);
+}
+
+.estimateCep input {
+  width: 8.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.estimateForm input[name="quantity"] {
+  width: 4.5rem;
+}
+
+.estimateForm select {
+  max-width: 12rem;
+}
+
+.estimateForm button {
+  min-height: 44px;
+}
+
+/* Sem JavaScript o resultado por streaming nunca chega: no lugar de "Calculando…" eterno, fica
+   a dica do `<noscript>`. */
+@media (scripting: none) {
+  .estimateLoading {
+    display: none;
+  }
+}
+
+.estimateHelp {
+  align-self: flex-start;
+  font-size: 0.85rem;
+}
+
+.estimateResult {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.estimateFor {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--store-ink-soft);
+}
+
+.estimateList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.estimateOption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius);
+  background: var(--store-surface);
+}
+
+.estimateFree {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}

@@ -59,6 +59,8 @@ QuoteProblem = Literal[
     "no_service",
     # Frete v2: toda combinação passou do teto de volumes da loja (regras de embalagem).
     "too_many_parcels",
+    # Estimativa da vitrine: nenhuma das variantes pedidas está à venda nesta loja.
+    "no_items",
 ]
 
 

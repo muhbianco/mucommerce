@@ -23,6 +23,7 @@ import { Suspense } from "react";
 import { AddToCart, CART_ERRORS } from "../../../_store/add-to-cart";
 import { Gallery } from "../../../_store/gallery";
 import { RelatedProducts } from "../../../_store/related-products";
+import { ShippingEstimate } from "../../../_store/shipping-estimate";
 import { StoreImage } from "../../../_store/store-image";
 import { StoreShell } from "../../../_store/store-shell";
 import styles from "../../../_store/store.module.css";
@@ -53,6 +54,10 @@ const loadProduct = cache(async (slug: string) => {
   );
   return result.kind === "ok" ? { ...result, data: withDefaults(result.data) } : result;
 });
+
+/** O formulário do frete: o seletor de variante manda a escolha para ele (atributo `form`). */
+const FRETE_FORM = "frete-form";
+const QUANTIDADE = /^\d{1,3}(?:\.\d{1,3})?$/;
 
 function shareImage(product: ProductDetail): string | undefined {
   const renditions = product.images[0]?.renditions ?? [];
@@ -86,12 +91,12 @@ export default async function ProductPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ erro?: string; ok?: string }>;
+  searchParams: Promise<{ erro?: string; ok?: string; variante?: string; quantidade?: string; frete_erro?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context) notFound();
   const { slug } = await params;
-  const { erro, ok } = await searchParams;
+  const { erro, ok, variante, quantidade, frete_erro } = await searchParams;
   const result = await loadProduct(slug);
   const product = requireCatalog(result, `/loja/produto/${encodeURIComponent(slug)}`);
   // A ticket's page is its event page (when the store runs events).
@@ -101,6 +106,18 @@ export default async function ProductPage({
   const category = product.categories[0];
   const sells = Boolean(context.features.checkout);
   const back = `/loja/produto/${product.slug}`;
+  // Frete por CEP (F6): só para o que vai pela transportadora, numa loja que envia e que já
+  // está no frete v2 (a estimativa é liberada junto com ele, loja a loja).
+  const estimaFrete =
+    sells &&
+    ["physical", "made_to_order"].includes(product.kind) &&
+    Boolean(context.fulfillment.shipping?.enabled) &&
+    Boolean(context.features["shipping.packing_v2"]);
+  const varianteFrete =
+    product.variants.find((v) => v.id === variante) ??
+    product.variants.find((v) => v.availability === "available") ??
+    product.variants[0];
+  const quantidadeFrete = quantidade && QUANTIDADE.test(quantidade) && Number(quantidade) > 0 ? quantidade : "1";
 
   const structured = [
     {
@@ -180,6 +197,8 @@ export default async function ProductPage({
                 variants={product.variants}
                 modifierGroups={product.modifier_groups}
                 buy={sells ? { back } : undefined}
+                initialVariantId={varianteFrete?.id}
+                estimateFormId={estimaFrete ? FRETE_FORM : undefined}
               />
             ) : product.variants.length > 1 ? (
               <ul className={styles.variantList}>
@@ -200,6 +219,51 @@ export default async function ProductPage({
                 back={back}
                 disabled={offSale(product.availability)}
                 byWeight={product.sold_by === "weight"}
+              />
+            ) : null}
+            {estimaFrete && varianteFrete ? (
+              <ShippingEstimate
+                formId={FRETE_FORM}
+                back={back}
+                title="Frete e prazo"
+                lines={[{ variant_id: varianteFrete.id, quantity: quantidadeFrete }]}
+                caption={`Para ${quantidadeFrete.replace(".", ",")}${product.sold_by === "weight" ? ` ${product.unit_label}` : "×"} ${
+                  product.variants.length > 1 ? `${product.name} ${varianteFrete.name}` : product.name
+                }`}
+                fields={
+                  <>
+                    {product.options.length ? null : product.variants.length > 1 ? (
+                      <label>
+                        Opção
+                        <select name="variant_id" defaultValue={varianteFrete.id}>
+                          {product.variants.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <input type="hidden" name="variant_id" value={varianteFrete.id} />
+                    )}
+                    <label>
+                      {product.sold_by === "weight" ? `Quantidade (${product.unit_label})` : "Quantidade"}
+                      <input
+                        name="quantity"
+                        inputMode="decimal"
+                        defaultValue={quantidadeFrete.replace(".", ",")}
+                        pattern="\d{1,3}([.,]\d{1,3})?"
+                      />
+                    </label>
+                  </>
+                }
+                error={frete_erro}
+                subtotalCents={Math.round(varianteFrete.price.amount_cents * Number(quantidadeFrete))}
+                freeAboveCents={context.fulfillment.shipping?.free_above_cents ?? null}
+                showFreeGap
+                currency={varianteFrete.price.currency}
+                pickup={(context.fulfillment.modes ?? []).includes("pickup") ? (context.fulfillment.pickup_locations ?? []).map((l) => l.name) : []}
+                item="produto"
               />
             ) : null}
             {sells ? <StoreGuarantees context={context} /> : <p className="muted">Pedidos online chegam em breve.</p>}

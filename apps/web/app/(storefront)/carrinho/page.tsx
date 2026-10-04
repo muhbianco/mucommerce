@@ -8,6 +8,7 @@ import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice, type StorePrice } from "@/lib/storefront";
 import { freeShippingBase } from "@/lib/store/pricing";
+import { estimateBadges } from "@/lib/store/shipping";
 
 import { CART_ERRORS } from "../_store/add-to-cart";
 import {
@@ -19,6 +20,7 @@ import {
   removeCoupon,
   setCartQuantity,
 } from "../_store/cart-actions";
+import { ShippingEstimate } from "../_store/shipping-estimate";
 import { StoreShell } from "../_store/store-shell";
 import styles from "../_store/store.module.css";
 import { EmptyState, FreeShippingBar, Notice, PageHead, Section, Split, TableWrap, Thumb } from "../_store/ui";
@@ -27,6 +29,7 @@ export const metadata: Metadata = { title: "Carrinho", robots: { index: false, f
 
 interface CartItem {
   id: string;
+  variant_id: string;
   product_slug: string | null;
   product_kind: string | null;
   name: string;
@@ -168,7 +171,7 @@ function slotLabel(slot: Slot): string {
 export default async function CartPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ok?: string; erro?: string; frete?: string }>;
+  searchParams: Promise<{ ok?: string; erro?: string; frete?: string; frete_erro?: string }>;
 }) {
   const context = await getStorefrontContext();
   if (!context || !context.features.checkout) notFound();
@@ -181,7 +184,7 @@ export default async function CartPage({
     if (error instanceof CustomerApiError && error.status === 403) redirect("/acesso-pendente?next=%2Fcarrinho");
     throw error;
   }
-  const { ok, erro, frete } = await searchParams;
+  const { ok, erro, frete, frete_erro } = await searchParams;
   const { quote, options } = cart;
   const currency = quote.currency;
   /**
@@ -208,6 +211,12 @@ export default async function CartPage({
   const slotChoices = chosen.type ? (options.slots[chosen.type] ?? []) : [];
 
   const freeAbove = (context.fulfillment.shipping?.free_above_cents ?? null) as number | null;
+  // A estimativa pública cota até 20 linhas; acima disso, só com o endereço (cotação do carrinho).
+  const vendaveis = cart.items.filter((item) => !item.problem && item.variant_id);
+  const estimateLines =
+    vendaveis.length <= 20
+      ? vendaveis.map((item) => ({ variant_id: item.variant_id, quantity: String(item.quantity) }))
+      : [];
 
   // Frete é cotado na hora, nunca guardado entre visitas: preço de transportadora vence.
   // Só cota quando o cliente pediu (`?frete=<endereço>`), para não gastar chamada em quem
@@ -224,6 +233,8 @@ export default async function CartPage({
       shippingQuote = { options: [], problem: error.code, refusals: [] };
     }
   }
+
+  const selos = estimateBadges(shippingQuote?.options ?? []);
 
   return (
     <StoreShell context={context}>
@@ -476,10 +487,33 @@ export default async function CartPage({
                       {prazo(chosen.shipping.delivery_days ?? null)}
                     </Notice>
                   ) : null}
-                  {options.addresses.length === 0 ? (
+                  {options.addresses.length === 0 && !context.features["shipping.packing_v2"] ? (
                     <p>
                       Para calcular o frete, <Link href={NOVO_ENDERECO}>cadastre um endereço</Link>.
                     </p>
+                  ) : options.addresses.length === 0 ? (
+                    // Sem endereço ainda: o CEP já dá uma ideia do frete (F6). Escolher e fechar o
+                    // pedido continua pedindo o endereço, que é onde a cotação assinada nasce.
+                    <ShippingEstimate
+                      formId="frete-carrinho"
+                      back="/carrinho"
+                      title={null}
+                      lines={estimateLines}
+                      caption="Para o seu carrinho"
+                      error={frete_erro}
+                      subtotalCents={freeShippingBase(quote.subtotal_cents, quote.discount_cents)}
+                      freeAboveCents={freeAbove}
+                      showFreeGap={false}
+                      currency={currency}
+                      pickup={[]}
+                      item="carrinho"
+                      footer={
+                        <p>
+                          Para escolher o frete e fechar o pedido,{" "}
+                          <Link href={NOVO_ENDERECO}>cadastre o endereço de entrega</Link>.
+                        </p>
+                      }
+                    />
                   ) : (
                     <>
                       <form action={quoteShipping}>
@@ -531,6 +565,11 @@ export default async function CartPage({
                                     : prazo(option.delivery_days).replace(/^ · /, "")}
                                 </span>
                               </span>
+                              {(selos[option.service_code] ?? []).map((selo) => (
+                                <span key={selo} className={styles.tag}>
+                                  {selo}
+                                </span>
+                              ))}
                               <span className={styles.quotePrice}>{money(option.price_cents, currency)}</span>
                             </label>
                           ))}

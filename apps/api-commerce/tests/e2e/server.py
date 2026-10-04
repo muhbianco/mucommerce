@@ -79,6 +79,9 @@ E2E_ENV = {
     "NOTIFY_N8N_URL": os.environ.get("NOTIFY_N8N_URL", ""),
     "NOTIFY_N8N_SECRET": os.environ.get("NOTIFY_N8N_SECRET", ""),
     "PAYMENTS_ALLOWED_PROVIDERS": "fake",
+    # Frete pela transportadora de mentira (app/shipping/providers/fake.py): a vitrine estima por
+    # CEP (frete.spec) e o simulador do painel cota de verdade, sem rede.
+    "SHIPPING_ALLOWED_PROVIDERS": "fake",
     "PAYMENTS_FAKE_WEBHOOK_SECRET": "e2e-" + "w" * 32,
     "CELERY_BROKER_URL": "",
     # A suíte entra no painel uma vez por teste, tudo de 127.0.0.1. Com o número de produção
@@ -123,6 +126,7 @@ from app.core.database import SessionFactory, create_app_engine  # noqa: E402
 from app.core.scopes import TenantRole  # noqa: E402
 from app.coupons.service import CouponService  # noqa: E402
 from app.identity.models import AdminUser, TenantMembership  # noqa: E402
+from app.integrations.credentials import CredentialStore  # noqa: E402
 from app.landing.gateway import FakeGateway  # noqa: E402
 from app.landing.generation import generate_draft  # noqa: E402
 from app.landing.models import DraftStatus, LandingDraft  # noqa: E402
@@ -224,6 +228,11 @@ async def _variant_product(session: AsyncSession, tenant_id: str) -> None:
             base_price_cents=5900,
             stock_policy="unlimited",
             tags=["algodão"],
+            # Dobrada, pronta para a caixa: é o produto que o frete.spec estima por CEP.
+            weight_grams=200,
+            width_mm=250,
+            height_mm=30,
+            depth_mm=300,
         )
     )
     product_id = view.product.id
@@ -315,6 +324,26 @@ async def seed() -> None:
             {
                 "pickup": {"enabled": True, "locations": [pickup]},
                 "delivery": {"enabled": True, "zones": [zona]},
+                "shipping": {
+                    "enabled": True,
+                    "provider": "fake",
+                    "origin": {
+                        "name": "Loja MuhBianco",
+                        "postal_code": "01001000",
+                        "address": "Rua E2E",
+                        "number": "100",
+                        "district": "Sé",
+                        "city": "São Paulo",
+                        "state": "SP",
+                        "document": "46867029000176",
+                    },
+                    "box": {
+                        "width_mm": 300,
+                        "height_mm": 200,
+                        "depth_mm": 200,
+                        "max_weight_grams": 10000,
+                    },
+                },
             },
             ACTOR,
         )
@@ -330,6 +359,9 @@ async def seed() -> None:
         session.add(
             TenantMembership(tenant_id=store.id, admin_user_id=admin.id, role=TenantRole.OWNER)
         )
+        # Token de mentira da transportadora fake (o cofre cifra com a chave de teste acima).
+        bind_session_tenant(session, store.id)
+        await CredentialStore(session, store.id).put("fake", "access_token", "token-de-teste")
         await session.commit()
         await _brand_logo(session, store.id)
         await _publish_products(session, store.id)

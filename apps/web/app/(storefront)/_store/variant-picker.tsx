@@ -26,14 +26,23 @@ export function VariantPicker({
   variants,
   modifierGroups,
   buy,
+  initialVariantId,
+  estimateFormId,
 }: {
   options: ProductOption[];
   variants: StoreVariant[];
   modifierGroups: StoreModifierGroup[];
   /** The store sells online: show the buy form (back = this page, for the sign-in round trip). */
   buy?: { back: string };
+  /** Start on this variant (the one the shipping estimate was made for). */
+  initialVariantId?: string;
+  /** The shipping-estimate form on the page: the chosen variant goes along with the CEP. */
+  estimateFormId?: string;
 }) {
-  const first = variants.find((v) => v.availability === "available") ?? variants[0];
+  const first =
+    variants.find((v) => v.id === initialVariantId) ??
+    variants.find((v) => v.availability === "available") ??
+    variants[0];
   const [selection, setSelection] = useState<Record<string, string>>(first?.option_values ?? {});
   const [extras, setExtras] = useState<string[]>(() =>
     modifierGroups.flatMap((group) => (group.min_select > 0 ? group.modifiers.slice(0, group.min_select) : [])).map((m) => m.id),
@@ -120,6 +129,11 @@ export function VariantPicker({
           <span className={styles.soldOut}>{AVAILABILITY_LABEL.unavailable}</span>
         )}
       </p>
+      {/* Pertence ao formulário do frete (atributo `form`), não ao de compra: o "Calcular" leva a
+          variante escolhida. Sem JavaScript sai a inicial, renderizada no servidor. */}
+      {estimateFormId && chosen ? (
+        <input type="hidden" form={estimateFormId} name="variant_id" value={chosen.id} />
+      ) : null}
       {buy ? (
         <form action={addToCart} className={styles.buy}>
           <input type="hidden" name="variant_id" value={chosen?.id ?? ""} />
