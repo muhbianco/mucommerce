@@ -7,18 +7,60 @@ Medidas em milímetros e gramas, como o catálogo; a tela converte para centíme
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Request, Response, status
 from pydantic import BaseModel, Field, StringConstraints
+from sqlalchemy import select
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
+from app.catalog.models import PHYSICAL_KINDS, Product
 from app.core.exceptions import ValidationError
+from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope
+from app.models.base import utcnow
 from app.schemas.common import StrictModel
+from app.shipping.inputs import (
+    LineIn,
+    active_packages,
+    load_packing_inputs,
+    package_spec,
+    packing_rules,
+)
 from app.shipping.models import ShippingPackage
 from app.shipping.packages import PackageService, outer_dims
+from app.shipping.packing.candidates import plan_candidates
+from app.shipping.packing.declared import check_declaration
+from app.shipping.packing.model import (
+    Dims,
+    ItemClass,
+    PackageKind,
+    PlannedParcel,
+    Rotation,
+    fits_alone,
+)
+from app.shipping.packing.placement import unit_capacity
+from app.shipping.packing.scoring import (
+    CORREIOS,
+    CORREIOS_CUBIC_FREE_MM3,
+    PROFILES,
+    billable_g,
+    proxy,
+    select_top_k,
+    within_limits,
+)
 from app.tenancy.context import TenantContext
+from app.tenancy.settings_schemas import PackingSettings, fulfillment_settings
+
+#: Acima de 70 cm em algum lado os Correios cobram a taxa de não mecanizáveis (central de ajuda
+#: do Melhor Envio, conferida em 04/10/2026) — e ela não aparece na cotação.
+NONMECH_SIDE_MM = 700
+CORREIOS_MAX_GRAMS = 30_000
+#: Quantos produtos a prévia da embalagem mostra ("cabem 18 rabiolas").
+PREVIEW_PRODUCTS = 5
+MAX_SIM_UNITS = 500
 
 router = APIRouter(
     prefix="/admin/tenants/{tenant_id}/shipping/packages", tags=["Painel — Embalagens"]
@@ -266,3 +308,358 @@ async def delete_package(
 ) -> Response:
     await _service(request, session, user, tenant).delete(package_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ----------------------------------------------------------------------------- prévia e simulador
+
+planning_router = APIRouter(
+    prefix="/admin/tenants/{tenant_id}/shipping", tags=["Painel — Embalagens"]
+)
+
+
+class RuleDraft(StrictModel):
+    package_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
+    max_units: Annotated[int, Field(ge=1, le=100_000)] | None = None
+
+
+class ProductPreviewIn(StrictModel):
+    """O rascunho do formulário do produto (ainda não salvo): a tela mostra onde ele cabe."""
+
+    weight_grams: Annotated[int, Field(ge=1, le=1_000_000)]
+    width_mm: Annotated[int, Field(ge=1, le=100_000)]
+    height_mm: Annotated[int, Field(ge=1, le=100_000)]
+    depth_mm: Annotated[int, Field(ge=1, le=100_000)]
+    rotation: Literal["any", "upright"] = "any"
+    flexible: bool = False
+    mode: Literal["auto", "restricted", "own_container"] = "auto"
+    rules: Annotated[list[RuleDraft], Field(default_factory=list, max_length=10)]
+
+
+class PackageCapacity(BaseModel):
+    package_id: str
+    name: str
+    kind: str
+    is_default: bool
+    #: O motor pode usar esta embalagem para este produto, no modo escolhido?
+    allowed: bool
+    #: Pela geometria e pelo peso (sem declaração da loja).
+    calculated: int
+    #: O que a loja declarou para esta embalagem (só vale no modo restrito).
+    declared: int | None
+    #: O que o motor vai usar de fato.
+    effective: int
+    #: Veredito da declaração: ok, over_physical (aviso), too_compressed, does_not_fit, too_heavy…
+    declared_check: str | None
+    declared_percent: int | None
+    #: Por que não cabe nenhuma (does_not_fit, too_heavy), quando `calculated` é zero.
+    reason: str | None
+
+
+class PackagePreviewIn(StrictModel):
+    kind: Kind = "box"
+    inner_length_mm: InnerMm
+    inner_width_mm: InnerMm
+    inner_height_mm: InnerMm
+    outer_length_mm: OuterMm | None = None
+    outer_width_mm: OuterMm | None = None
+    outer_height_mm: OuterMm | None = None
+    empty_weight_grams: Tare = 0
+    max_weight_grams: MaxWeight = 30_000
+
+
+class ProductFit(BaseModel):
+    product_id: str
+    name: str
+    units: int
+
+
+class PackagePreview(BaseModel):
+    billed_outer_mm: list[int]
+    cubic_grams: int
+    #: Até 30 L por fora: nos Correios paga o peso real (cubagem até 5 kg é desconsiderada).
+    cubic_free: bool
+    #: Avisos: correios_limits, nonmech_side (lado > 70 cm), nonmech_shape (tubo), over_30kg.
+    warnings: list[str]
+    fits: list[ProductFit]
+
+
+class SimLineIn(StrictModel):
+    variant_id: Annotated[str, StringConstraints(min_length=36, max_length=36)]
+    quantity_milli: Annotated[int, Field(ge=1, le=500_000)]
+
+
+class SimulateIn(StrictModel):
+    lines: Annotated[list[SimLineIn], Field(min_length=1, max_length=10)]
+
+
+class SimItem(BaseModel):
+    key: str
+    name: str
+    sku: str
+    units: int
+
+
+class SimParcel(BaseModel):
+    package_id: str | None
+    package_name: str
+    kind: str
+    outer_mm: list[int]
+    gross_grams: int
+    billable_correios_grams: int
+    value_cents: int
+    material_cents: int
+    own: bool
+    oversize: bool
+    declared: bool
+    items: list[SimItem]
+
+
+class SimPlan(BaseModel):
+    strategy: str
+    hash: str
+    degraded: bool
+    #: Estaria entre as combinações cotadas (top-K da loja).
+    quoted: bool
+    estimate_cents: dict[str, int | None]
+    parcels: list[SimParcel]
+
+
+class SimulateOut(BaseModel):
+    plans: list[SimPlan]
+    problem: str | None
+    missing: list[str]
+    fallbacks: list[str]
+
+
+def _settings_packing(tenant: TenantContext) -> PackingSettings:
+    return fulfillment_settings(tenant.settings).shipping.packing
+
+
+@planning_router.post(
+    "/packing-preview/product",
+    response_model=list[PackageCapacity],
+    summary="Onde o produto (rascunho) cabe, embalagem por embalagem",
+)
+async def preview_product(
+    session: DbSession, tenant: PackageReader, body: ProductPreviewIn
+) -> list[PackageCapacity]:
+    regras_loja = packing_rules(_settings_packing(tenant))
+    pacotes = [package_spec(p) for p in await active_packages(session)]
+    automaticas = tuple(p.id for p in pacotes if p.auto_select) or tuple(
+        p.id for p in pacotes if p.is_default
+    )
+    regras = {r.package_id: r.max_units for r in body.rules}
+    permitidas: tuple[str, ...]
+    if body.mode == "own_container":
+        permitidas = ()
+    elif body.mode == "restricted":
+        permitidas = tuple(sorted(regras))
+    else:
+        permitidas = automaticas
+    rotacao = Rotation(body.rotation)
+    medidas = Dims.from_catalog(
+        width_mm=body.width_mm, height_mm=body.height_mm, depth_mm=body.depth_mm
+    )
+    declaradas = (
+        {k: v for k, v in regras.items() if v is not None} if body.mode == "restricted" else {}
+    )
+    sem_declaracao = ItemClass(
+        key="rascunho",
+        variant_id="rascunho",
+        product_id="rascunho",
+        name="rascunho",
+        sku="",
+        dims=medidas,
+        weight_g=body.weight_grams,
+        value_cents=0,
+        units=1,
+        rotation=rotacao,
+        flexible=body.flexible,
+        allowed=tuple(p.id for p in pacotes),
+    )
+    com_declaracao = replace(sem_declaracao, declared=declaradas)
+    saida = []
+    for pacote in pacotes:
+        calculada = unit_capacity(sem_declaracao, pacote, regras_loja)
+        declarada = regras.get(pacote.id) if body.mode == "restricted" else None
+        veredito = None
+        if declarada is not None:
+            veredito = check_declaration(
+                units=declarada,
+                unit=medidas,
+                unit_grams=body.weight_grams,
+                rotation=rotacao,
+                flexible=body.flexible,
+                inner=pacote.inner,
+                kind=pacote.kind,
+                usable_grams=pacote.usable_g,
+            )
+        motivo = None
+        if calculada == 0:
+            espaco = pacote.space(regras_loja.padding_mm)
+            cabe = fits_alone(medidas, rotacao, espaco, pacote.kind)
+            motivo = "too_heavy" if cabe else "does_not_fit"
+        saida.append(
+            PackageCapacity(
+                package_id=pacote.id,
+                name=pacote.name,
+                kind=pacote.kind.value,
+                is_default=pacote.is_default,
+                allowed=pacote.id in permitidas,
+                calculated=calculada,
+                declared=declarada,
+                effective=unit_capacity(com_declaracao, pacote, regras_loja),
+                declared_check=veredito.code if veredito else None,
+                declared_percent=veredito.percent if veredito else None,
+                reason=motivo,
+            )
+        )
+    return saida
+
+
+@planning_router.post(
+    "/packing-preview/package",
+    response_model=PackagePreview,
+    summary="Medida cobrada, avisos e quantos de cada produto cabem (embalagem em rascunho)",
+)
+async def preview_package(
+    session: DbSession, tenant: PackageReader, body: PackagePreviewIn
+) -> PackagePreview:
+    regras_loja = packing_rules(_settings_packing(tenant))
+    rascunho = ShippingPackage(
+        id="rascunho",
+        name="rascunho",
+        kind=body.kind,
+        inner_length_mm=body.inner_length_mm,
+        inner_width_mm=body.inner_width_mm,
+        inner_height_mm=body.inner_height_mm,
+        outer_length_mm=body.outer_length_mm,
+        outer_width_mm=body.outer_width_mm,
+        outer_height_mm=body.outer_height_mm,
+        empty_weight_grams=body.empty_weight_grams,
+        max_weight_grams=body.max_weight_grams,
+        auto_select=True,
+        active=True,
+        position=0,
+    )
+    spec = package_spec(rascunho)
+    fora = spec.outer
+    avisos: list[str] = []
+    if not within_limits(fora, CORREIOS):
+        avisos.append("correios_limits")
+    if max(fora.sorted_desc()) > NONMECH_SIDE_MM:
+        avisos.append("nonmech_side")
+    if spec.kind == PackageKind.TUBE:
+        avisos.append("nonmech_shape")
+    if body.max_weight_grams > CORREIOS_MAX_GRAMS:
+        avisos.append("over_30kg")
+    stmt = (
+        select(Product)
+        .where(
+            Product.kind.in_(sorted(PHYSICAL_KINDS)),
+            Product.archived_at.is_(None),
+            Product.weight_grams > 0,
+            Product.width_mm > 0,
+            Product.height_mm > 0,
+            Product.depth_mm > 0,
+        )
+        .order_by(Product.updated_at.desc(), Product.id)
+        .limit(PREVIEW_PRODUCTS)
+    )
+    cabem = []
+    for produto in (await session.execute(stmt)).scalars():
+        item = ItemClass(
+            key=produto.id,
+            variant_id=produto.id,
+            product_id=produto.id,
+            name=produto.name,
+            sku=produto.sku,
+            dims=Dims.from_catalog(
+                width_mm=produto.width_mm or 0,
+                height_mm=produto.height_mm or 0,
+                depth_mm=produto.depth_mm or 0,
+            ),
+            weight_g=produto.weight_grams or 0,
+            value_cents=0,
+            units=1,
+            rotation=Rotation(produto.packing_rotation),
+            flexible=produto.packing_flexible,
+            allowed=(spec.id,),
+        )
+        unidades = unit_capacity(item, spec, regras_loja)
+        cabem.append(ProductFit(product_id=produto.id, name=produto.name, units=unidades))
+    return PackagePreview(
+        billed_outer_mm=[fora.length, fora.width, fora.height],
+        cubic_grams=-(-fora.volume // CORREIOS.cubic_divisor),
+        cubic_free=fora.volume <= CORREIOS_CUBIC_FREE_MM3,
+        warnings=avisos,
+        fits=cabem,
+    )
+
+
+@planning_router.post(
+    "/simulate",
+    response_model=SimulateOut,
+    summary="Monta as combinações de caixas de um carrinho de teste (sem cotar)",
+    dependencies=[Depends(rate_limit("packing_simulate", 30, 60))],
+)
+async def simulate(session: DbSession, tenant: PackageReader, body: SimulateIn) -> SimulateOut:
+    if sum(line.quantity_milli for line in body.lines) > MAX_SIM_UNITS * 1000:
+        raise ValidationError(f"No máximo {MAX_SIM_UNITS} unidades por simulação.")
+    cfg = _settings_packing(tenant)
+    linhas = [LineIn(line.variant_id, line.quantity_milli) for line in body.lines]
+    entradas = await load_packing_inputs(session, linhas, cfg, now=utcnow())
+    rotulos = {chave: (nome, sku) for chave, nome, sku in entradas.labels}
+    if not entradas.classes:
+        return SimulateOut(
+            plans=[],
+            problem=None,
+            missing=list(entradas.missing),
+            fallbacks=list(entradas.fallbacks),
+        )
+    todos = await asyncio.to_thread(
+        plan_candidates, entradas.classes, entradas.packages, entradas.rules
+    )
+    cotados = {p.hash for p in select_top_k(todos.candidates, cfg.max_candidates)}
+    planos = [
+        SimPlan(
+            strategy=plano.strategy,
+            hash=plano.hash,
+            degraded=plano.degraded,
+            quoted=plano.hash in cotados,
+            estimate_cents={perfil.name: proxy(plano, perfil) for perfil in PROFILES},
+            parcels=[_sim_parcel(v, rotulos) for v in plano.parcels],
+        )
+        for plano in todos.candidates
+    ]
+    return SimulateOut(
+        plans=planos,
+        problem=todos.problem,
+        missing=list(entradas.missing),
+        fallbacks=list(entradas.fallbacks),
+    )
+
+
+def _sim_parcel(volume: PlannedParcel, rotulos: dict[str, tuple[str, str]]) -> SimParcel:
+    return SimParcel(
+        package_id=volume.package_id,
+        package_name=volume.package_name,
+        kind=volume.kind,
+        outer_mm=list(volume.outer.sorted_desc()),
+        gross_grams=volume.gross_g,
+        billable_correios_grams=billable_g(volume.gross_g, volume.outer, CORREIOS),
+        value_cents=volume.value_cents,
+        material_cents=volume.material_cents,
+        own=volume.own,
+        oversize=volume.oversize,
+        declared=volume.declared,
+        items=[
+            SimItem(
+                key=chave,
+                name=rotulos.get(chave, (chave, ""))[0],
+                sku=rotulos.get(chave, ("", ""))[1],
+                units=n,
+            )
+            for chave, n in volume.contents
+        ],
+    )

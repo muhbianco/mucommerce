@@ -396,3 +396,190 @@ async def test_variacao_tem_medida_propria_ou_herda_as_tres(
     )
     assert so_peso.status_code == 200
     assert so_peso.json()["variants"][0]["weight_grams"] == 500
+
+
+# ----------------------------------------------------------------------------- prévia e simulador
+
+
+async def _tres_caixas(client: AsyncClient, tenant: Any, owner: dict[str, str]) -> dict[str, str]:
+    p = await nova(
+        client,
+        tenant,
+        owner,
+        name="Caixa P",
+        inner_length_mm=200,
+        inner_width_mm=150,
+        inner_height_mm=100,
+        empty_weight_grams=80,
+    )
+    m = await nova(client, tenant, owner, name="Caixa M")
+    g = await nova(
+        client,
+        tenant,
+        owner,
+        name="Caixa G",
+        inner_length_mm=400,
+        inner_width_mm=300,
+        inner_height_mm=200,
+        empty_weight_grams=300,
+    )
+    return {"P": p["id"], "M": m["id"], "G": g["id"]}
+
+
+async def test_previa_do_produto_mostra_calculada_e_declarada(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner = await loja(client, session_factory)
+    ids = await _tres_caixas(client, tenant, owner)
+    rota = f"{base(tenant)}/shipping/packing-preview/product"
+    auto = (await client.post(rota, json=RABIOLA, headers=owner)).json()
+    por_nome = {c["name"]: c for c in auto}
+    assert {n: c["calculated"] for n, c in por_nome.items()} == {
+        "Caixa P": 6,
+        "Caixa M": 18,
+        "Caixa G": 48,
+    }
+    assert all(c["allowed"] for c in auto), "no automático, todas as automáticas valem"
+
+    flexivel = (
+        await client.post(
+            rota,
+            json=RABIOLA
+            | {
+                "flexible": True,
+                "mode": "restricted",
+                "rules": [{"package_id": ids["M"], "max_units": 25}],
+            },
+            headers=owner,
+        )
+    ).json()
+    m = next(c for c in flexivel if c["package_id"] == ids["M"])
+    assert (m["calculated"], m["declared"], m["effective"]) == (18, 25, 25)
+    assert (m["declared_check"], m["declared_percent"]) == ("over_physical", 139)
+    assert [c["allowed"] for c in flexivel if c["package_id"] != ids["M"]] == [False, False]
+
+    rigido = (
+        await client.post(
+            rota,
+            json=RABIOLA
+            | {"mode": "restricted", "rules": [{"package_id": ids["M"], "max_units": 25}]},
+            headers=owner,
+        )
+    ).json()
+    m = next(c for c in rigido if c["package_id"] == ids["M"])
+    assert m["effective"] == 18, "rígido: a declaração só reduz"
+
+
+async def test_previa_da_embalagem_avisa_e_diz_quanto_cabe(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner = await loja(client, session_factory)
+    await create_product(client, tenant, owner, name="Rabiola", **RABIOLA)
+    rota = f"{base(tenant)}/shipping/packing-preview/package"
+    corpo = {k: v for k, v in CAIXA_M.items() if k != "name"}
+    m = (await client.post(rota, json=corpo, headers=owner)).json()
+    assert m["billed_outer_mm"] == [308, 208, 158]
+    assert m["cubic_free"] is True
+    assert m["warnings"] == []
+    assert [(f["name"], f["units"]) for f in m["fits"]] == [("Rabiola", 18)]
+
+    tubo = (
+        await client.post(
+            rota,
+            json={
+                "kind": "tube",
+                "inner_length_mm": 800,
+                "inner_width_mm": 100,
+                "inner_height_mm": 100,
+            },
+            headers=owner,
+        )
+    ).json()
+    assert set(tubo["warnings"]) == {"nonmech_shape", "nonmech_side"}
+
+
+async def test_simulador_monta_os_planos_sem_cotar(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner = await loja(client, session_factory)
+    ids = await _tres_caixas(client, tenant, owner)
+    rabiola = await create_product(client, tenant, owner, name="Rabiola", **RABIOLA)
+    sem_medida = await create_product(client, tenant, owner, name="Sem medida")
+    servico = await create_product(client, tenant, owner, name="Montagem", kind="service")
+    resposta = await client.post(
+        f"{base(tenant)}/shipping/simulate",
+        json={
+            "lines": [
+                {"variant_id": rabiola["variants"][0]["id"], "quantity_milli": 4000},
+                {"variant_id": sem_medida["variants"][0]["id"], "quantity_milli": 1000},
+                {"variant_id": servico["variants"][0]["id"], "quantity_milli": 1000},
+            ]
+        },
+        headers=owner,
+    )
+    assert resposta.status_code == 200, resposta.text
+    corpo = resposta.json()
+    assert corpo["missing"] == [sem_medida["variants"][0]["id"]]
+    consolidar = next(p for p in corpo["plans"] if p["strategy"] == "consolidate")
+    assert [v["package_id"] for v in consolidar["parcels"]] == [ids["P"]]
+    volume = consolidar["parcels"][0]
+    assert volume["items"] == [
+        {"key": rabiola["variants"][0]["id"], "name": "Rabiola", "sku": rabiola["sku"], "units": 4}
+    ]
+    assert volume["gross_grams"] == 80 + 4 * 150
+    assert any(p["quoted"] for p in corpo["plans"])
+
+    demais = await client.post(
+        f"{base(tenant)}/shipping/simulate",
+        json={"lines": [{"variant_id": rabiola["variants"][0]["id"], "quantity_milli": 500_000}]},
+        headers=owner,
+    )
+    assert demais.status_code == 200
+    acima = await client.post(
+        f"{base(tenant)}/shipping/simulate",
+        json={
+            "lines": [
+                {"variant_id": rabiola["variants"][0]["id"], "quantity_milli": 400_000},
+                {"variant_id": sem_medida["variants"][0]["id"], "quantity_milli": 200_000},
+            ]
+        },
+        headers=owner,
+    )
+    assert acima.status_code == 422
+
+
+async def test_vendido_a_peso_vira_pecas_inteiras_e_uma_parcial(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    from app.shipping.inputs import LineIn, load_packing_inputs
+    from app.tenancy.context import bind_session_tenant
+    from app.tenancy.settings_schemas import PackingSettings
+
+    tenant, owner = await loja(client, session_factory)
+    await nova(client, tenant, owner)
+    queijo = await create_product(
+        client,
+        tenant,
+        owner,
+        name="Queijo",
+        sold_by="weight",
+        unit_label="kg",
+        weight_grams=1000,
+        width_mm=100,
+        height_mm=100,
+        depth_mm=100,
+    )
+    variante = queijo["variants"][0]["id"]
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        from app.models.base import utcnow
+
+        entradas = await load_packing_inputs(
+            session,
+            [LineIn(variante, 2000), LineIn(variante, 500)],
+            PackingSettings(),
+            now=utcnow(),
+        )
+    pecas = {c.key: (c.units, c.weight_g) for c in entradas.classes}
+    # 2,5 kg = 2 peças inteiras de 1 kg + 1 peça de 500 g (as duas linhas somam).
+    assert pecas == {variante: (2, 1000), f"{variante}~500": (1, 500)}
