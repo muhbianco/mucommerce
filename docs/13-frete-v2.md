@@ -708,7 +708,9 @@ Dependências:
 | F2.5 | doc oficial conferida; sandbox aguardando o dono | ver "Fatos verificados" abaixo; falta rodar `scripts/melhorenvio_probe.py` com a conta sandbox e aprovar o registro |
 | F4 | feito, exceto "Serviços oferecidos" | Embalagens (assistente, padrão, outras, arquivadas, regras, simulador sem cotação real), nova/edição com prévia, Envio sem a caixa do v1 e com checklist; a lista de serviços lê o endpoint do Melhor Envio e por isso espera o portão |
 | F5 | feito | "Envio e embalagem" no produto (g/kg e cm, modos, características, regras com capacidade declarada, "Onde cabe" do servidor), medidas por variação; prévia ao vivo (ilha JS) ficou para depois — hoje atualiza ao salvar |
-| F3a, F3b, F6, F7, F8 | esperando o portão F2.5 | cotação com o plano, vitrine com CEP, etiqueta por volume, liberação |
+| F2.5 | **aprovado** em 04/10/2026 | doc oficial + sandbox; ver "Fatos verificados" |
+| F3a | feito (branch `frete-v2`) | cotação do plano (`consolidate`, uma chamada) com seguro em `volumes[].insurance` e cm inteiros para cima; opções assinadas com `<hash>:<modo>`; faixa de prazo; `place` reconstrói o plano antes dos locks e grava `parcel_plan`; despacho usa o plano congelado (v1 recalcula como antes); trava do `per_volume` até a F7; problema novo `too_many_parcels`; sem embalagem ativa ou flag desligada = v1 |
+| F3b, F6, F7, F8 | a fazer | até 3 combinações por serviço, vitrine com CEP, etiqueta por volume, liberação |
 
 Benchmark do motor com as quatro estratégias (`python -m scripts.bench_packing 3000`, máquina de
 dev, 04/10/2026):
@@ -751,4 +753,4 @@ máximo `max_candidates` (3), sem perder precisão. O despacho por volume (F7) c
 mais de um volume só o 1º vai segurado. O preço muda pouco (PAC 54,30 contra 54,04), mas o seguro
 fica errado. A correção entra na F3 (`volumes[].insurance`).
 
-**Aprovação do dono:** pendente.
+**Aprovação do dono:** aprovado em 04/10/2026 ("aprovado, pode seguir com a F3a").

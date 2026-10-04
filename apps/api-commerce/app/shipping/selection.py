@@ -34,6 +34,9 @@ def parse_selection(raw: Any) -> ShippingSelection | None:
             signature=str(raw["signature"]),
             cart=str(raw["cart"]),
             delivery_days=int(raw["delivery_days"]) if raw.get("delivery_days") else None,
+            plan=str(raw.get("plan") or ""),
+            delivery_min=int(raw["delivery_min"]) if raw.get("delivery_min") else None,
+            delivery_max=int(raw["delivery_max"]) if raw.get("delivery_max") else None,
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -50,6 +53,18 @@ class ShippingSelection:
     signature: str
     cart: str
     delivery_days: int | None = None
+    #: Frete v2: `<hash do plano>:<modo de etiqueta>`, assinado junto. Vazio = cotação v1.
+    plan: str = ""
+    delivery_min: int | None = None
+    delivery_max: int | None = None
+
+    @property
+    def plan_hash(self) -> str:
+        return self.plan.partition(":")[0]
+
+    @property
+    def label_mode(self) -> str:
+        return self.plan.partition(":")[2]
 
     def snapshot(self) -> dict[str, Any]:
         """O que fica congelado no pedido: sem assinatura, que não serve depois."""
@@ -60,5 +75,8 @@ class ShippingSelection:
             "carrier": self.carrier,
             "price_cents": self.price_cents,
             "delivery_days": self.delivery_days,
+            "delivery_min": self.delivery_min,
+            "delivery_max": self.delivery_max,
             "quoted_at": self.quoted_at.isoformat(),
+            "plan": self.plan or None,
         }

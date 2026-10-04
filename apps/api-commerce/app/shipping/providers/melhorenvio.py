@@ -9,6 +9,16 @@ gerar etiqueta (`/shipment/generate`) → imprimir (`/shipment/print`) → rastr
 Unidades: a API fala **centímetro, quilo e real**; o nosso domínio fala milímetro, grama e
 centavo. A conversão mora aqui e em nenhum outro lugar.
 
+Conferido no sandbox em 04/10/2026 (docs/13-frete-v2.md, "Fatos verificados"):
+
+- seguro por volume só funciona em `volumes[].insurance`; `options.insurance_value` vai só
+  para o 1º volume, e `volumes[].insurance_value` é ignorado;
+- uma cotação com N volumes já traz o preço de cada transportadora para a remessa inteira —
+  nos Correios, a soma por volume, com o preço de cada um em `packages[].price`;
+- a API arredonda as medidas para inteiro (0,5 cm virou 0 nos Correios): mandamos centímetros
+  inteiros **arredondados para cima**, para nunca cotar uma caixa menor que a real;
+- `height`/`length` é a grafia certa (a do OpenAPI, `heigth`/`lenght`, é recusada).
+
 Idempotência: a API não tem chave de idempotência. Quem impede etiqueta comprada duas vezes é a
 linha de `order_shipments` com o pedido único — aqui só mandamos a nossa referência em `tags`,
 para o operador achar o pedido do lado deles.
@@ -69,8 +79,16 @@ _STATUS: dict[str, TrackingStatus] = {
 }
 
 
-def _cm(mm: int) -> float:
-    return round(max(mm, 1) / 10, 1)
+#: Quem aceita vários volumes numa etiqueta só, na compra. Correios (1, 2, 17), J&T, Loggi,
+#: .package Centralizado e Total Express exigem uma inserção por volume (docs de compra e
+#: central de ajuda). Jadlog aceita a remessa com vários volumes; o teto de 5 é da central de
+#: ajuda e se confirma na compra (F7). O que não estiver aqui conta como 1.
+_MULTI_VOLUME = {"jadlog": 5}
+
+
+def _cm(mm: int) -> int:
+    """Milímetros → centímetros inteiros, para cima (a API arredonda e pode cortar para baixo)."""
+    return max(1, -(-mm // 10))
 
 
 def _kg(grams: int) -> float:
@@ -88,14 +106,17 @@ def _cents(value: Any) -> int:
         return 0
 
 
-def volume(parcel: Parcel) -> dict[str, Any]:
-    """Um volume nosso no formato deles (cm/kg)."""
-    return {
+def volume(parcel: Parcel, *, insured: bool = True) -> dict[str, Any]:
+    """Um volume nosso no formato deles (cm/kg), com o seguro **dele** (`insurance`)."""
+    corpo: dict[str, Any] = {
         "height": _cm(parcel.height_mm),
         "width": _cm(parcel.width_mm),
         "length": _cm(parcel.depth_mm),
         "weight": _kg(parcel.weight_grams),
     }
+    if insured:
+        corpo["insurance"] = _reais(parcel.value_cents)
+    return corpo
 
 
 def party(who: ShippingParty) -> dict[str, Any]:
@@ -137,19 +158,34 @@ def parse_options(payload: Any) -> tuple[ShippingOption, ...]:
         erro = item.get("error")
         preco = item.get("custom_price") or item.get("price")
         prazo = item.get("custom_delivery_time") or item.get("delivery_time")
+        faixa = item.get("custom_delivery_range") or item.get("delivery_range")
+        faixa = faixa if isinstance(faixa, dict) else {}
+        bruto_pacotes = item.get("packages")
+        pacotes: list[Any] = bruto_pacotes if isinstance(bruto_pacotes, list) else []
+        precos = [p.get("price") for p in pacotes if isinstance(p, dict)]
+        transportadora = str((empresa or {}).get("name") or "")
         opcoes.append(
             ShippingOption(
                 service_code=str(item.get("id") or ""),
                 service_name=str(item.get("name") or ""),
-                carrier=str((empresa or {}).get("name") or ""),
+                carrier=transportadora,
                 price_cents=_cents(preco),
-                delivery_days=int(prazo)
-                if isinstance(prazo, (int, float, str)) and str(prazo).isdigit()
-                else None,
+                delivery_days=_int(prazo),
                 error=str(erro) if erro else None,
+                delivery_min=_int(faixa.get("min")),
+                delivery_max=_int(faixa.get("max")),
+                # Só quando todo volume veio com preço (Correios); senão a cobrança é da remessa.
+                parcel_prices_cents=tuple(_cents(p) for p in precos)
+                if precos and all(p is not None for p in precos)
+                else (),
+                multi_volume_max=_MULTI_VOLUME.get(transportadora.casefold(), 1),
             )
         )
     return tuple(opcoes)
+
+
+def _int(value: Any) -> int | None:
+    return int(value) if isinstance(value, (int, float, str)) and str(value).isdigit() else None
 
 
 class MelhorEnvioProvider:
@@ -176,12 +212,9 @@ class MelhorEnvioProvider:
         corpo: dict[str, Any] = {
             "from": {"postal_code": request.origin_postal_code},
             "to": {"postal_code": request.destination_postal_code},
+            # Seguro dentro de cada volume: em `options` ele ia todo para o 1º (sandbox).
             "volumes": [volume(p) for p in request.parcels],
-            "options": {
-                "insurance_value": _reais(sum(p.value_cents for p in request.parcels)),
-                "receipt": False,
-                "own_hand": False,
-            },
+            "options": {"receipt": False, "own_hand": False},
         }
         if request.services:
             corpo["services"] = ",".join(request.services)
@@ -268,7 +301,8 @@ class MelhorEnvioProvider:
                     "unitary_value": _reais(sum(p.value_cents for p in request.parcels)),
                 }
             ],
-            "volumes": [volume(p) for p in request.parcels],
+            # Na compra o seguro segue em `options` até a F7 conferir o carrinho no sandbox.
+            "volumes": [volume(p, insured=False) for p in request.parcels],
             "options": {
                 "insurance_value": _reais(request.insurance_cents),
                 "receipt": False,

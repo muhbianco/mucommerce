@@ -40,6 +40,13 @@ class ShippingChoiceIn(StrictModel):
     quoted_at: datetime
     signature: Annotated[str, Field(min_length=16, max_length=128)]
     cart: Annotated[str, Field(min_length=8, max_length=64)]
+    #: Frete v2: o plano de volumes assinado junto (vazio nas cotações v1). A vitrine devolve a
+    #: opção inteira, então todo campo novo da leitura precisa caber aqui no mesmo deploy.
+    plan: Annotated[
+        str, Field(max_length=64, pattern=r"^([0-9a-f]{32}:(single|per_volume|multi_volume))?$")
+    ] = ""
+    delivery_min: Annotated[int, Field(ge=0, le=365)] | None = None
+    delivery_max: Annotated[int, Field(ge=0, le=365)] | None = None
 
 
 class FulfillmentChoiceIn(StrictModel):

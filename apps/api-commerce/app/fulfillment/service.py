@@ -202,6 +202,7 @@ def _shipping_problem(
         service_code=selection.service_code,
         price_cents=selection.price_cents,
         quoted_at=selection.quoted_at,
+        plan=selection.plan,
     )
     return None if confere else "quote_invalid"
 

@@ -57,6 +57,11 @@ interface ShippingOption {
   quoted_at: string;
   signature: string;
   cart: string;
+  /** Frete v2: o plano de caixas assinado junto (volta intacto, senão a assinatura não confere). */
+  plan?: string;
+  /** Faixa de prazo em dias úteis, já com o preparo da loja. */
+  delivery_min?: number | null;
+  delivery_max?: number | null;
 }
 
 interface ShippingQuote {
@@ -127,6 +132,7 @@ const SHIPPING_PROBLEM: Record<string, string> = {
   missing_dimensions: "Falta o peso ou o tamanho de um item para calcular o frete. Avise a loja.",
   unavailable: "A transportadora não respondeu agora. Tente de novo em instantes.",
   no_service: "Nenhuma transportadora atende esse endereço com o que está no carrinho.",
+  too_many_parcels: "Este pedido precisa de mais caixas do que a loja envia de uma vez. Fale com a loja.",
   address_required: "Escolha um endereço para calcular.",
 };
 
@@ -519,7 +525,11 @@ export default async function CartPage({
                               <input type="radio" name="option" value={JSON.stringify(option)} required />
                               <span className={styles.quoteName}>
                                 {option.carrier} {option.service_name}
-                                <span className="muted">{prazo(option.delivery_days).replace(/^ · /, "")}</span>
+                                <span className="muted">
+                                  {option.delivery_min && option.delivery_max && option.delivery_min < option.delivery_max
+                                    ? `chega em ${option.delivery_min} a ${option.delivery_max} dias úteis`
+                                    : prazo(option.delivery_days).replace(/^ · /, "")}
+                                </span>
                               </span>
                               <span className={styles.quotePrice}>{money(option.price_cents, currency)}</span>
                             </label>

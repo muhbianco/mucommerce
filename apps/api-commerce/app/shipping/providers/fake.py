@@ -58,28 +58,39 @@ class FakeShippingProvider:
     ) -> tuple[ShippingOption, ...]:
         if request.destination_postal_code == CEP_INSTAVEL:
             raise ShippingProviderError("provedor instável", http_status=503)
-        peso = sum(p.weight_grams for p in request.parcels)
         distancia = abs(
             int(request.destination_postal_code[:5]) - int(request.origin_postal_code[:5])
         )
-        base = 1500 + peso * 2 + distancia // 10
+        # Econômico cobra por volume e não junta volumes numa etiqueta (como os Correios);
+        # Expresso cobra a remessa e aceita até 5 volumes por etiqueta (como a Jadlog). Com um
+        # volume só, os preços são os de sempre.
+        por_volume = tuple(1500 + p.weight_grams * 2 + distancia // 10 for p in request.parcels)
+        peso = sum(p.weight_grams for p in request.parcels)
+        remessa = 1500 + peso * 2 + distancia // 10
         fora = request.destination_postal_code == CEP_FORA_DE_AREA
         opcoes: tuple[ShippingOption, ...] = (
             ShippingOption(
                 service_code="fake_economico",
                 service_name="Fake Econômico",
                 carrier="Fake",
-                price_cents=base,
+                price_cents=sum(por_volume),
                 delivery_days=8,
                 error="fora da área de entrega" if fora else None,
+                delivery_min=6,
+                delivery_max=8,
+                parcel_prices_cents=por_volume,
+                multi_volume_max=1,
             ),
             ShippingOption(
                 service_code="fake_expresso",
                 service_name="Fake Expresso",
                 carrier="Fake",
-                price_cents=base * 2,
+                price_cents=remessa * 2,
                 delivery_days=2,
                 error="fora da área de entrega" if fora else None,
+                delivery_min=1,
+                delivery_max=2,
+                multi_volume_max=5,
             ),
         )
         if request.services:

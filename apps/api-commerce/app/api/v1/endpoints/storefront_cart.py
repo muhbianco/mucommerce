@@ -248,6 +248,10 @@ class ShippingOptionRead(BaseModel):
     quoted_at: str
     signature: str
     cart: str
+    plan: str = ""
+    #: Faixa de prazo em dias úteis, já com os dias de preparo da loja.
+    delivery_min: int | None = None
+    delivery_max: int | None = None
 
 
 class ShippingOptionsRead(BaseModel):

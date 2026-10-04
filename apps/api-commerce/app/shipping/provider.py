@@ -137,6 +137,17 @@ class ShippingOption:
     price_cents: int
     delivery_days: int | None = None
     error: str | None = None
+    #: Faixa de prazo em dias úteis (o Melhor Envio devolve `delivery_range`); `delivery_days`
+    #: é o máximo dela.
+    delivery_min: int | None = None
+    delivery_max: int | None = None
+    #: Preço de cada volume, quando a transportadora cobra por volume (Correios). Vazio quando
+    #: ela cobra a remessa inteira (Jadlog).
+    parcel_prices_cents: tuple[int, ...] = ()
+    #: Quantos volumes cabem numa etiqueta só na compra. 1 = uma etiqueta por volume (Correios,
+    #: J&T, Loggi, Total — docs de compra do Melhor Envio). Desconhecido conta como 1: é sempre
+    #: válido e nunca promete uma compra que a transportadora recusaria.
+    multi_volume_max: int = 1
 
     @property
     def usable(self) -> bool:

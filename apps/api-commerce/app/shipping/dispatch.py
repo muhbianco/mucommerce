@@ -32,8 +32,10 @@ from app.orders.state_machine import OrderStatus
 from app.shipping import registry
 from app.shipping.models import OrderShipment, ShipmentStatus
 from app.shipping.packing import MissingDimensions
+from app.shipping.plan import parcels_from_snapshot
 from app.shipping.provider import (
     InsufficientBalanceError,
+    Parcel,
     ShipmentRequest,
     ShippingCredentials,
     ShippingParty,
@@ -180,18 +182,18 @@ class ShipmentService:
     async def _request(
         self, order: Order, remessa: OrderShipment, cfg: ShippingSettings
     ) -> ShipmentRequest:
-        itens = await self._items(order.id)
-        try:
-            volumes = await parcels_for(
-                self.session,
-                [QuoteLine(i.variant_id, i.quantity_milli) for i in itens],
-                cfg,
-            )
-        except MissingDimensions as exc:
-            raise ValidationError(
-                "Produto sem peso ou medida: não dá para gerar a etiqueta.",
-                variants=list(exc.variants),
-            ) from exc
+        congelado = (order.fulfillment or {}).get("parcel_plan")
+        if isinstance(congelado, dict):
+            # Frete v2: a etiqueta sai com os volumes que foram cotados e pagos — nunca recalcula
+            # com a medida de hoje. Vale com a flag ligada ou não (desligar não muda pedido feito).
+            if congelado.get("label_mode") == "per_volume":
+                # A cotação v2 não vende isto até a etiqueta por volume existir (F7).
+                raise ValidationError(
+                    "Este pedido precisa de uma etiqueta por volume, que ainda não está disponível."
+                )
+            volumes = parcels_from_snapshot(congelado)
+        else:
+            volumes = await self._legacy_parcels(order, cfg)
         if not volumes:
             raise ValidationError("Pedido sem volume para enviar.")
         remessa.parcels = [
@@ -215,6 +217,21 @@ class ShipmentService:
             insurance_cents=sum(p.value_cents for p in volumes),
             notes=f"Pedido {order.number}",
         )
+
+    async def _legacy_parcels(self, order: Order, cfg: ShippingSettings) -> tuple[Parcel, ...]:
+        """Pedido do motor v1 (sem plano congelado): recalcula como sempre fez."""
+        itens = await self._items(order.id)
+        try:
+            return await parcels_for(
+                self.session,
+                [QuoteLine(i.variant_id, i.quantity_milli) for i in itens],
+                cfg,
+            )
+        except MissingDimensions as exc:
+            raise ValidationError(
+                "Produto sem peso ou medida: não dá para gerar a etiqueta.",
+                variants=list(exc.variants),
+            ) from exc
 
     async def _items(self, order_id: str) -> list[OrderItem]:
         stmt = (

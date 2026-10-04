@@ -7,6 +7,11 @@ domínio sabe conferir sozinho depois.
 Princípio do caminho do checkout: **nunca travar e nunca mentir**. Timeout curto, cache da
 chamada cara, e quando a transportadora não responde o cliente vê "frete indisponível agora",
 não uma lista vazia que parece "não entregamos aí".
+
+Frete v2 (flag `shipping.packing_v2`, docs/13-frete-v2.md): o motor de embalagem monta o plano
+de volumes, a transportadora cota esse plano (uma chamada, com o seguro por volume) e cada
+opção sai assinada junto com o hash do plano — é ele que o `place` reconstrói e o despacho usa.
+Sem embalagem ativa, o v2 não se aplica e a cotação segue pelo v1.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -27,7 +32,10 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.credentials import CredentialStore
 from app.shipping import registry, signing
+from app.shipping.inputs import LineIn, load_packing_inputs
 from app.shipping.packing import Box, MissingDimensions, PackItem, item_from_variant, pack
+from app.shipping.packing.candidates import CONSOLIDATE, plan_candidates
+from app.shipping.plan import label_mode, to_parcel
 from app.shipping.provider import (
     Parcel,
     QuoteRequest,
@@ -48,7 +56,13 @@ QuoteProblem = Literal[
     "missing_dimensions",
     "unavailable",
     "no_service",
+    # Frete v2: toda combinação passou do teto de volumes da loja (regras de embalagem).
+    "too_many_parcels",
 ]
+
+#: Recusa que o motor v2 acrescenta enquanto a etiqueta por volume (F7) não existe: a opção
+#: some em vez de vender um envio que o despacho ainda não sabe comprar.
+_PER_VOLUME_PENDING = "Envio em mais de um volume ainda não disponível neste serviço."
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +84,10 @@ class QuotedOption:
     quoted_at: datetime
     signature: str
     cart: str
+    #: Frete v2: `<hash do plano>:<modo de etiqueta>`, assinado junto. Vazio no v1.
+    plan: str = ""
+    delivery_min: int | None = None
+    delivery_max: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +100,9 @@ class QuotedOption:
             "quoted_at": self.quoted_at.isoformat(),
             "signature": self.signature,
             "cart": self.cart,
+            "plan": self.plan,
+            "delivery_min": self.delivery_min,
+            "delivery_max": self.delivery_max,
         }
 
 
@@ -115,6 +136,10 @@ class ShippingQuoteService:
         credenciais = await self._credentials(cfg)
         if credenciais is None:
             return QuoteOutcome(problem="not_configured")
+        if self.tenant.feature("shipping.packing_v2"):
+            resultado = await self._options_v2(provider, credenciais, cfg, destino, lines)
+            if resultado is not None:
+                return resultado
         try:
             volumes = await self._parcels(lines, cfg)
         except MissingDimensions as exc:
@@ -133,6 +158,83 @@ class ShippingQuoteService:
         opcoes = tuple(self._sign(cfg, opcao, carrinho) for opcao in bruto if opcao.usable)
         if not opcoes:
             return QuoteOutcome(problem="no_service", refusals=_refusals(bruto))
+        return QuoteOutcome(options=tuple(sorted(opcoes, key=lambda o: o.price_cents)))
+
+    # ------------------------------------------------------------------ frete v2
+
+    async def _options_v2(
+        self,
+        provider: Any,
+        credentials: ShippingCredentials,
+        cfg: ShippingSettings,
+        destino: str,
+        lines: Sequence[QuoteLine],
+    ) -> QuoteOutcome | None:
+        """Planeja, cota o plano e assina cada opção com ele. `None` = v2 não se aplica.
+
+        F3a: cota o plano da estratégia `consolidate` (uma chamada). A F3b cota até
+        `max_candidates` combinações e fica, por serviço, com a mais barata.
+        """
+        regras = cfg.packing
+        entradas = await load_packing_inputs(
+            self.session,
+            [LineIn(line.variant_id, line.quantity_milli) for line in lines],
+            regras,
+            now=self.now,
+        )
+        if entradas.missing:
+            return QuoteOutcome(problem="missing_dimensions", missing=entradas.missing)
+        if not entradas.classes:
+            return QuoteOutcome(problem="shipping_disabled")
+        if not entradas.packages:
+            logger.info("Frete v2 sem embalagem ativa; cotação pelo v1")
+            return None
+        candidatos = await asyncio.to_thread(
+            plan_candidates, entradas.classes, entradas.packages, entradas.rules
+        )
+        if not candidatos.candidates:
+            return QuoteOutcome(problem="too_many_parcels")
+        plano = next(
+            (p for p in candidatos.candidates if p.strategy == CONSOLIDATE),
+            candidatos.candidates[0],
+        )
+        volumes = tuple(to_parcel(v) for v in plano.parcels)
+        bruto = await self._ask(provider, credentials, cfg, destino, volumes)
+        if bruto is None:
+            return QuoteOutcome(problem="unavailable")
+        carrinho = signing.cart_signature(
+            tenant_id=self.tenant.id,
+            destination_postal_code=destino,
+            lines=[(line.variant_id, line.quantity_milli) for line in lines],
+        )
+        material = sum(v.material_cents for v in plano.parcels) if regras.charge_material else 0
+        opcoes: list[QuotedOption] = []
+        recusas: list[ShippingOption] = []
+        for opcao in bruto:
+            if not opcao.usable:
+                recusas.append(opcao)
+                continue
+            modo = label_mode(len(volumes), opcao.multi_volume_max)
+            if modo == "per_volume":
+                recusas.append(replace(opcao, error=_PER_VOLUME_PENDING))
+                continue
+            opcoes.append(
+                self._sign(cfg, opcao, carrinho, plan=f"{plano.hash}:{modo}", extra_cents=material)
+            )
+        logger.info(
+            "Cotação de frete",
+            extra={
+                "engine": "v2",
+                "plan": plano.hash,
+                "strategy": plano.strategy,
+                "degraded": plano.degraded,
+                "parcels": len(volumes),
+                "dest_prefix": destino[:3],
+                "offers": len(opcoes),
+            },
+        )
+        if not opcoes:
+            return QuoteOutcome(problem="no_service", refusals=_refusals(recusas))
         return QuoteOutcome(options=tuple(sorted(opcoes, key=lambda o: o.price_cents)))
 
     # ------------------------------------------------------------------ interno
@@ -166,7 +268,12 @@ class ShippingQuoteService:
         chave = _cache_key(self.tenant.id, cfg, destino, volumes)
         guardado = await _cache.get(chave)
         if isinstance(guardado, list):
-            return tuple(ShippingOption(**item) for item in guardado)
+            return tuple(
+                ShippingOption(
+                    **{**item, "parcel_prices_cents": tuple(item.get("parcel_prices_cents") or ())}
+                )
+                for item in guardado
+            )
         pedido = QuoteRequest(
             origin_postal_code=cfg.origin.postal_code,
             destination_postal_code=destino,
@@ -189,11 +296,17 @@ class ShippingQuoteService:
         )
         return tuple(opcoes)
 
-    def _sign(self, cfg: ShippingSettings, option: ShippingOption, cart: str) -> QuotedOption:
-        preco = _with_markup(option.price_cents, cfg)
-        prazo = (
-            option.delivery_days + cfg.handling_days if option.delivery_days is not None else None
-        )
+    def _sign(
+        self,
+        cfg: ShippingSettings,
+        option: ShippingOption,
+        cart: str,
+        *,
+        plan: str = "",
+        extra_cents: int = 0,
+    ) -> QuotedOption:
+        # Custo da embalagem (quando a loja liga) entra antes do acréscimo: ele é custo dela.
+        preco = _with_markup(option.price_cents + extra_cents, cfg)
         quoted_at = self.now.replace(microsecond=0)
         return QuotedOption(
             provider=cfg.provider,
@@ -201,9 +314,12 @@ class ShippingQuoteService:
             service_name=option.service_name,
             carrier=option.carrier,
             price_cents=preco,
-            delivery_days=prazo,
+            delivery_days=_plus(option.delivery_days, cfg.handling_days),
             quoted_at=quoted_at,
             cart=cart,
+            plan=plan,
+            delivery_min=_plus(option.delivery_min, cfg.handling_days),
+            delivery_max=_plus(option.delivery_max, cfg.handling_days),
             signature=signing.sign(
                 tenant_id=self.tenant.id,
                 cart=cart,
@@ -211,6 +327,7 @@ class ShippingQuoteService:
                 service_code=option.service_code,
                 price_cents=preco,
                 quoted_at=quoted_at,
+                plan=plan,
             ),
         )
 
@@ -290,6 +407,11 @@ def _unit_price(variant: ProductVariant, product: Product) -> int:
     return int(variant.price_cents or product.base_price_cents or 0)
 
 
+def _plus(days: int | None, handling: int) -> int | None:
+    """Prazo da transportadora + dias de preparo da loja (os dois em dias úteis)."""
+    return days + handling if days is not None else None
+
+
 def _with_markup(price_cents: int, cfg: ShippingSettings) -> int:
     """Acréscimo da loja (embalagem, mão de obra). Entra antes da assinatura, senão não vale."""
     return round(price_cents * (100 + cfg.markup_percent) / 100) + cfg.markup_cents
@@ -335,6 +457,7 @@ def _cache_key(
 
 
 def _as_dict(option: ShippingOption) -> dict[str, Any]:
+    """Para o cache. Campo novo com default: entrada antiga do cache continua carregando."""
     return {
         "service_code": option.service_code,
         "service_name": option.service_name,
@@ -342,6 +465,10 @@ def _as_dict(option: ShippingOption) -> dict[str, Any]:
         "price_cents": option.price_cents,
         "delivery_days": option.delivery_days,
         "error": option.error,
+        "delivery_min": option.delivery_min,
+        "delivery_max": option.delivery_max,
+        "parcel_prices_cents": list(option.parcel_prices_cents),
+        "multi_volume_max": option.multi_volume_max,
     }
 
 

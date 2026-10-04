@@ -6,6 +6,10 @@ cotação nenhuma: recalcula o HMAC e sabe se aquilo saiu daqui, para este carri
 
 O que a assinatura amarra: loja, carrinho (itens + endereço), transportadora, serviço, preço e
 o instante da cotação. Mudou qualquer coisa — item, CEP, preço —, a assinatura não confere.
+
+Frete v2: também o **plano de volumes** (`plan` = `<hash>:<modo de etiqueta>`), para a etiqueta
+sair igual à cotação. Vazio (cotação v1) não entra no texto assinado, então as assinaturas
+antigas continuam conferindo byte a byte.
 """
 
 from __future__ import annotations
@@ -44,10 +48,11 @@ def sign(
     service_code: str,
     price_cents: int,
     quoted_at: datetime,
+    plan: str = "",
 ) -> str:
     return hmac.new(
         _key(),
-        _payload(tenant_id, cart, provider, service_code, price_cents, quoted_at),
+        _payload(tenant_id, cart, provider, service_code, price_cents, quoted_at, plan),
         hashlib.sha256,
     ).hexdigest()
 
@@ -61,6 +66,7 @@ def verify(
     service_code: str,
     price_cents: int,
     quoted_at: datetime,
+    plan: str = "",
 ) -> bool:
     esperado = sign(
         tenant_id=tenant_id,
@@ -69,6 +75,7 @@ def verify(
         service_code=service_code,
         price_cents=price_cents,
         quoted_at=quoted_at,
+        plan=plan,
     )
     return hmac.compare_digest(esperado, signature or "")
 
@@ -90,9 +97,11 @@ def _payload(
     service_code: str,
     price_cents: int,
     quoted_at: datetime,
+    plan: str = "",
 ) -> bytes:
     carimbo = quoted_at.replace(microsecond=0).isoformat()
-    return f"{tenant_id}|{cart}|{provider}|{service_code}|{price_cents}|{carimbo}".encode()
+    texto = f"{tenant_id}|{cart}|{provider}|{service_code}|{price_cents}|{carimbo}"
+    return (f"{texto}|{plan}" if plan else texto).encode()
 
 
 def _digits(value: str) -> str:

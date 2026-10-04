@@ -57,6 +57,9 @@ from app.orders.state_machine import (
 from app.payments.closing import close_active_payment
 from app.pricing.quote import LineInput, PricedLine, Quote
 from app.pricing.service import PricingService
+from app.shipping.inputs import LineIn
+from app.shipping.plan import resolve_frozen_plan
+from app.shipping.selection import parse_selection
 from app.tenancy.context import TenantContext
 from app.tenancy.repository import TenantRepository
 from app.tenancy.service import Actor
@@ -104,6 +107,10 @@ class OrderService:
             LineInput(i.variant_id, i.quantity_milli, tuple(i.modifier_ids or ()), key=i.id)
             for i in items
         ]
+        # Frete v2: o plano de volumes assinado é reconstruído **antes** de travar cupom e saldos
+        # (leitura e conta, sem lock). Só depois da assinatura conferida é que um plano que mudou
+        # vira recusa — senão um token adulterado responderia "vencida" em vez de "inválida".
+        plano_token, plano = await self._frozen_plan(cart, lines, now)
         coupons = CouponService(self.session, self.tenant, self.actor)
         # Lock order: cart → coupon → balances. The coupon row is held from here to the commit.
         coupon = await coupons.by_code(cart.coupon_code, lock=True) if cart.coupon_code else None
@@ -124,6 +131,9 @@ class OrderService:
             customer_id=cmd.customer_id,
         )
         self._check_quote(quote, cmd.expected_total_cents)
+        if plano_token and plano is None:
+            # Produto, embalagem ou valor mudaram desde a cotação: o preço era de outro plano.
+            raise FulfillmentInvalidError(problems=["quote_expired"])
         consents = await self._consents(cmd, now)
 
         number = await TenantRepository(self.session).next_sequence(ORDER_SEQUENCE)
@@ -135,6 +145,8 @@ class OrderService:
         applied = quote.coupon if quote.coupon and quote.coupon.discount_cents else None
         if address is not None and fq.type in ("delivery", "shipping"):
             fulfillment["address"] = address_snapshot(address)
+        if plano is not None and fq.type == "shipping":
+            fulfillment["parcel_plan"] = plano
         order = self._insert_order(
             number=number,
             customer_id=cmd.customer_id,
@@ -487,6 +499,25 @@ class OrderService:
         if not items:
             raise CartEmptyError()
         return cart, items
+
+    async def _frozen_plan(
+        self, cart: Any, lines: list[LineInput], now: datetime
+    ) -> tuple[str, dict[str, Any] | None]:
+        """(token do plano escolhido, snapshot reconstruído ou None se o plano mudou)."""
+        bruto = (getattr(cart, "fulfillment", None) or {}) if cart is not None else {}
+        if bruto.get("type") != "shipping":
+            return "", None
+        escolha = parse_selection(bruto.get("shipping"))
+        if escolha is None or not escolha.plan:
+            return "", None
+        plano = await resolve_frozen_plan(
+            self.session,
+            self.tenant,
+            [LineIn(line.variant_id, line.quantity_milli) for line in lines],
+            escolha.plan,
+            now=now,
+        )
+        return escolha.plan, plano
 
     @staticmethod
     def _check_quote(quote: Quote, expected_total_cents: int) -> None:
