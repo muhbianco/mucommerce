@@ -699,7 +699,10 @@ Dependências:
 | F1 | feito (branch `frete-v2`) | 0035–0037, `shipping_packages`, `product_package_rules`, medidas por variação, API de embalagens, regra forte do `max_units` |
 | F2a | feito (branch `frete-v2`) | núcleo do motor: grade com guilhotina, extreme points, verify, consolidate + encolher, degradado, hash; fuzz 5000 sementes verde |
 | F2b | feito (branch `frete-v2`) | flexível (volume, não posição) e declarada com prioridade presa a 200%, tubo (fila pelo eixo), `correios_fit`, `cubic_free`, `per_product`, estimativa local e top‑K; first-fit reaproveitado entre estratégias |
-| F2.5 | aguardando o dono | conta sandbox do Melhor Envio + token fora do repo (ver §10) |
+| F2.5 | doc oficial conferida; sandbox aguardando o dono | ver "Fatos verificados" abaixo; falta rodar `scripts/melhorenvio_probe.py` com a conta sandbox e aprovar o registro |
+| F4 | feito, exceto "Serviços oferecidos" | Embalagens (assistente, padrão, outras, arquivadas, regras, simulador sem cotação real), nova/edição com prévia, Envio sem a caixa do v1 e com checklist; a lista de serviços lê o endpoint do Melhor Envio e por isso espera o portão |
+| F5 | feito | "Envio e embalagem" no produto (g/kg e cm, modos, características, regras com capacidade declarada, "Onde cabe" do servidor), medidas por variação; prévia ao vivo (ilha JS) ficou para depois — hoje atualiza ao salvar |
+| F3a, F3b, F6, F7, F8 | esperando o portão F2.5 | cotação com o plano, vitrine com CEP, etiqueta por volume, liberação |
 
 Benchmark do motor com as quatro estratégias (`python -m scripts.bench_packing 3000`, máquina de
 dev, 04/10/2026):
