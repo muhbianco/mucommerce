@@ -23,6 +23,22 @@ Testes:
   4. grafia dos campos: `height`/`length` x `heigth`/`lenght` (como está no OpenAPI);
   5. prazo: `delivery_time`, `delivery_range` e os `custom_*` de uma rota conhecida;
   6. lista de serviços: `GET /api/v2/me/shipment/services`.
+
+Modo `--dce` (com `--cart`): o caminho inteiro da compra — carrinho, pagamento, geração e
+impressão — para saber onde a nota fiscal ou a DC-e (declaração de conteúdo eletrônica,
+obrigatória desde 06/04/2026) são cobradas. **Gasta saldo do sandbox** (dinheiro de mentira):
+confira se a carteira do sandbox tem uns R$ 200 antes. Casos, todos como envio não comercial:
+  A. remetente CPF, PAC, produtos item a item;
+  B. remetente CPF, Jadlog .Package, produtos item a item;
+  C. remetente CNPJ, PAC, produtos item a item;
+  D. remetente CNPJ, Jadlog .Package, produtos item a item;
+  E. remetente CPF, PAC, uma linha só ("Pedido 123"), como o despacho manda hoje.
+O CPF de teste do remetente vai no arquivo do `--cart`, em `"remetente_cpf"`. Os links das
+etiquetas ficam em `probe-melhorenvio-etiquetas.json` (local: a etiqueta mostra os endereços);
+a saída principal não leva link, chave de documento fiscal nem dado pessoal.
+
+    .venv\\Scripts\\python -m scripts.melhorenvio_probe --cart melhorenvio-partes.json `
+        --dce --out probe-melhorenvio-dce.json
 """
 
 from __future__ import annotations
@@ -30,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -125,12 +142,42 @@ _PESSOAIS = frozenset(
 )
 
 
+#: Chaves que dão acesso a documento ou etiqueta: link da etiqueta abre os endereços, e chave de
+#: NF-e/DC-e carrega o CPF/CNPJ de quem emitiu.
+_ACESSO = frozenset({"url", "key", "chave", "protocol", "self_tracking"})
+_CHAVE_FISCAL = re.compile(r"^\d{44}$")
+
+
 def _sem_pessoais(dados: Any) -> Any:
     if isinstance(dados, dict):
-        return {k: ("<omitido>" if k in _PESSOAIS else _sem_pessoais(v)) for k, v in dados.items()}
+        return {
+            k: (
+                "<omitido>"
+                if k in _PESSOAIS
+                else "<acesso omitido>"
+                if k in _ACESSO and dados.get(k)
+                else _sem_pessoais(v)
+            )
+            for k, v in dados.items()
+        }
     if isinstance(dados, list):
         return [_sem_pessoais(v) for v in dados]
+    if isinstance(dados, str) and _CHAVE_FISCAL.match(dados):
+        return "<chave fiscal omitida>"
     return dados
+
+
+def _chaves(dados: Any, prefixo: str = "") -> list[str]:
+    """Os caminhos de campo de uma resposta (para achar onde a DC-e aparece, sem os valores)."""
+    caminhos: list[str] = []
+    if isinstance(dados, dict):
+        for k, v in dados.items():
+            caminho = f"{prefixo}.{k}" if prefixo else str(k)
+            caminhos.append(caminho)
+            caminhos += _chaves(v, caminho)
+    elif isinstance(dados, list) and dados:
+        caminhos += _chaves(dados[0], f"{prefixo}[]")
+    return caminhos
 
 
 def _volume(
@@ -340,6 +387,137 @@ def _carrinho(sonda: Sonda, partes: dict[str, Any], servicos: list[Any]) -> list
     return linhas
 
 
+#: Produtos de exemplo da DC-e: nome, quantidade e valor unitário em texto, como na doc.
+_ITENS = [
+    {"name": "Rabiola 500 m", "quantity": "3", "unitary_value": "12.00"},
+    {"name": "Carretel de linha 10", "quantity": "1", "unitary_value": "25.00"},
+]
+_LINHA_UNICA = [{"name": "Pedido 123", "quantity": "1", "unitary_value": "61.00"}]
+
+
+def _remetentes(partes: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """O remetente do arquivo em duas versões: só CPF (`document`) e só CNPJ
+    (`company_document`)."""
+    base = {
+        k: v
+        for k, v in partes["from"].items()
+        if k not in {"document", "company_document", "state_register"}
+    }
+    cpf = "".join(ch for ch in str(partes.get("remetente_cpf") or "") if ch.isdigit())
+    cnpj = "".join(ch for ch in str(partes["from"].get("company_document") or "") if ch.isdigit())
+    remetentes: dict[str, dict[str, Any]] = {}
+    if len(cpf) == 11:
+        remetentes["cpf"] = base | {"document": cpf}
+    if len(cnpj) == 14:
+        remetentes["cnpj"] = base | {"company_document": cnpj}
+    return remetentes
+
+
+def _dce(sonda: Sonda, partes: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Carrinho → pagamento → geração → impressão, por caso; para no primeiro passo recusado.
+
+    Devolve o resumo (sem dado pessoal) e os links das etiquetas (só para o arquivo local).
+    """
+    servicos = sonda.chama("dce-servicos", "GET", "/api/v2/me/shipment/services") or []
+    jadlog = next(
+        (
+            s.get("id")
+            for s in servicos
+            if isinstance(s, dict)
+            and "jadlog" in str((s.get("company") or {}).get("name", "")).lower()
+            and ".package" in str(s.get("name", "")).lower()
+        ),
+        None,
+    )
+    saldo = sonda.chama("dce-saldo", "GET", "/api/v2/me/balance")
+    remetentes = _remetentes(partes)
+    casos: list[tuple[str, str, Any, list[dict[str, str]]]] = [
+        ("A-cpf-pac-itens", "cpf", 1, _ITENS),
+        ("B-cpf-jadlog-itens", "cpf", jadlog, _ITENS),
+        ("C-cnpj-pac-itens", "cnpj", 1, _ITENS),
+        ("D-cnpj-jadlog-itens", "cnpj", jadlog, _ITENS),
+        ("E-cpf-pac-linha-unica", "cpf", 1, _LINHA_UNICA),
+    ]
+    linhas: list[dict[str, Any]] = [
+        {"saldo_sandbox": saldo.get("balance") if isinstance(saldo, dict) else None}
+    ]
+    etiquetas: dict[str, str] = {}
+    caixa = {"height": 10, "width": 15, "length": 20, "weight": 0.68}
+    for nome, quem, servico, produtos in casos:
+        linha: dict[str, Any] = {"caso": nome, "servico": servico, "passos": {}}
+        linhas.append(linha)
+        if servico is None or quem not in remetentes:
+            linha["pulado"] = "sem Jadlog .Package na conta" if servico is None else f"sem {quem}"
+            continue
+        corpo = {
+            "service": servico,
+            "from": remetentes[quem],
+            "to": partes["to"],
+            "products": produtos,
+            "volumes": [caixa],
+            "options": {
+                "insurance_value": 61.0,
+                "receipt": False,
+                "own_hand": False,
+                "reverse": False,
+                "non_commercial": True,
+                "platform": "MuhBianco (sondagem)",
+                "tags": [{"tag": f"sonda-{nome}"}],
+            },
+        }
+        item = sonda.chama(f"dce-{nome}-carrinho", "POST", "/api/v2/me/cart", corpo, pessoal=True)
+        linha["passos"]["carrinho"] = _passo(sonda)
+        pedido = item.get("id") if isinstance(item, dict) else None
+        if not pedido:
+            continue
+        sonda.chama(f"dce-{nome}-item", "GET", f"/api/v2/me/cart/{pedido}", pessoal=True)
+        linha["passos"]["item_no_carrinho"] = _passo(sonda, campos=True)
+        pago = sonda.chama(
+            f"dce-{nome}-pagamento",
+            "POST",
+            "/api/v2/me/shipment/checkout",
+            {"orders": [pedido]},
+            pessoal=True,
+        )
+        linha["passos"]["pagamento"] = _passo(sonda)
+        if pago is None:
+            sonda.chama(f"dce-{nome}-limpa", "DELETE", f"/api/v2/me/cart/{pedido}", pessoal=True)
+            continue
+        gerado = sonda.chama(
+            f"dce-{nome}-geracao",
+            "POST",
+            "/api/v2/me/shipment/generate",
+            {"orders": [pedido]},
+            pessoal=True,
+        )
+        linha["passos"]["geracao"] = _passo(sonda, campos=True)
+        if gerado is None:
+            continue
+        sonda.chama(f"dce-{nome}-etiqueta", "GET", f"/api/v2/me/orders/{pedido}", pessoal=True)
+        linha["passos"]["etiqueta"] = _passo(sonda, campos=True)
+        impresso = sonda.chama(
+            f"dce-{nome}-impressao",
+            "POST",
+            "/api/v2/me/shipment/print",
+            {"mode": "private", "orders": [pedido]},
+            pessoal=True,
+        )
+        linha["passos"]["impressao"] = _passo(sonda, campos=True)
+        if isinstance(impresso, dict) and impresso.get("url"):
+            etiquetas[nome] = str(impresso["url"])
+    return linhas, etiquetas
+
+
+def _passo(sonda: Sonda, *, campos: bool = False) -> dict[str, Any]:
+    """O último passo: status, a resposta (já sem dado pessoal) e, se pedido, os caminhos de
+    campo da resposta — é por eles que se acha onde a DC-e aparece."""
+    ultima = sonda.registro[-1]
+    passo: dict[str, Any] = {"status": ultima["status"], "resposta": ultima["resposta"]}
+    if campos:
+        passo["campos"] = sorted(set(_chaves(ultima["resposta"])))
+    return passo
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="probe-melhorenvio.json")
@@ -347,20 +525,38 @@ def main() -> None:
     parser.add_argument(
         "--only-cart", action="store_true", help="roda só os testes de carrinho (exige --cart)"
     )
+    parser.add_argument(
+        "--dce",
+        action="store_true",
+        help="compra de ponta a ponta (gasta saldo do sandbox) para a DC-e (exige --cart)",
+    )
     args = parser.parse_args()
     partes = json.loads(Path(args.cart).read_text(encoding="utf-8")) if args.cart else None
-    if args.only_cart and partes is None:
-        sys.exit("--only-cart precisa de --cart <arquivo com from/to>.")
+    if (args.only_cart or args.dce) and partes is None:
+        sys.exit("--only-cart e --dce precisam de --cart <arquivo com from/to>.")
+    if args.dce and partes is not None and not _remetentes(partes).get("cpf"):
+        sys.exit('--dce precisa de "remetente_cpf" (11 dígitos) no arquivo do --cart.')
 
     sonda = Sonda(_token(), _user_agent())
     try:
-        if args.only_cart and partes is not None:
+        etiquetas: dict[str, str] = {}
+        if args.dce and partes is not None:
+            casos, etiquetas = _dce(sonda, partes)
+            resultado: dict[str, Any] = {"dce": casos}
+        elif args.only_cart and partes is not None:
             servicos = sonda.chama("6-servicos", "GET", "/api/v2/me/shipment/services") or []
             resultado = {"2b_carrinho": _carrinho(sonda, partes, servicos)}
         else:
             resultado = rodar(sonda, partes)
     finally:
         sonda.close()
+    if etiquetas:
+        # Links das etiquetas (mostram os endereços): ficam só na máquina do dono, para abrir o
+        # PDF e ver se a DC-e sai junto. Este arquivo não é lido por ninguém além dele.
+        Path("probe-melhorenvio-etiquetas.json").write_text(
+            json.dumps(etiquetas, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print("Links das etiquetas em probe-melhorenvio-etiquetas.json (só para você abrir).")
     saida = {
         "rodado_em": datetime.now(UTC).isoformat(timespec="seconds"),
         "base": BASE,
