@@ -10,6 +10,7 @@ import {
   DEFAULT_PRESET,
   PACKAGE_KIND_LABEL,
   PACKAGE_PRESETS,
+  QUOTE_PROBLEM_TEXT,
   STRATEGY_LABEL,
   packingSettings,
   type ShippingPackage,
@@ -101,7 +102,10 @@ export default async function Packages({
         nomes.set(variante.id, produto.name);
         return [{ variant_id: variante.id, quantity_milli: (pedidos[i]?.units ?? 1) * 1000 }];
       });
-      simulacao = await api<SimulateOut>(`${path}/shipping/simulate`, { json: { lines } });
+      const cep = (query.cep ?? "").replace(/\D/g, "");
+      simulacao = await api<SimulateOut>(`${path}/shipping/simulate`, {
+        json: { lines, ...(cep.length === 8 ? { postal_code: cep } : {}) },
+      });
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       simErro = error.code;
@@ -388,6 +392,13 @@ export default async function Packages({
                 </label>
               </div>
             ))}
+            <label className={styles.field}>
+              CEP de destino (opcional)
+              <input name="cep" inputMode="numeric" maxLength={9} defaultValue={query.cep ?? ""} placeholder="20040-020" />
+              <span className={styles.fieldHint}>
+                Com CEP, cada combinação é cotada de verdade na sua conta da transportadora.
+              </span>
+            </label>
             <div className={styles.formActions}>
               <button type="submit" className={styles.button}>
                 Montar as caixas
@@ -410,6 +421,7 @@ function SimResult({ result, nomes }: { result: SimulateOut; nomes: Map<string, 
           Sem peso ou medida (ficaram de fora): {result.missing.map((v) => nomes.get(v) ?? v).join(", ")}.
         </p>
       ) : null}
+      {result.quote_problem ? <p className={styles.note}>{QUOTE_PROBLEM_TEXT[result.quote_problem] ?? result.quote_problem}</p> : null}
       {result.problem === "too_many_parcels" ? (
         <p className={styles.error}>Passou do limite de volumes por pedido das suas regras de embalagem.</p>
       ) : null}
@@ -438,10 +450,41 @@ function SimResult({ result, nomes }: { result: SimulateOut; nomes: Map<string, 
               </li>
             ))}
           </ol>
-          <p className={local.estimate}>
-            Estimativa só para comparar: Correios {formatEstimate(plano.estimate_cents.correios)} · Jadlog{" "}
-            {formatEstimate(plano.estimate_cents.jadlog_package)}. O preço de verdade vem da transportadora.
-          </p>
+          {plano.quotes && plano.quotes.length ? (
+            <ul className={local.quotes}>
+              {plano.quotes.map((q, i) => (
+                <li key={`${q.service_code}-${i}`} data-best={q.best ? "true" : undefined}>
+                  <span>
+                    {q.carrier} {q.service_name}
+                    {q.delivery_min && q.delivery_max ? (
+                      <span className={styles.fieldHint}>
+                        {" "}
+                        · {q.delivery_min === q.delivery_max ? q.delivery_max : `${q.delivery_min} a ${q.delivery_max}`} dias úteis
+                      </span>
+                    ) : null}
+                  </span>
+                  <span>
+                    {q.price_cents !== null && !q.error ? (
+                      <strong>{formatMoney(q.price_cents)}</strong>
+                    ) : (
+                      <em className={styles.fieldHint}>{q.error ?? "não leva"}</em>
+                    )}
+                    {q.best ? (
+                      <>
+                        {" "}
+                        <Pill state="live">Mais barata neste serviço</Pill>
+                      </>
+                    ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={local.estimate}>
+              Estimativa só para comparar: Correios {formatEstimate(plano.estimate_cents.correios)} · Jadlog{" "}
+              {formatEstimate(plano.estimate_cents.jadlog_package)}. Informe um CEP para ver o preço de verdade.
+            </p>
+          )}
         </div>
       ))}
     </div>

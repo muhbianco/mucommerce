@@ -65,6 +65,12 @@ test("embalagem padrão, Caixa P, rabiola medida e 4 rabiolas numa Caixa P", asy
   await expect(consolidado.locator("ol > li")).toHaveCount(1);
   await expect(consolidado).toContainText("Caixa P");
   await expect(consolidado).toContainText("4× Rabiola E2E");
+
+  // Com CEP, o simulador tenta cotar de verdade; sem transportadora configurada, diz o que falta.
+  await page.locator('input[name="cep"]').fill("20040-020");
+  await page.getByRole("button", { name: "Montar as caixas" }).click();
+  await expect(page.getByText(/Para cotar de verdade/)).toBeVisible();
+  await expect(page.locator('[data-strategy="consolidate"]')).toContainText("Caixa P");
 });
 
 test("capacidade declarada: rígido só limita, flexível declara até o dobro, 50 é recusado", async ({ page }) => {

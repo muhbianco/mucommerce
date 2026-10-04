@@ -29,6 +29,8 @@ SERVICES = ("fake_economico", "fake_expresso")
 _SHIPMENTS: dict[str, ShipmentResult] = {}
 _BY_REFERENCE: dict[str, str] = {}
 _STATUS: dict[str, TrackingStatus] = {}
+#: Cotações recebidas, na ordem (os testes contam chamadas: deduplicação e cache).
+CALLS: list[QuoteRequest] = []
 #: Interruptores de teste: CEP de destino que força um comportamento.
 CEP_SEM_SALDO = "99999999"
 CEP_FORA_DE_AREA = "88888888"
@@ -36,6 +38,7 @@ CEP_INSTAVEL = "77777777"
 
 
 def reset() -> None:
+    CALLS.clear()
     _SHIPMENTS.clear()
     _BY_REFERENCE.clear()
     _STATUS.clear()
@@ -56,6 +59,7 @@ class FakeShippingProvider:
     async def quote(
         self, credentials: ShippingCredentials, request: QuoteRequest
     ) -> tuple[ShippingOption, ...]:
+        CALLS.append(request)
         if request.destination_postal_code == CEP_INSTAVEL:
             raise ShippingProviderError("provedor instável", http_status=503)
         distancia = abs(

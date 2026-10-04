@@ -8,6 +8,7 @@ Medidas em milímetros e gramas, como o catálogo; a tela converte para centíme
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Annotated, Literal
 
@@ -37,6 +38,7 @@ from app.shipping.packing.model import (
     Dims,
     ItemClass,
     PackageKind,
+    ParcelPlan,
     PlannedParcel,
     Rotation,
     fits_alone,
@@ -51,6 +53,8 @@ from app.shipping.packing.scoring import (
     select_top_k,
     within_limits,
 )
+from app.shipping.plan import label_mode
+from app.shipping.service import ShippingQuoteService, choose_offers, customer_price
 from app.tenancy.context import TenantContext
 from app.tenancy.settings_schemas import PackingSettings, fulfillment_settings
 
@@ -391,6 +395,8 @@ class SimLineIn(StrictModel):
 
 class SimulateIn(StrictModel):
     lines: Annotated[list[SimLineIn], Field(min_length=1, max_length=10)]
+    #: Com CEP (e a conta da transportadora conectada), cada combinação é cotada de verdade.
+    postal_code: Annotated[str, StringConstraints(pattern=r"^\d{5}-?\d{3}$")] | None = None
 
 
 class SimItem(BaseModel):
@@ -415,6 +421,21 @@ class SimParcel(BaseModel):
     items: list[SimItem]
 
 
+class SimQuote(BaseModel):
+    service_code: str
+    service_name: str
+    carrier: str
+    #: O que o cliente pagaria (com material, se a loja cobra, e o acréscimo da loja).
+    price_cents: int | None
+    delivery_min: int | None
+    delivery_max: int | None
+    error: str | None
+    #: single, multi_volume ou per_volume (este último ainda não vendido: F7).
+    mode: str | None
+    #: É a combinação que a vitrine ofereceria para este serviço.
+    best: bool
+
+
 class SimPlan(BaseModel):
     strategy: str
     hash: str
@@ -423,6 +444,8 @@ class SimPlan(BaseModel):
     quoted: bool
     estimate_cents: dict[str, int | None]
     parcels: list[SimParcel]
+    #: Preço real por serviço (só com CEP e conta conectada).
+    quotes: list[SimQuote] = []
 
 
 class SimulateOut(BaseModel):
@@ -430,6 +453,8 @@ class SimulateOut(BaseModel):
     problem: str | None
     missing: list[str]
     fallbacks: list[str]
+    #: Por que não deu para cotar de verdade (sem CEP, nada): shipping_disabled, not_configured.
+    quote_problem: str | None = None
 
 
 def _settings_packing(tenant: TenantContext) -> PackingSettings:
@@ -622,6 +647,12 @@ async def simulate(session: DbSession, tenant: PackageReader, body: SimulateIn) 
         plan_candidates, entradas.classes, entradas.packages, entradas.rules
     )
     cotados = {p.hash for p in select_top_k(todos.candidates, cfg.max_candidates)}
+    precos: dict[str, list[SimQuote]] = {}
+    problema_cotacao: str | None = None
+    if body.postal_code and todos.candidates:
+        precos, problema_cotacao = await _real_quotes(
+            session, tenant, todos.candidates, body.postal_code
+        )
     planos = [
         SimPlan(
             strategy=plano.strategy,
@@ -630,6 +661,7 @@ async def simulate(session: DbSession, tenant: PackageReader, body: SimulateIn) 
             quoted=plano.hash in cotados,
             estimate_cents={perfil.name: proxy(plano, perfil) for perfil in PROFILES},
             parcels=[_sim_parcel(v, rotulos) for v in plano.parcels],
+            quotes=precos.get(plano.hash, []),
         )
         for plano in todos.candidates
     ]
@@ -638,7 +670,64 @@ async def simulate(session: DbSession, tenant: PackageReader, body: SimulateIn) 
         problem=todos.problem,
         missing=list(entradas.missing),
         fallbacks=list(entradas.fallbacks),
+        quote_problem=problema_cotacao,
     )
+
+
+async def _real_quotes(
+    session: DbSession, tenant: TenantContext, plans: Sequence[ParcelPlan], postal_code: str
+) -> tuple[dict[str, list[SimQuote]], str | None]:
+    """Cota cada combinação na transportadora da loja e marca a vencedora de cada serviço —
+    a mesma escolha que a vitrine faz (`choose_offers`)."""
+    servico = ShippingQuoteService(session, tenant, utcnow())
+    respostas, problema = await servico.quote_plans(plans, destination_postal_code=postal_code)
+    if problema is not None:
+        return {}, problema
+    cfg = fulfillment_settings(tenant.settings).shipping
+    escolha = choose_offers(plans, respostas, charge_material=cfg.packing.charge_material)
+    vencedoras = {(o.option.service_code, o.plan.hash) for o in escolha.offers}
+    saida: dict[str, list[SimQuote]] = {}
+    for plano, resposta in zip(plans, respostas, strict=True):
+        material = (
+            sum(v.material_cents for v in plano.parcels) if cfg.packing.charge_material else 0
+        )
+        linhas = []
+        for opcao in resposta or ():
+            modo = label_mode(len(plano.parcels), opcao.multi_volume_max) if opcao.usable else None
+            erro = opcao.error
+            if modo == "per_volume":
+                erro = "Mais de um volume neste serviço: chega com a etiqueta por volume."
+            linhas.append(
+                SimQuote(
+                    service_code=opcao.service_code,
+                    service_name=opcao.service_name,
+                    carrier=opcao.carrier,
+                    price_cents=customer_price(opcao.price_cents, material, cfg)
+                    if opcao.usable
+                    else None,
+                    delivery_min=opcao.delivery_min,
+                    delivery_max=opcao.delivery_max,
+                    error=erro,
+                    mode=modo,
+                    best=(opcao.service_code, plano.hash) in vencedoras,
+                )
+            )
+        if resposta is None:
+            linhas.append(
+                SimQuote(
+                    service_code="",
+                    service_name="",
+                    carrier="",
+                    price_cents=None,
+                    delivery_min=None,
+                    delivery_max=None,
+                    error="A transportadora não respondeu para esta combinação.",
+                    mode=None,
+                    best=False,
+                )
+            )
+        saida[plano.hash] = linhas
+    return saida, None
 
 
 def _sim_parcel(volume: PlannedParcel, rotulos: dict[str, tuple[str, str]]) -> SimParcel:

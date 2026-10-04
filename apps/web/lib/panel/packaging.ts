@@ -69,6 +69,20 @@ export interface SimParcel {
   items: { key: string; name: string; sku: string; units: number }[];
 }
 
+export interface SimQuote {
+  service_code: string;
+  service_name: string;
+  carrier: string;
+  /** O que o cliente pagaria (com o acréscimo da loja). */
+  price_cents: number | null;
+  delivery_min: number | null;
+  delivery_max: number | null;
+  error: string | null;
+  mode: string | null;
+  /** É a combinação que a vitrine ofereceria para este serviço. */
+  best: boolean;
+}
+
 export interface SimPlan {
   strategy: string;
   hash: string;
@@ -76,6 +90,7 @@ export interface SimPlan {
   quoted: boolean;
   estimate_cents: Record<string, number | null>;
   parcels: SimParcel[];
+  quotes?: SimQuote[];
 }
 
 export interface SimulateOut {
@@ -83,7 +98,13 @@ export interface SimulateOut {
   problem: string | null;
   missing: string[];
   fallbacks: string[];
+  quote_problem?: string | null;
 }
+
+export const QUOTE_PROBLEM_TEXT: Record<string, string> = {
+  shipping_disabled: "Para cotar de verdade, ligue o envio por transportadora e informe a origem em Envio.",
+  not_configured: "Para cotar de verdade, conecte a conta da transportadora em Envio.",
+};
 
 export interface PackingSettings {
   padding_mm: number;

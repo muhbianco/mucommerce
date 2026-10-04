@@ -246,3 +246,126 @@ async def test_v2_sem_embalagem_ativa_cai_no_v1(
     _, cotacao, _ = await rabiolas(client, session_factory, tenant, owner, me, 4)
     assert cotacao["problem"] is None
     assert all(o["plan"] == "" for o in cotacao["options"])
+
+
+# ----------------------------------------------------------------------------- F3b
+
+#: Caixa M grande demais para a cubagem grátis dos Correios (408 x 308 x 268 mm por fora > 30 L)
+#: e pesada (300 g): a estratégia `consolidate` usa ela (1 volume), a `cubic_free` usa 2 Caixas P.
+CAIXA_M_PESADA = {
+    "name": "Caixa M",
+    "inner_length_mm": 400,
+    "inner_width_mm": 300,
+    "inner_height_mm": 260,
+    "empty_weight_grams": 300,
+}
+
+
+async def test_cada_servico_fica_com_a_sua_combinacao_mais_barata(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """8 rabiolas: 1 Caixa M (1500 g) ou 2 Caixas P (160 + 1200 = 1360 g). O Econômico cobra
+    por volume e não junta volumes → fica com a M. O Expresso cobra a remessa pelo peso → fica
+    com as 2 P, numa etiqueta só. Duas combinações, duas chamadas, cada serviço com a sua."""
+    tenant, owner, me = await loja(client, session_factory, caixas=(CAIXA_P, CAIXA_M_PESADA))
+    _, cotacao, _ = await rabiolas(client, session_factory, tenant, owner, me, 8)
+    assert cotacao["problem"] is None, cotacao
+    por_servico = {o["service_code"]: o for o in cotacao["options"]}
+    economico, expresso = por_servico["fake_economico"], por_servico["fake_expresso"]
+    assert economico["plan"].endswith(":single")
+    assert economico["price_cents"] == 1500 + 1500 * 2 + DISTANCIA
+    assert expresso["plan"].endswith(":multi_volume")
+    assert expresso["price_cents"] == (1500 + 1360 * 2 + DISTANCIA) * 2
+    assert economico["plan"].split(":")[0] != expresso["plan"].split(":")[0]
+    assert len(fake_shipping.CALLS) == 2, "uma chamada por combinação distinta"
+
+
+async def test_pedido_com_a_combinacao_de_outro_servico_congela_a_dele(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner, me = await loja(client, session_factory, caixas=(CAIXA_P, CAIXA_M_PESADA))
+    _, cotacao, endereco = await rabiolas(client, session_factory, tenant, owner, me, 8)
+    expresso = next(o for o in cotacao["options"] if o["service_code"] == "fake_expresso")
+    carrinho = await escolher(client, me, endereco, expresso)
+    resposta = await place(client, me, order_body(carrinho))
+    assert resposta.status_code == 201, resposta.text
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, resposta.json()["id"])
+        assert pedido is not None
+        plano = (pedido.fulfillment or {})["parcel_plan"]
+    assert plano["label_mode"] == "multi_volume"
+    assert [v["package_name"] for v in plano["parcels"]] == ["Caixa P", "Caixa P"]
+
+
+def test_escolha_por_servico_tolera_combinacao_que_falhou() -> None:
+    from app.shipping.packing.model import Dims, ParcelPlan, PlannedParcel
+    from app.shipping.provider import ShippingOption
+    from app.shipping.service import choose_offers
+
+    def plano(nome: str, volumes: int, material: int = 0) -> ParcelPlan:
+        parcela = PlannedParcel(
+            package_id="p",
+            package_name="P",
+            kind="box",
+            outer=Dims(200, 150, 100),
+            inner=None,
+            gross_g=500,
+            tare_g=0,
+            value_cents=0,
+            material_cents=material,
+            contents=(("v", 1),),
+        )
+        return ParcelPlan(nome, (parcela,) * volumes, False, nome * 4)
+
+    def opcao(servico: str, preco: int, multi: int = 1) -> ShippingOption:
+        return ShippingOption(servico, servico, "X", preco, 3, multi_volume_max=multi)
+
+    um, dois = plano("aaaaaaaa", 1, material=300), plano("bbbbbbbb", 2)
+    escolha = choose_offers(
+        [um, dois, plano("cccccccc", 1)],
+        [(opcao("pac", 2000),), (opcao("pac", 1500), opcao("jad", 1600, multi=5)), None],
+        charge_material=True,
+    )
+    assert escolha.failed is True, "a terceira combinação falhou e mesmo assim há ofertas"
+    por_servico = {o.option.service_code: o for o in escolha.offers}
+    # PAC com 2 volumes exige 2 etiquetas: até a F7 vale só a combinação de 1 volume.
+    assert por_servico["pac"].plan is um and por_servico["pac"].mode == "single"
+    assert por_servico["pac"].charged_material_cents == 300
+    assert por_servico["jad"].plan is dois and por_servico["jad"].mode == "multi_volume"
+    assert any("mais de um volume" in (r.error or "") for r in escolha.refusals)
+
+    vazia = choose_offers([um], [None], charge_material=False)
+    assert (vazia.offers, vazia.failed) == ((), True)
+
+
+async def test_simulador_com_cep_mostra_o_preco_real_e_a_vencedora_de_cada_servico(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner, me = await loja(client, session_factory, caixas=(CAIXA_P, CAIXA_M_PESADA))
+    criado, _, _ = await rabiolas(client, session_factory, tenant, owner, me, 8)
+    resposta = await client.post(
+        f"{base(tenant)}/shipping/simulate",
+        json={
+            "lines": [{"variant_id": criado["variants"][0]["id"], "quantity_milli": 8000}],
+            "postal_code": "20000-000",
+        },
+        headers=owner,
+    )
+    assert resposta.status_code == 200, resposta.text
+    corpo = resposta.json()
+    assert corpo["quote_problem"] is None
+    vencedoras = {
+        (q["service_code"], tuple(v["package_name"] for v in plano["parcels"]))
+        for plano in corpo["plans"]
+        for q in plano["quotes"]
+        if q["best"]
+    }
+    assert vencedoras == {
+        ("fake_economico", ("Caixa M",)),
+        ("fake_expresso", ("Caixa P", "Caixa P")),
+    }
+    duas_p = next(p for p in corpo["plans"] if len(p["parcels"]) == 2)
+    economico_em_duas = next(q for q in duas_p["quotes"] if q["service_code"] == "fake_economico")
+    assert economico_em_duas["mode"] == "per_volume"
+    assert economico_em_duas["error"], "explica por que este serviço não vale aqui (ainda)"

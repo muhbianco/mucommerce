@@ -710,7 +710,8 @@ Dependências:
 | F5 | feito | "Envio e embalagem" no produto (g/kg e cm, modos, características, regras com capacidade declarada, "Onde cabe" do servidor), medidas por variação; prévia ao vivo (ilha JS) ficou para depois — hoje atualiza ao salvar |
 | F2.5 | **aprovado** em 04/10/2026 | doc oficial + sandbox; ver "Fatos verificados" |
 | F3a | feito (branch `frete-v2`) | cotação do plano (`consolidate`, uma chamada) com seguro em `volumes[].insurance` e cm inteiros para cima; opções assinadas com `<hash>:<modo>`; faixa de prazo; `place` reconstrói o plano antes dos locks e grava `parcel_plan`; despacho usa o plano congelado (v1 recalcula como antes); trava do `per_volume` até a F7; problema novo `too_many_parcels`; sem embalagem ativa ou flag desligada = v1 |
-| F3b, F6, F7, F8 | a fazer | até 3 combinações por serviço, vitrine com CEP, etiqueta por volume, liberação |
+| F3b | feito (branch `frete-v2`) | top-K (`max_candidates`, padrão 3) cotado em paralelo, uma chamada por combinação distinta; por serviço vence a mais barata para a loja (preço + material; empate: menos volumes, depois ranking); combinação que falha não derruba as outras; simulador com CEP mostra o preço real de cada serviço em cada combinação e marca a vencedora. Efeito colateral bom: um plano de 1 volume no top-K devolve PAC/SEDEX mesmo antes da F7 |
+| F6, F7, F8 | a fazer | vitrine com CEP, etiqueta por volume, liberação |
 
 Benchmark do motor com as quatro estratégias (`python -m scripts.bench_packing 3000`, máquina de
 dev, 04/10/2026):

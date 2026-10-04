@@ -34,7 +34,8 @@ from app.integrations.credentials import CredentialStore
 from app.shipping import registry, signing
 from app.shipping.inputs import LineIn, load_packing_inputs
 from app.shipping.packing import Box, MissingDimensions, PackItem, item_from_variant, pack
-from app.shipping.packing.candidates import CONSOLIDATE, plan_candidates
+from app.shipping.packing.candidates import plan_candidates
+from app.shipping.packing.model import ParcelPlan
 from app.shipping.plan import label_mode, to_parcel
 from app.shipping.provider import (
     Parcel,
@@ -170,10 +171,11 @@ class ShippingQuoteService:
         destino: str,
         lines: Sequence[QuoteLine],
     ) -> QuoteOutcome | None:
-        """Planeja, cota o plano e assina cada opção com ele. `None` = v2 não se aplica.
+        """Planeja, cota as melhores combinações e assina, por serviço, a mais barata.
 
-        F3a: cota o plano da estratégia `consolidate` (uma chamada). A F3b cota até
-        `max_candidates` combinações e fica, por serviço, com a mais barata.
+        Até `max_candidates` combinações (top-K da estimativa local), cotadas em paralelo com
+        uma chamada cada — o sandbox mostrou que uma cotação com N volumes já traz o preço da
+        remessa inteira. `None` = o v2 não se aplica aqui (sem embalagem ativa): segue o v1.
         """
         regras = cfg.packing
         entradas = await load_packing_inputs(
@@ -190,52 +192,96 @@ class ShippingQuoteService:
             logger.info("Frete v2 sem embalagem ativa; cotação pelo v1")
             return None
         candidatos = await asyncio.to_thread(
-            plan_candidates, entradas.classes, entradas.packages, entradas.rules
+            plan_candidates,
+            entradas.classes,
+            entradas.packages,
+            entradas.rules,
+            top_k=regras.max_candidates,
         )
-        if not candidatos.candidates:
+        planos = candidatos.candidates
+        if not planos:
             return QuoteOutcome(problem="too_many_parcels")
-        plano = next(
-            (p for p in candidatos.candidates if p.strategy == CONSOLIDATE),
-            candidatos.candidates[0],
-        )
-        volumes = tuple(to_parcel(v) for v in plano.parcels)
-        bruto = await self._ask(provider, credentials, cfg, destino, volumes)
-        if bruto is None:
-            return QuoteOutcome(problem="unavailable")
+        respostas = await self._quote_many(provider, credentials, cfg, destino, planos)
+        escolha = choose_offers(planos, respostas, charge_material=regras.charge_material)
         carrinho = signing.cart_signature(
             tenant_id=self.tenant.id,
             destination_postal_code=destino,
             lines=[(line.variant_id, line.quantity_milli) for line in lines],
         )
-        material = sum(v.material_cents for v in plano.parcels) if regras.charge_material else 0
-        opcoes: list[QuotedOption] = []
-        recusas: list[ShippingOption] = []
-        for opcao in bruto:
-            if not opcao.usable:
-                recusas.append(opcao)
-                continue
-            modo = label_mode(len(volumes), opcao.multi_volume_max)
-            if modo == "per_volume":
-                recusas.append(replace(opcao, error=_PER_VOLUME_PENDING))
-                continue
-            opcoes.append(
-                self._sign(cfg, opcao, carrinho, plan=f"{plano.hash}:{modo}", extra_cents=material)
+        opcoes = [
+            self._sign(
+                cfg,
+                oferta.option,
+                carrinho,
+                plan=f"{oferta.plan.hash}:{oferta.mode}",
+                extra_cents=oferta.charged_material_cents,
             )
+            for oferta in escolha.offers
+        ]
         logger.info(
             "Cotação de frete",
             extra={
                 "engine": "v2",
-                "plan": plano.hash,
-                "strategy": plano.strategy,
-                "degraded": plano.degraded,
-                "parcels": len(volumes),
                 "dest_prefix": destino[:3],
-                "offers": len(opcoes),
+                "candidates": [
+                    {"strategy": p.strategy, "parcels": len(p.parcels), "degraded": p.degraded}
+                    for p in planos
+                ],
+                "calls_failed": sum(1 for r in respostas if r is None),
+                "offers": [
+                    {
+                        "service": o.option.service_code,
+                        "strategy": o.plan.strategy,
+                        "parcels": len(o.plan.parcels),
+                        "mode": o.mode,
+                        "price_cents": o.option.price_cents,
+                    }
+                    for o in escolha.offers
+                ],
             },
         )
         if not opcoes:
-            return QuoteOutcome(problem="no_service", refusals=_refusals(recusas))
+            if escolha.failed:
+                return QuoteOutcome(problem="unavailable")
+            return QuoteOutcome(problem="no_service", refusals=_refusals(escolha.refusals))
         return QuoteOutcome(options=tuple(sorted(opcoes, key=lambda o: o.price_cents)))
+
+    async def quote_plans(
+        self, plans: Sequence[ParcelPlan], *, destination_postal_code: str
+    ) -> tuple[list[tuple[ShippingOption, ...] | None], QuoteProblem | None]:
+        """Cota planos prontos (o simulador do painel): respostas por plano, ou o problema."""
+        cfg = fulfillment_settings(self.tenant.settings).shipping
+        destino = _digits(destination_postal_code)
+        if not cfg.enabled or cfg.origin is None or len(destino) != 8:
+            return [], "shipping_disabled"
+        provider = registry.get_provider(cfg.provider)
+        if provider is None or not registry.flag_on(self.tenant, cfg.provider):
+            return [], "shipping_disabled"
+        credenciais = await self._credentials(cfg)
+        if credenciais is None:
+            return [], "not_configured"
+        return await self._quote_many(provider, credenciais, cfg, destino, plans), None
+
+    async def _quote_many(
+        self,
+        provider: Any,
+        credentials: ShippingCredentials,
+        cfg: ShippingSettings,
+        destino: str,
+        plans: Sequence[ParcelPlan],
+    ) -> list[tuple[ShippingOption, ...] | None]:
+        """Uma chamada por pedido **distinto**, todas em paralelo, cada uma com o seu teto de
+        tempo; o que falhou volta `None` e não derruba as outras (nem entra no cache)."""
+        volumes = [tuple(to_parcel(v) for v in plano.parcels) for plano in plans]
+        unicos: dict[str, tuple[Parcel, ...]] = {}
+        for vols in volumes:
+            unicos.setdefault(_cache_key(self.tenant.id, cfg, destino, vols), vols)
+        chaves = list(unicos)
+        respostas = await asyncio.gather(
+            *(self._ask(provider, credentials, cfg, destino, unicos[k]) for k in chaves)
+        )
+        por_chave = dict(zip(chaves, respostas, strict=True))
+        return [por_chave[_cache_key(self.tenant.id, cfg, destino, vols)] for vols in volumes]
 
     # ------------------------------------------------------------------ interno
 
@@ -305,8 +351,7 @@ class ShippingQuoteService:
         plan: str = "",
         extra_cents: int = 0,
     ) -> QuotedOption:
-        # Custo da embalagem (quando a loja liga) entra antes do acréscimo: ele é custo dela.
-        preco = _with_markup(option.price_cents + extra_cents, cfg)
+        preco = customer_price(option.price_cents, extra_cents, cfg)
         quoted_at = self.now.replace(microsecond=0)
         return QuotedOption(
             provider=cfg.provider,
@@ -330,6 +375,61 @@ class ShippingQuoteService:
                 plan=plan,
             ),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """A combinação vencedora de um serviço."""
+
+    plan: ParcelPlan
+    option: ShippingOption
+    mode: str
+    #: Custo da embalagem que vai para o preço do cliente (só com `charge_material`).
+    charged_material_cents: int
+
+
+@dataclass(frozen=True, slots=True)
+class OfferChoice:
+    offers: tuple[Offer, ...]
+    refusals: tuple[ShippingOption, ...]
+    #: Alguma chamada falhou ou estourou o tempo (sem oferta, isso vira "indisponível").
+    failed: bool
+
+
+def choose_offers(
+    plans: Sequence[ParcelPlan],
+    responses: Sequence[tuple[ShippingOption, ...] | None],
+    *,
+    charge_material: bool,
+) -> OfferChoice:
+    """Por serviço, a combinação mais barata para a loja: preço + material; empate fica com a
+    de menos volumes e depois com a ordem do ranking. Serviço que exige uma etiqueta por volume
+    não vale para plano com mais de um volume enquanto a F7 não existir (vira recusa)."""
+    melhor: dict[str, tuple[tuple[int, int, int], Offer]] = {}
+    recusas: list[ShippingOption] = []
+    falhou = False
+    for posicao, (plano, resposta) in enumerate(zip(plans, responses, strict=True)):
+        if resposta is None:
+            falhou = True
+            continue
+        material = sum(v.material_cents for v in plano.parcels)
+        for opcao in resposta:
+            if not opcao.usable:
+                recusas.append(opcao)
+                continue
+            modo = label_mode(len(plano.parcels), opcao.multi_volume_max)
+            if modo == "per_volume":
+                recusas.append(replace(opcao, error=_PER_VOLUME_PENDING))
+                continue
+            chave = (opcao.price_cents + material, len(plano.parcels), posicao)
+            atual = melhor.get(opcao.service_code)
+            if atual is None or chave < atual[0]:
+                melhor[opcao.service_code] = (
+                    chave,
+                    Offer(plano, opcao, modo, material if charge_material else 0),
+                )
+    ofertas = tuple(oferta for _, oferta in sorted(melhor.values(), key=lambda t: t[0]))
+    return OfferChoice(ofertas, tuple(recusas), falhou)
 
 
 async def parcels_for(
@@ -405,6 +505,12 @@ def _unit_price(variant: ProductVariant, product: Product) -> int:
     frete oscilar com campanha de preço.
     """
     return int(variant.price_cents or product.base_price_cents or 0)
+
+
+def customer_price(carrier_cents: int, material_cents: int, cfg: ShippingSettings) -> int:
+    """O que o cliente paga: frete da transportadora + material (se a loja cobra), com o
+    acréscimo da loja por cima. Material entra antes do acréscimo: ele é custo dela."""
+    return _with_markup(carrier_cents + material_cents, cfg)
 
 
 def _plus(days: int | None, handling: int) -> int | None:
