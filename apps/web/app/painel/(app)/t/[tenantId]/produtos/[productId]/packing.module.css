@@ -1,0 +1,160 @@
+/*
+ * Produto → Envio e embalagem (frete v2). Só variáveis do `.shell`.
+ */
+
+.subhead {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1rem;
+  scroll-margin-top: 5rem;
+}
+
+.weightRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 4.5rem;
+  gap: 0.4rem;
+}
+
+.modes {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 0;
+  border: 0;
+}
+
+.modes legend {
+  margin-bottom: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mode {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: start;
+  min-height: 44px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.mode:has(input:checked) {
+  border-color: var(--teal-deep);
+}
+
+.mode > span {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.modeTitle {
+  display: inline;
+}
+
+/* Ajuda abaixo do rótulo, não colada nele, nas caixas de marcar desta seção. */
+.traits label > span > span {
+  display: block;
+}
+
+/*
+ * Lista "só nestas embalagens": aparece só no modo restrito. Sem :has, ela aparece sempre e o
+ * servidor só lê as regras quando o modo é restrito.
+ */
+.rules {
+  margin: -0.2rem 0 0.2rem 1.6rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 2px solid var(--line);
+}
+
+.packing:has(input[name="packing_mode"]:not([value="restricted"]):checked) .rules {
+  display: none;
+}
+
+.rule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.25rem 0;
+}
+
+.ruleMax {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.ruleMax input {
+  width: 5.5rem;
+}
+
+/* A ajuda do "máximo de unidades" muda com "é flexível". */
+.hintFlexible {
+  display: none;
+}
+
+.packing:has(input[name="packing_flexible"]:checked) .hintFlexible {
+  display: block;
+}
+
+.packing:has(input[name="packing_flexible"]:checked) .hintRigid {
+  display: none;
+}
+
+.traits {
+  margin: 0.5rem 0 1rem;
+}
+
+.traits > summary {
+  font-size: 0.9rem;
+  color: var(--teal-deep);
+  cursor: pointer;
+}
+
+.fit {
+  margin-top: 0.75rem;
+  padding: 0.8rem 1rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+.fit h5 {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+}
+
+.fitList {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.fitList li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+  opacity: 0.7;
+}
+
+.fitList li[data-allowed="true"] {
+  opacity: 1;
+}
+
+.declaredBadge {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--amber) 30%, var(--paper));
+  font-size: 0.75rem;
+  font-weight: 700;
+}

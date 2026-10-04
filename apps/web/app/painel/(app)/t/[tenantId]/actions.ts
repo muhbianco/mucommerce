@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { api, ApiError } from "@/lib/panel/api";
 import { normalizeEmail, normalizeInstagram, normalizeWhatsapp } from "@/lib/panel/contact";
 import { localToUtcIso, parseModifierLines, parseQuantity } from "@/lib/panel/format";
+import { parseCm, parseWeight, type WeightUnit } from "@/lib/panel/measure";
 import {
   type Media,
   MODIFIER_GROUP_ROWS,
@@ -65,12 +66,16 @@ export async function updateProduct(form: FormData): Promise<void> {
         stock_policy: text(form, "stock_policy"),
         sold_by: text(form, "sold_by"),
         unit_label: text(form, "unit_label") || "un",
-        weight_grams: measure(form, "weight_grams"),
-        width_mm: measure(form, "width_mm"),
-        height_mm: measure(form, "height_mm"),
-        depth_mm: measure(form, "depth_mm"),
-        // Vazio = caixa padrão da loja. `null` é o que apaga a escolha; `undefined` a manteria.
-        shipping_box_id: optional(form, "shipping_box_id"),
+        ...(text(form, "packing_v2") === "1"
+          ? packingFields(form)
+          : {
+              weight_grams: measure(form, "weight_grams"),
+              width_mm: measure(form, "width_mm"),
+              height_mm: measure(form, "height_mm"),
+              depth_mm: measure(form, "depth_mm"),
+              // Vazio = caixa padrão da loja. `null` é o que apaga a escolha; `undefined` a manteria.
+              shipping_box_id: optional(form, "shipping_box_id"),
+            }),
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
         tags: tagNames(form),
@@ -78,6 +83,59 @@ export async function updateProduct(form: FormData): Promise<void> {
       },
     });
   });
+}
+
+const PACKING_MODES = new Set(["auto", "restricted", "own_container"]);
+
+/** Peso na unidade escolhida (g ou kg) → gramas; vazio → null (sem medida, a cotação recusa). */
+function weightField(form: FormData, valueName: string, unitName: string): number | null {
+  const unit: WeightUnit = text(form, unitName) === "kg" ? "kg" : "g";
+  const grams = parseWeight(text(form, valueName), unit);
+  if (grams !== null && (Number.isNaN(grams) || grams > 1_000_000)) throw new FormError("peso_invalido");
+  return grams;
+}
+
+/** Centímetros digitados → milímetros; vazio → null. */
+function cmField(form: FormData, name: string): number | null {
+  const mm = parseCm(text(form, name));
+  if (mm !== null && (Number.isNaN(mm) || mm > 1_000_000)) throw new FormError("medida_invalida");
+  return mm;
+}
+
+/**
+ * Frete v2: peso e medidas em g/kg e cm, o modo de embalar, as características e as regras.
+ *
+ * As regras só vão quando o modo é "só em embalagens específicas": no automático elas ficam
+ * guardadas como estão, para quem voltar ao modo restrito não perder o que tinha configurado.
+ */
+function packingFields(form: FormData): Record<string, unknown> {
+  const mode = text(form, "packing_mode");
+  if (!PACKING_MODES.has(mode)) throw new FormError("id_invalido");
+  const fields: Record<string, unknown> = {
+    weight_grams: weightField(form, "weight_value", "weight_unit"),
+    width_mm: cmField(form, "width_cm"),
+    height_mm: cmField(form, "height_cm"),
+    depth_mm: cmField(form, "depth_cm"),
+    packing_mode: mode,
+    packing_rotation: form.get("packing_turns") === "on" ? "any" : "upright",
+    packing_flexible: form.get("packing_flexible") === "on",
+    packing_ship_alone: form.get("packing_ship_alone") === "on",
+  };
+  if (mode === "restricted") {
+    fields.package_rules = form
+      .getAll("rule_pkg")
+      .map(String)
+      .map(id)
+      .map((packageId) => {
+        const raw = text(form, `rule_max_${packageId}`);
+        const max = raw ? Number(raw) : null;
+        if (max !== null && (!Number.isInteger(max) || max < 1 || max > 100_000)) {
+          throw new FormError("numero_invalido");
+        }
+        return { package_id: packageId, max_units: max };
+      });
+  }
+  return fields;
 }
 
 /**
@@ -257,10 +315,15 @@ export async function updateVariant(form: FormData): Promise<void> {
   const productId = id(text(form, "product_id"));
   const variantId = id(text(form, "variant_id"));
   await run(`${page}/produtos/${productId}`, "variante", async () => {
-    await api(`${path}/products/${productId}/variants/${variantId}`, {
-      method: "PATCH",
-      json: { price_cents: money(form, "price"), cost_cents: money(form, "cost") },
-    });
+    const json: Record<string, unknown> = { price_cents: money(form, "price"), cost_cents: money(form, "cost") };
+    if (text(form, "measures") === "1") {
+      // Frete v2: peso e medidas da variação; vazio herda do produto (as três medidas juntas).
+      json.weight_grams = weightField(form, "weight_value", "weight_unit");
+      json.width_mm = cmField(form, "width_cm");
+      json.height_mm = cmField(form, "height_cm");
+      json.depth_mm = cmField(form, "depth_cm");
+    }
+    await api(`${path}/products/${productId}/variants/${variantId}`, { method: "PATCH", json });
   });
 }
 

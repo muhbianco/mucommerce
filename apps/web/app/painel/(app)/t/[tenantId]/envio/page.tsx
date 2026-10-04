@@ -27,6 +27,13 @@ interface ShippingStatus {
   box_oversize: string | null;
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
+  /** Frete v2: o que falta nas embalagens (só com a flag `shipping.packing_v2`). */
+  packing?: {
+    packages_active: number;
+    has_default: boolean;
+    unfit: { id: string; name: string }[];
+    orphans: { id: string; name: string }[];
+  } | null;
 }
 
 interface Origin {
@@ -73,6 +80,7 @@ const MISSING_LABEL: Record<string, string> = {
   "secret:access_token": "Conectar a conta da transportadora",
   "config:origem": "Informar o endereço de onde a mercadoria sai",
   "provider:indisponivel": "Transportadora indisponível nesta instalação",
+  "config:embalagem": "Cadastrar a embalagem padrão (em Embalagens)",
 };
 
 function reais(cents?: number | null): string {
@@ -103,6 +111,9 @@ export default async function Shipping({
   type Caixa = NonNullable<ShippingSettings["boxes"]>[number];
   const caixas: Caixa[] = [...(cfg.boxes ?? []), {} as Caixa];
   const pronto = status.connected && status.has_origin && status.flag_on;
+  // Frete v2: as caixas moram em Embalagens; esta tela fica com conta, origem e preço.
+  const v2 = Boolean(context.features["shipping.packing_v2"]);
+  const embalagens = `/t/${context.tenant_id}/embalagens`;
   const carrier = PROVIDER_LABEL[status.provider] ?? status.provider;
 
   return (
@@ -132,7 +143,41 @@ export default async function Shipping({
         </p>
       ) : null}
 
-      {status.box_oversize ? (
+      {v2 && status.packing && status.packing.unfit.length > 0 ? (
+        <Section
+          title="Produtos que não cabem em nenhuma embalagem"
+          description="Eles viajam soltos, com a medida deles — e cada unidade vira um frete."
+        >
+          <ul className={styles.steps}>
+            {status.packing.unfit.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Cadastre uma embalagem maior em <Link href={embalagens}>Embalagens</Link>, ou marque no
+            produto que ele vai na embalagem dele.
+          </p>
+        </Section>
+      ) : null}
+
+      {v2 && status.packing && status.packing.orphans.length > 0 ? (
+        <Section
+          title="Produtos sem embalagem ativa"
+          description="Eles só aceitavam embalagens que foram arquivadas; enquanto isso, o sistema escolhe sozinho."
+        >
+          <ul className={styles.steps}>
+            {status.packing.orphans.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
+      {!v2 && status.box_oversize ? (
         <Section
           title="A caixa padrão não passa nos Correios"
           description="Ela entra em toda cotação, então uma caixa grande demais derruba o frete da loja inteira — inclusive o de quem comprou um item pequeno."
@@ -310,8 +355,12 @@ export default async function Shipping({
       </Section>
 
       <Section
-        title="Caixa e preço"
-        description="A caixa padrão define o volume cotado; o acréscimo cobre embalagem e trabalho."
+        title={v2 ? "Preço do frete" : "Caixa e preço"}
+        description={
+          v2
+            ? "O acréscimo cobre embalagem e trabalho. As caixas ficam em Embalagens."
+            : "A caixa padrão define o volume cotado; o acréscimo cobre embalagem e trabalho."
+        }
       >
         <form action={saveRules}>
           <input type="hidden" name="tenant_id" value={tenantId} />
@@ -326,6 +375,8 @@ export default async function Shipping({
             </span>
           </label>
           <div className={styles.fields}>
+            {v2 ? null : (
+              <>
             <label className={styles.field}>
               Largura da caixa (mm)
               <input name="box_width_mm" type="number" min={10} max={2000} defaultValue={box.width_mm ?? 200} />
@@ -359,6 +410,8 @@ export default async function Shipping({
               />
               <span className={styles.fieldHint}>A transportadora cobra o peso real, com embalagem.</span>
             </label>
+              </>
+            )}
             <label className={styles.field}>
               Acréscimo sobre o frete (%)
               <input name="markup_percent" type="number" min={0} max={100} defaultValue={cfg.markup_percent ?? 0} />
@@ -386,7 +439,15 @@ export default async function Shipping({
         </form>
       </Section>
 
-      <Section
+{v2 ? (
+        <Section title="Embalagens" description="As caixas, envelopes e tubos da loja.">
+          <p className={styles.hint}>
+            As embalagens agora têm tela própria: lá você cadastra a padrão e as outras, e testa como o
+            sistema monta as caixas de um pedido. <Link href={embalagens}>Abrir Embalagens</Link>
+          </p>
+        </Section>
+      ) : (
+            <Section
         title="Outras embalagens"
         description="Cadastre as caixas que você usa de verdade e diga, em cada produto, em qual delas ele viaja."
       >
@@ -439,6 +500,7 @@ export default async function Shipping({
           </div>
         </form>
       </Section>
+      )}
 
       <Section title="Como o pedido anda" description="O que acontece depois que alguém compra.">
         <ol className={styles.steps}>

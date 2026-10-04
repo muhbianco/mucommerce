@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 
 import { api, ApiError, requireMe } from "@/lib/panel/api";
 import { formatMoney, moneyInput, utcToLocalInput } from "@/lib/panel/format";
+import { cmInput, weightInput } from "@/lib/panel/measure";
+import type { PackageCapacity, ShippingPackage } from "@/lib/panel/packaging";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { type PillState, PRODUCT_STATE, stateOf } from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
@@ -59,6 +61,7 @@ import {
 import { Flash } from "../../flash";
 import { ImageUploader } from "../../image-uploader";
 import { EmptyState, KeyValues, PageHeader, Pill, Section } from "../../ui";
+import { PackingSection } from "./packing-section";
 import local from "./produto.module.css";
 
 export const metadata: Metadata = { title: "Produto" };
@@ -236,6 +239,33 @@ export default async function ProductPage({
     }
   }
   const canWrite = scopes.can("catalog:write") && product.status !== "archived";
+  // Frete v2: embalagens e "onde cabe" vêm do servidor (o mesmo motor da cotação).
+  const v2 = Boolean(context.features["shipping.packing_v2"] && context.features.checkout);
+  let pacotes: ShippingPackage[] = [];
+  let capacidades: PackageCapacity[] | null = null;
+  if (v2) {
+    pacotes = await api<ShippingPackage[]>(`${path}/shipping/packages`);
+    const { weight_grams, width_mm, height_mm, depth_mm } = product;
+    if (weight_grams && width_mm && height_mm && depth_mm) {
+      try {
+        capacidades = await api<PackageCapacity[]>(`${path}/shipping/packing-preview/product`, {
+          json: {
+            weight_grams,
+            width_mm,
+            height_mm,
+            depth_mm,
+            rotation: product.packing_rotation ?? "any",
+            flexible: product.packing_flexible ?? false,
+            mode: product.packing_mode ?? "auto",
+            rules: product.package_rules ?? [],
+          },
+        });
+      } catch (error) {
+        // A prévia é ajuda, não bloqueio: se ela falhar, a página abre sem "onde cabe".
+        if (!(error instanceof ApiError)) throw error;
+      }
+    }
+  }
   const tiers = (product.price_tiers ?? []) as { min_qty_milli: number; unit_price_cents: number }[];
   const zone = context.timezone;
   const hidden = (
@@ -267,6 +297,7 @@ export default async function ProductPage({
     ["basico", "Informações básicas"],
     ["preco", "Preço"],
     ["venda", "Como você vende"],
+    ...(v2 ? ([["envio", "Envio e embalagem"]] as [string, string][]) : []),
     ["organizacao", "Organização na loja"],
     ["link", "Link e Google"],
     ...(isTicket ? [] : ([["opcoes", "Opções"]] as [string, string][])),
@@ -634,6 +665,16 @@ export default async function ProductPage({
                   </label>
                 </div>
 
+                {v2 ? (
+                  <PackingSection
+                    product={product}
+                    packages={pacotes}
+                    capacities={capacidades}
+                    base={base}
+                    disabled={!canWrite}
+                  />
+                ) : (
+                  <>
                 <h4 className={local.subhead}>Peso e medidas da caixa</h4>
                 {soltoNaCotacao ? (
                   // Item que não cabe na caixa padrão viaja **sozinho**, um volume por unidade:
@@ -715,6 +756,8 @@ export default async function ProductPage({
                     />
                   </label>
                 </div>
+                  </>
+                )}
               </Section>
 
               <Section id="organizacao" title="Organização na loja">
@@ -1111,6 +1154,55 @@ export default async function ProductPage({
                         disabled={!canWrite}
                       />
                     </label>
+                    {v2 && product.has_variants ? (
+                      <details
+                        className={local.variantMeasures}
+                        open={Boolean(variant.weight_grams || variant.width_mm)}
+                      >
+                        <summary>Peso e medidas próprios (vazio = igual ao produto)</summary>
+                        <input type="hidden" name="measures" value="1" />
+                        <label className={styles.field}>
+                          Peso
+                          <span className={local.weightRow}>
+                            <input
+                              name="weight_value"
+                              inputMode="decimal"
+                              defaultValue={weightInput(variant.weight_grams).value}
+                              placeholder={weightInput(product.weight_grams).value || "igual ao produto"}
+                              disabled={!canWrite}
+                            />
+                            <select
+                              name="weight_unit"
+                              defaultValue={weightInput(variant.weight_grams ?? product.weight_grams).unit}
+                              disabled={!canWrite}
+                              aria-label="Unidade do peso"
+                            >
+                              <option value="g">g</option>
+                              <option value="kg">kg</option>
+                            </select>
+                          </span>
+                        </label>
+                        {(
+                          [
+                            ["depth_cm", "Comprimento (cm)", variant.depth_mm, product.depth_mm],
+                            ["width_cm", "Largura (cm)", variant.width_mm, product.width_mm],
+                            ["height_cm", "Altura (cm)", variant.height_mm, product.height_mm],
+                          ] as const
+                        ).map(([name, label, propria, herdada]) => (
+                          <label key={name} className={styles.field}>
+                            {label}
+                            <input
+                              name={name}
+                              inputMode="decimal"
+                              defaultValue={cmInput(propria)}
+                              placeholder={cmInput(herdada) || "igual ao produto"}
+                              disabled={!canWrite}
+                            />
+                          </label>
+                        ))}
+                        <span className={styles.fieldHint}>As três medidas vêm juntas; o peso pode ser só ele.</span>
+                      </details>
+                    ) : null}
                     {canWrite ? (
                       <button type="submit" className={smallButton}>
                         Salvar variante

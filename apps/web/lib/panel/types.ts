@@ -110,6 +110,11 @@ export interface Variant {
   option_values: Record<string, string> | null;
   price: Price;
   paused_reason: string | null;
+  /** Peso e medidas próprios (frete v2); null herda do produto. */
+  weight_grams?: number | null;
+  width_mm?: number | null;
+  height_mm?: number | null;
+  depth_mm?: number | null;
 }
 
 export interface ProductSummary {
@@ -146,6 +151,13 @@ export interface Product extends ProductSummary {
   depth_mm: number | null;
   /** Em qual embalagem da loja este produto viaja. Nulo usa a caixa padrão. */
   shipping_box_id?: string | null;
+  /** Frete v2: como o produto é embalado (docs/13-frete-v2.md §7.5). */
+  packing_mode?: "auto" | "restricted" | "own_container";
+  packing_rotation?: "any" | "upright";
+  packing_flexible?: boolean;
+  packing_ship_alone?: boolean;
+  /** "Só nestas embalagens", com a capacidade declarada opcional. */
+  package_rules?: { package_id: string; max_units: number | null }[];
   seo: { title?: string | null; description?: string | null } | null;
   category_ids: string[];
   tags: TagRef[];

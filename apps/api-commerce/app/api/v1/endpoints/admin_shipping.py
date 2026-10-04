@@ -15,7 +15,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
-from app.catalog.models import Product, ProductKind, ProductStatus
+from app.catalog.models import PHYSICAL_KINDS, Product, ProductKind, ProductStatus
 from app.core.exceptions import NotFoundError
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope, scopes_for_tenant_role
@@ -25,7 +25,10 @@ from app.models.base import utcnow
 from app.orders.models import Order
 from app.shipping import registry
 from app.shipping.dispatch import ShipmentService
-from app.shipping.models import OrderShipment, ShipmentEvent
+from app.shipping.inputs import active_packages, package_spec, packing_rules
+from app.shipping.models import OrderShipment, ProductPackageRule, ShipmentEvent, ShippingPackage
+from app.shipping.packing.model import Dims, ItemClass, PackingMode, Rotation
+from app.shipping.packing.placement import unit_capacity
 from app.shipping.provider import ShippingCredentials
 from app.tenancy.context import TenantContext
 from app.tenancy.settings_schemas import fulfillment_settings
@@ -53,6 +56,17 @@ class OversizedProduct(BaseModel):
     detail: str
 
 
+class PackingStatus(BaseModel):
+    """Frete v2 (flag `shipping.packing_v2`): o que falta nas embalagens."""
+
+    packages_active: int
+    has_default: bool
+    #: Produtos medidos que não cabem em nenhuma embalagem ativa: viajam soltos (no máximo 20).
+    unfit: list[UnmeasuredProduct] = []
+    #: Produtos "só nestas embalagens" cujas embalagens foram todas arquivadas (no máximo 20).
+    orphans: list[UnmeasuredProduct] = []
+
+
 class ShippingStatusRead(BaseModel):
     provider: str
     flag_on: bool
@@ -72,6 +86,7 @@ class ShippingStatusRead(BaseModel):
     box_oversize: str | None = None
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
+    packing: PackingStatus | None = None
 
 
 class CredentialIn(BaseModel):
@@ -239,7 +254,100 @@ async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingRe
     status = _status(tenant, connected=bool(token))
     status.unmeasured = await _unmeasured(session, tenant.id)
     status.oversized = await _oversized(session, tenant.id)
+    if tenant.feature("shipping.packing_v2"):
+        status.packing = await _packing_status(session, tenant)
+        # No v2 a caixa é a embalagem padrão da tabela, não a do JSON.
+        status.has_box = status.packing.has_default
+        if not status.packing.has_default:
+            status.missing.append("config:embalagem")
     return status
+
+
+#: Quantos produtos medidos a checagem "não cabe em nenhuma" olha (lista limitada).
+_UNFIT_SCAN = 200
+
+
+async def _packing_status(session: AsyncSession, tenant: TenantContext) -> PackingStatus:
+    pacotes = [package_spec(p) for p in await active_packages(session)]
+    regras = packing_rules(fulfillment_settings(tenant.settings).shipping.packing)
+    todas = tuple(p.id for p in pacotes)
+    nao_cabem: list[UnmeasuredProduct] = []
+    if pacotes:
+        stmt = (
+            select(
+                Product.id,
+                Product.name,
+                Product.weight_grams,
+                Product.width_mm,
+                Product.height_mm,
+                Product.depth_mm,
+                Product.packing_rotation,
+                Product.packing_flexible,
+            )
+            .where(
+                Product.kind.in_(sorted(PHYSICAL_KINDS)),
+                Product.packing_mode != PackingMode.OWN_CONTAINER,
+                Product.status == ProductStatus.ACTIVE,
+                Product.archived_at.is_(None),
+                Product.weight_grams > 0,
+                Product.width_mm > 0,
+                Product.height_mm > 0,
+                Product.depth_mm > 0,
+            )
+            .order_by(Product.name, Product.id)
+            .limit(_UNFIT_SCAN)
+        )
+        for pid, nome, peso, largura, altura, prof, rotacao, flexivel in (
+            await session.execute(stmt)
+        ).tuples():
+            item = ItemClass(
+                key=pid,
+                variant_id=pid,
+                product_id=pid,
+                name=nome,
+                sku="",
+                dims=Dims.from_catalog(
+                    width_mm=largura or 0, height_mm=altura or 0, depth_mm=prof or 0
+                ),
+                weight_g=peso or 0,
+                value_cents=0,
+                units=1,
+                rotation=Rotation(rotacao),
+                flexible=flexivel,
+                allowed=todas,
+            )
+            if all(unit_capacity(item, p, regras) == 0 for p in pacotes):
+                nao_cabem.append(UnmeasuredProduct(id=pid, name=nome))
+                if len(nao_cabem) == 20:
+                    break
+    ativa = (
+        select(ProductPackageRule.id)
+        .join(
+            ShippingPackage,
+            (ShippingPackage.id == ProductPackageRule.package_id)
+            & (ShippingPackage.tenant_id == ProductPackageRule.tenant_id),
+        )
+        .where(ProductPackageRule.product_id == Product.id, ShippingPackage.active.is_(True))
+        .exists()
+    )
+    orfaos = (
+        await session.execute(
+            select(Product.id, Product.name)
+            .where(
+                Product.packing_mode == PackingMode.RESTRICTED,
+                Product.archived_at.is_(None),
+                ~ativa,
+            )
+            .order_by(Product.name, Product.id)
+            .limit(20)
+        )
+    ).tuples()
+    return PackingStatus(
+        packages_active=len(pacotes),
+        has_default=any(p.is_default for p in pacotes),
+        unfit=nao_cabem,
+        orphans=[UnmeasuredProduct(id=pid, name=nome) for pid, nome in orfaos],
+    )
 
 
 @router.put(

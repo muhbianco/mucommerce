@@ -583,3 +583,40 @@ async def test_vendido_a_peso_vira_pecas_inteiras_e_uma_parcial(
     pecas = {c.key: (c.units, c.weight_g) for c in entradas.classes}
     # 2,5 kg = 2 peças inteiras de 1 kg + 1 peça de 500 g (as duas linhas somam).
     assert pecas == {variante: (2, 1000), f"{variante}~500": (1, 500)}
+
+
+async def test_status_do_envio_no_v2_lista_o_que_falta_nas_embalagens(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant = await selling_store(session_factory, flags={"shipping.packing_v2": True})
+    owner = await member_headers(client, session_factory, tenant)
+    status_vazio = (await client.get(f"{base(tenant)}/shipping", headers=owner)).json()
+    assert status_vazio["packing"]["has_default"] is False
+    assert "config:embalagem" in status_vazio["missing"]
+
+    m = await nova(client, tenant, owner)
+    extra = await nova(client, tenant, owner, name="Extra")
+    from tests.test_pricing import product as publicado
+
+    grande = await publicado(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        name="Bicicleta",
+        weight_grams=12000,
+        width_mm=800,
+        height_mm=1500,
+        depth_mm=300,
+    )
+    restrito = await create_product(client, tenant, owner, name="Rabiola", **RABIOLA)
+    await _regra(client, tenant, owner, restrito["id"], extra["id"], None)
+    await client.patch(f"{pkgs(tenant)}/{extra['id']}", json={"active": False}, headers=owner)
+
+    status = (await client.get(f"{base(tenant)}/shipping", headers=owner)).json()
+    assert status["packing"]["has_default"] is True
+    assert status["has_box"] is True
+    assert "config:embalagem" not in status["missing"]
+    assert status["packing"]["orphans"] == [{"id": restrito["id"], "name": "Rabiola"}]
+    assert status["packing"]["unfit"] == [{"id": grande["id"], "name": "Bicicleta"}]
+    assert m["id"]  # a padrão segue ativa

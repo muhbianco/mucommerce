@@ -291,6 +291,8 @@ async def seed() -> None:
                 "pickup": True,
                 "customer_login": True,
                 "coupons": True,
+                # Frete v2: a tela de Embalagens e a seção de envio do produto (embalagens.spec).
+                "shipping.packing_v2": True,
             },
             ACTOR,
         )

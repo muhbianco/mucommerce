@@ -208,7 +208,7 @@ class PackageService:
             return package
         if not package.active:
             raise ConflictError(
-                "Embalagem arquivada não pode ser a padrão.", code="package_inactive"
+                "Embalagem arquivada não pode ser a padrão.", reason="package_inactive"
             )
         before = _snapshot(package)
         # Tira a marca antes de pôr: o UNIQUE sobre `default_marker` recusaria duas por um
@@ -264,7 +264,7 @@ class PackageService:
             # Corrida: duas abas criando a "primeira" (duas padrão) ou o mesmo nome.
             raise ConflictError(
                 "A embalagem mudou ao mesmo tempo em outra tela. Recarregue e tente de novo.",
-                code="package_conflict",
+                reason="package_conflict",
             ) from exc
 
     async def _audit(

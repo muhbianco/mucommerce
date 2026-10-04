@@ -70,18 +70,26 @@ export async function saveOrigin(form: FormData): Promise<void> {
   }));
 }
 
-/** Caixa padrão do empacotamento e as regras de preço do frete. */
+/**
+ * Caixa padrão do empacotamento (motor v1) e as regras de preço do frete.
+ *
+ * Com o frete v2 a caixa sai desta tela (vai para Embalagens) e o formulário não traz mais os
+ * campos dela: aí a caixa guardada fica como está, para o v1 continuar valendo num rollback.
+ */
 export async function saveRules(form: FormData): Promise<void> {
+  const temCaixa = form.has("box_width_mm");
   await saveMerged(form, "envio_regras", (shipping) => ({
     ...shipping,
     enabled: checked(form, "enabled"),
-    box: {
-      width_mm: int(form, "box_width_mm", 200),
-      height_mm: int(form, "box_height_mm", 150),
-      depth_mm: int(form, "box_depth_mm", 100),
-      max_weight_grams: int(form, "box_max_weight_grams", 30000),
-      empty_weight_grams: int(form, "box_empty_weight_grams", 0),
-    },
+    box: temCaixa
+      ? {
+          width_mm: int(form, "box_width_mm", 200),
+          height_mm: int(form, "box_height_mm", 150),
+          depth_mm: int(form, "box_depth_mm", 100),
+          max_weight_grams: int(form, "box_max_weight_grams", 30000),
+          empty_weight_grams: int(form, "box_empty_weight_grams", 0),
+        }
+      : shipping.box,
     markup_percent: int(form, "markup_percent", 0),
     markup_cents: money(form, "markup") ?? 0,
     free_above_cents: money(form, "free_above"),

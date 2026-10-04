@@ -75,8 +75,17 @@ export function contactFields(form: FormData): Record<string, string | null> {
   return out;
 }
 
+const REASON = /^[a-z_]{1,40}$/;
+
 function outcome(error: unknown): string {
-  if (error instanceof FormError || error instanceof ApiError) return `erro=${error.code}`;
+  if (error instanceof FormError) return `erro=${error.code}`;
+  if (error instanceof ApiError) {
+    // Quando a API diz *qual* regra quebrou (`details.reason`), a tela mostra a frase daquela
+    // regra ("o produto teria de encolher para menos da metade"), não "algum campo é inválido".
+    const reason = error.details.reason;
+    if (typeof reason === "string" && REASON.test(reason)) return `erro=${error.code}.${reason}`;
+    return `erro=${error.code}`;
+  }
   throw error;
 }
 

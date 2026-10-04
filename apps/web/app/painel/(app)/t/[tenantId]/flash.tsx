@@ -62,6 +62,13 @@ const OK: Record<string, string> = {
   modulo_desligado: "Módulo desligado. Nada foi apagado.",
   vitrine: "Quem vê a vitrine foi atualizado.",
   taxa: "Repasse da taxa salvo.",
+  embalagem_criada: "Embalagem cadastrada. Veja ao lado onde os seus produtos cabem.",
+  embalagem_salva: "Embalagem salva.",
+  embalagem_padrao: "Esta agora é a embalagem padrão da loja.",
+  embalagem_arquivada: "Embalagem arquivada. Os produtos que só usavam ela passam para a escolha automática.",
+  embalagem_reativada: "Embalagem reativada.",
+  embalagem_apagada: "Embalagem apagada.",
+  regras_embalagem: "Regras de embalagem salvas.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -119,12 +126,40 @@ const ERRORS: Record<string, string> = {
   module_in_use: "Outro módulo ligado depende deste; desligue aquele primeiro.",
   cep_origem_invalido: "CEP de origem inválido: informe os 8 dígitos.",
   token_invalido: "Token muito curto — confira se copiou inteiro.",
+  peso_invalido: "Peso inválido: use só números (150 ou 1,2), e escolha g ou kg ao lado.",
+  tipo_invalido: "Escolha o tipo da embalagem.",
+  package_name_taken: "Já existe uma embalagem com esse nome.",
+  package_limit: "A loja pode ter até 30 embalagens. Arquive ou apague uma antes.",
+  default_package: "A embalagem padrão não pode ser arquivada nem apagada. Torne outra padrão antes.",
+  package_in_use: "Há produtos que usam esta embalagem. Arquive em vez de apagar.",
+  "conflict.package_inactive": "Embalagem arquivada não pode ser a padrão. Reative antes.",
+  "conflict.package_conflict": "A embalagem mudou ao mesmo tempo em outra tela. Recarregue e tente de novo.",
+  "validation_error.inner_required": "Informe as três medidas por dentro.",
+  "validation_error.tube_diameter": "No tubo, informe o comprimento e o diâmetro.",
+  "validation_error.outer_partial": "Informe as três medidas por fora, ou deixe as três vazias.",
+  "validation_error.outer_smaller": "A medida por fora não pode ser menor que a por dentro.",
+  "validation_error.weight_limit": "O peso máximo precisa passar do peso da embalagem vazia.",
+  packing_invalid: "Configuração de embalagem inválida.",
+  "packing_invalid.duplicate_package": "A mesma embalagem foi escolhida duas vezes.",
+  "packing_invalid.unknown_package": "Essa embalagem não existe mais. Recarregue a página.",
+  "packing_invalid.own_container_needs_measures":
+    "Para ir na embalagem dele, o produto precisa de peso e das três medidas.",
+  "packing_invalid.own_container_not_flexible":
+    "Produto flexível não vai na embalagem própria: ele precisa de uma caixa.",
+  "packing_invalid.restricted_needs_packages": "Marque ao menos uma embalagem ativa para este produto.",
+  "packing_invalid.too_compressed":
+    "Essa quantidade faria o produto encolher para menos da metade. Diminua o número declarado.",
+  "packing_invalid.does_not_fit": "Nem uma unidade cabe nessa embalagem. Desmarque-a ou confira as medidas.",
+  "packing_invalid.too_heavy": "Essa quantidade passa do peso que a embalagem aguenta.",
+  "packing_invalid.missing_measures": "Para declarar quantos cabem, informe peso e medidas do produto.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 
 export function Flash({ ok, erro }: { ok?: string; erro?: string }) {
   if (erro) {
-    return <p className={styles.error}>{ERRORS[erro] ?? `Não foi possível salvar (${erro}).`}</p>;
+    // `codigo.motivo` (ex.: packing_invalid.too_compressed): a frase do motivo, senão a do código.
+    const message = ERRORS[erro] ?? ERRORS[erro.split(".")[0] ?? erro] ?? `Não foi possível salvar (${erro}).`;
+    return <p className={styles.error}>{message}</p>;
   }
   if (ok && OK[ok]) return <p className={styles.ok}>{OK[ok]}</p>;
   return null;
