@@ -48,6 +48,8 @@ interface ServiceOption {
   max_insurance_cents: number | null;
   max_weight_grams: number | null;
   offered: boolean;
+  /** Por que a loja não pode oferecer (ex.: Jadlog saindo do Paraná sem nota fiscal). */
+  blocked_reason?: string | null;
 }
 
 interface ServicesRead {
@@ -154,6 +156,9 @@ export default async function Shipping({
   const status = await api<ShippingStatus>(`/admin/tenants/${tenantId}/shipping`);
   const cfg = ((context.settings.fulfillment ?? {}) as { shipping?: ShippingSettings }).shipping ?? {};
   const origin = cfg.origin ?? {};
+  // CPF tem 11 dígitos, CNPJ 14: é assim que a etiqueta sai (o mesmo teste do provedor).
+  const documento = (origin.document ?? "").replace(/\D/g, "");
+  const origemPR = (origin.state ?? "").trim().toUpperCase() === "PR";
   const box = cfg.box ?? {};
   // Uma linha em branco no fim, para acrescentar sem precisar de botão que exija JavaScript.
   type Caixa = NonNullable<ShippingSettings["boxes"]>[number];
@@ -408,6 +413,43 @@ export default async function Shipping({
       </Section>
 
       <Section
+        title="Nota fiscal e declaração de conteúdo"
+        description="Como as suas etiquetas saem, pelo documento de quem envia."
+      >
+        {documento.length === 11 ? (
+          <p className={styles.hint}>
+            Você envia como <strong>pessoa física (CPF)</strong>. Cada etiqueta sai com a declaração de
+            conteúdo eletrônica (DC-e), que o Melhor Envio emite com os produtos do pedido — você não
+            precisa de nota fiscal nem de certificado digital.
+          </p>
+        ) : documento.length === 14 ? (
+          <p className={styles.hint}>
+            Você envia como <strong>empresa (CNPJ), sem nota fiscal</strong>, com a declaração de conteúdo
+            eletrônica (DC-e) que o Melhor Envio emite. Isso vale para MEI que vende para pessoa física e
+            para empresa que não é contribuinte de ICMS. Envio com nota fiscal ainda não é suportado.
+          </p>
+        ) : (
+          <p className={styles.note}>
+            Informe o CPF ou o CNPJ de quem envia, no endereço de origem acima: sem ele a etiqueta não sai.
+          </p>
+        )}
+        <p className={styles.hint}>
+          A declaração (DACE) sai na mesma página da etiqueta: imprima as duas e mande a DACE junto com o
+          pacote.
+        </p>
+        {origemPR ? (
+          <p className={styles.note}>
+            Saindo do Paraná, a Jadlog só aceita envio com nota fiscal: ela não aparece para os seus
+            clientes.
+          </p>
+        ) : null}
+        <p className={styles.hint}>
+          A própria declaração traz impresso que é contribuinte de ICMS quem vende com frequência ou em
+          volume de comércio. Se você ainda não tem MEI, confirme com um contador como enviar.
+        </p>
+      </Section>
+
+      <Section
         title="Serviços oferecidos"
         description="Os marcados aparecem para o cliente no checkout, cada um com o preço e o prazo dele."
       >
@@ -444,19 +486,18 @@ export default async function Shipping({
                   />
                   <span>
                     {s.name} · {s.carrier}{" "}
-                    {s.requires_invoice ? <Pill state="warn">pede nota fiscal</Pill> : null}
-                    {!s.available ? <Pill state="off">indisponível na sua conta</Pill> : null}
-                    <span className={`${styles.fieldHint} ${local.facts}`}>{serviceFacts(s)}</span>
+                    {s.blocked_reason ? (
+                      <Pill state="off">só com nota fiscal</Pill>
+                    ) : !s.available ? (
+                      <Pill state="off">indisponível na sua conta</Pill>
+                    ) : null}
+                    <span className={`${styles.fieldHint} ${local.facts}`}>
+                      {s.blocked_reason ?? serviceFacts(s)}
+                    </span>
                   </span>
                 </label>
               ))}
             </fieldset>
-            {servicos.services.some((s) => s.requires_invoice) ? (
-              <p className={styles.hint}>
-                &quot;Pede nota fiscal&quot;: a transportadora exige os dados da NF-e na compra da etiqueta.
-                Sem nota, deixe esse serviço desmarcado.
-              </p>
-            ) : null}
             <div className={styles.formActions}>
               <button type="submit" className={styles.button} disabled={readOnly}>
                 Salvar serviços

@@ -70,6 +70,8 @@ test("pedido despachado por volume: uma etiqueta e um rastreio para cada volume"
     /e2e-1\.pdf$/,
   );
   await expect(etiquetas.getByRole("link", { name: "Imprimir etiqueta 2" })).toBeVisible();
+  // A declaração de conteúdo (DACE) sai na mesma página da etiqueta e vai junto no pacote.
+  await expect(page.getByText(/declaração de conteúdo \(DACE\)/)).toBeVisible();
   // Já despachado: sem botão de compra.
   await expect(page.getByRole("button", { name: "Despachar agora" })).toHaveCount(0);
 });

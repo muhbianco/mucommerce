@@ -229,6 +229,30 @@ def parse_services(payload: Any) -> tuple[ServiceInfo, ...]:
     return tuple(servicos)
 
 
+def products(request: ShipmentRequest) -> list[dict[str, str]]:
+    """A lista de bens da DC-e, item a item, em texto como a doc mostra (fato 8).
+
+    Desde 06/04/2026 o Melhor Envio exige `products` "correto e completo": é dele que sai a
+    DACE impressa junto da etiqueta. Sem itens (não deveria acontecer), cai na linha única de
+    antes em vez de recusar o despacho — e avisa no log.
+    """
+    if request.items:
+        return [
+            {
+                "name": item.name,
+                "quantity": str(item.quantity),
+                "unitary_value": f"{item.unit_value_cents / 100:.2f}",
+            }
+            for item in request.items
+        ]
+    logger.warning(
+        "Etiqueta sem itens para a declaração de conteúdo", extra={"ref": request.reference}
+    )
+    total = sum(p.value_cents for p in request.parcels)
+    nome = f"Pedido {request.order_number}" if request.order_number else "Pedido"
+    return [{"name": nome, "quantity": "1", "unitary_value": f"{total / 100:.2f}"}]
+
+
 def _int(value: Any) -> int | None:
     return int(value) if isinstance(value, (int, float, str)) and str(value).isdigit() else None
 
@@ -342,13 +366,7 @@ class MelhorEnvioProvider:
             else request.service_code,
             "from": party(request.sender),
             "to": party(request.recipient),
-            "products": [
-                {
-                    "name": f"Pedido {request.order_number}" if request.order_number else "Pedido",
-                    "quantity": "1",
-                    "unitary_value": _reais(sum(p.value_cents for p in request.parcels)),
-                }
-            ],
+            "products": products(request),
             # No carrinho é o contrário da cotação (sandbox, 04/10/2026): `volumes[].insurance`
             # é ignorado e o seguro vale em `options`; a Jadlog recusa abaixo de R$ 1,00.
             "volumes": [volume(p, insured=False) for p in request.parcels],

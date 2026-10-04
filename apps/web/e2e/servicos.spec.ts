@@ -5,7 +5,7 @@ import { PANEL, STORE } from "./playwright.config";
 /**
  * Serviços oferecidos (frete v2, §7.7): a loja escolhe, na tela de Envio, quais serviços da
  * conta na transportadora aparecem no checkout. A lista vem da própria transportadora (no E2E,
- * a fake: Econômico como os Correios, Expresso como a Jadlog, que pede nota fiscal).
+ * a fake: Econômico como os Correios, Expresso como a Jadlog).
  *
  * Deixa a loja como encontrou (os dois serviços marcados): os specs seguintes cotam com ela.
  */
@@ -30,8 +30,12 @@ test("a loja tira um serviço do checkout, e a vitrine para de mostrá-lo", asyn
   await expect(servico(page, "fake_economico")).toBeChecked();
   await expect(servico(page, "fake_expresso")).toBeChecked();
   const expresso = page.locator('[data-service="fake_expresso"]');
-  await expect(expresso).toContainText("pede nota fiscal");
+  // Envio não comercial (DC-e) não pede nota: o "invoice" da lista não vale para ele (fato 8).
+  await expect(expresso).not.toContainText("nota fiscal");
   await expect(expresso).toContainText("vários volumes numa etiqueta só");
+  // A loja do seed tem CNPJ na origem: a tela diz como as etiquetas saem.
+  await expect(page.getByText(/empresa \(CNPJ\), sem nota fiscal/)).toBeVisible();
+  await expect(page.getByText(/confirme com um contador/)).toBeVisible();
   await expect(page.locator('[data-service="fake_economico"]')).toContainText("uma etiqueta por volume");
 
   await servico(page, "fake_expresso").uncheck();

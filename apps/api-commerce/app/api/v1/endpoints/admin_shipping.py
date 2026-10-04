@@ -33,9 +33,10 @@ from app.shipping.models import OrderShipment, ProductPackageRule, ShipmentEvent
 from app.shipping.packing.model import Dims, ItemClass, PackingMode, Rotation
 from app.shipping.packing.placement import unit_capacity
 from app.shipping.provider import ServiceInfo, ShippingCredentials, ShippingProviderError
+from app.shipping.service import invoice_only
 from app.tenancy.context import TenantContext
 from app.tenancy.service import TenantService
-from app.tenancy.settings_schemas import fulfillment_settings
+from app.tenancy.settings_schemas import ShippingSettings, fulfillment_settings
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/admin/tenants/{tenant_id}/shipping", tags=["Painel — Envio"])
@@ -107,6 +108,8 @@ class ServiceOptionRead(BaseModel):
     max_insurance_cents: int | None
     max_weight_grams: int | None
     offered: bool
+    #: Por que a loja não pode oferecer este serviço (ex.: Jadlog saindo do Paraná sem nota).
+    blocked_reason: str | None = None
 
 
 class ShippingServicesRead(BaseModel):
@@ -515,12 +518,20 @@ async def read_services(session: DbSession, user: CurrentAdmin, tenant: Shipping
     lista, problema = await _service_catalog(session, tenant)
     return ShippingServicesRead(
         services=[
-            ServiceOptionRead(**asdict(s), offered=todos or s.code in oferecidos)
-            for s in lista or ()
+            _service_read(s, cfg, offered=todos or s.code in oferecidos) for s in lista or ()
         ],
         all_offered=todos,
         problem=problema,
     )
+
+
+def _service_read(
+    service: ServiceInfo, cfg: ShippingSettings, *, offered: bool
+) -> ServiceOptionRead:
+    """O serviço como a tela mostra: indisponível também quando a origem exige nota fiscal."""
+    motivo = invoice_only(service.carrier, cfg.origin.state if cfg.origin else None)
+    dados = asdict(service) | {"available": service.available and motivo is None}
+    return ServiceOptionRead(**dados, offered=offered and motivo is None, blocked_reason=motivo)
 
 
 @router.put(
@@ -560,7 +571,13 @@ async def save_services(
             reason="unknown_service",
             codes=desconhecidos,
         )
-    indisponiveis = sorted(c for c in pedidos if not por_codigo[c].available)
+    cfg = fulfillment_settings(tenant.settings).shipping
+    origem = cfg.origin.state if cfg.origin else None
+    indisponiveis = sorted(
+        c
+        for c in pedidos
+        if not por_codigo[c].available or invoice_only(por_codigo[c].carrier, origem)
+    )
     if indisponiveis:
         raise ValidationError(
             "Serviço indisponível na sua conta.", reason="service_unavailable", codes=indisponiveis
@@ -576,7 +593,7 @@ async def save_services(
     linha = await servico_loja.get_or_404(tenant.id)
     await servico_loja.set_setting(linha, "fulfillment", valor, admin_actor(request, user))
     return ShippingServicesRead(
-        services=[ServiceOptionRead(**asdict(s), offered=s.code in pedidos) for s in lista],
+        services=[_service_read(s, cfg, offered=s.code in pedidos) for s in lista],
         all_offered=False,
     )
 

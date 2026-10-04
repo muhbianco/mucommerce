@@ -447,6 +447,12 @@ export default async function OrderPage({
                       </a>
                     </p>
                   ) : null}
+                  {shipment.label_url || porVolume ? (
+                    <p className={styles.hint}>
+                      A declaração de conteúdo (DACE) abre na mesma página da etiqueta: imprima as duas e
+                      mande a DACE junto com o pacote.
+                    </p>
+                  ) : null}
                   {shipment.last_error ? (
                     <p className={styles.note}>{shipment.last_error}</p>
                   ) : null}

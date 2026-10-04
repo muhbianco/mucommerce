@@ -155,6 +155,15 @@ class ShippingOption:
 
 
 @dataclass(frozen=True, slots=True)
+class DeclaredItem:
+    """Um bem da declaração de conteúdo (DC-e): o que a etiqueta diz que vai no pacote."""
+
+    name: str
+    quantity: int
+    unit_value_cents: int
+
+
+@dataclass(frozen=True, slots=True)
 class ShipmentRequest:
     #: Nossa referência (id da remessa). Vai para o provedor como chave de deduplicação.
     reference: str
@@ -165,6 +174,9 @@ class ShipmentRequest:
     order_number: int | None = None
     insurance_cents: int = 0
     notes: str | None = None
+    #: Os bens desta etiqueta, item a item: viram a lista da DC-e (fato 8). Com uma etiqueta
+    #: por volume, só os daquele volume.
+    items: tuple[DeclaredItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

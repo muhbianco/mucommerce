@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.catalog.models import PHYSICAL_KINDS
 from app.core.exceptions import (
     ShipmentInProgressError,
     ShippingBalanceError,
@@ -31,10 +32,17 @@ from app.orders.models import Order, OrderItem
 from app.orders.service import OrderService
 from app.orders.state_machine import OrderStatus
 from app.shipping import registry
+from app.shipping.declaration import (
+    OrderLine,
+    line_name,
+    order_declaration,
+    parcel_declarations,
+)
 from app.shipping.models import OrderShipment, ShipmentStatus
 from app.shipping.packing import MissingDimensions
 from app.shipping.plan import parcels_from_snapshot
 from app.shipping.provider import (
+    DeclaredItem,
     InsufficientBalanceError,
     Parcel,
     ShipmentRequest,
@@ -216,6 +224,7 @@ class ShipmentService:
         1º faria a próxima tentativa comprá-lo de novo. A retomada compra só o que falta. O
         pedido vira `shipped` quando todos os volumes têm etiqueta.
         """
+        declaracoes = await self._declare(order, (order.fulfillment or {}).get("parcel_plan"))
         volumes = [dict(v) for v in (remessa.parcels or [])]
         total = len(volumes)
         for n, (volume, parcela) in enumerate(zip(volumes, template.parcels, strict=True), start=1):
@@ -227,6 +236,8 @@ class ShipmentService:
                 parcels=(parcela,),
                 insurance_cents=parcela.value_cents,
                 notes=f"Pedido {order.number} - volume {n} de {total}",
+                # A DACE desta etiqueta lista só o que está neste volume.
+                items=declaracoes[n - 1] if n - 1 < len(declaracoes) else template.items,
             )
             try:
                 resultado = await provider.ship(credentials, pedido)
@@ -381,6 +392,30 @@ class ShipmentService:
             order_number=order.number,
             insurance_cents=sum(p.value_cents for p in volumes),
             notes=f"Pedido {order.number}",
+            items=order_declaration(await self._order_lines(order.id)),
+        )
+
+    async def _order_lines(self, order_id: str) -> list[OrderLine]:
+        """As linhas que vão na caixa: digital, serviço e ingresso não entram na declaração."""
+        return [
+            OrderLine(
+                variant_id=item.variant_id,
+                name=line_name(item.product_name, item.variant_name),
+                quantity_milli=item.quantity_milli,
+                total_cents=item.total_cents,
+                by_weight=item.sold_by == "weight",
+                unit_label=item.unit_label,
+            )
+            for item in await self._items(order_id)
+            if item.product_kind in PHYSICAL_KINDS
+        ]
+
+    async def _declare(self, order: Order, congelado: Any) -> tuple[tuple[DeclaredItem, ...], ...]:
+        """Com uma etiqueta por volume, a declaração de cada uma (só o que está no volume)."""
+        if not isinstance(congelado, dict) or congelado.get("label_mode") != "per_volume":
+            return ()
+        return parcel_declarations(
+            await self._order_lines(order.id), congelado.get("parcels") or []
         )
 
     async def _legacy_parcels(self, order: Order, cfg: ShippingSettings) -> tuple[Parcel, ...]:

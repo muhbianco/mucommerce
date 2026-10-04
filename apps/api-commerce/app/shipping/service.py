@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
@@ -354,6 +354,14 @@ class ShippingQuoteService:
                 extra={"provider": cfg.provider, "erro": type(exc).__name__},
             )
             return None
+        # Serviço que só aceita nota fiscal nesta origem vira recusa (com o motivo): a loja envia
+        # sem nota, com DC-e, e a etiqueta seria recusada na postagem.
+        opcoes = tuple(
+            replace(o, error=motivo)
+            if o.error is None and (motivo := invoice_only(o.carrier, cfg.origin.state))
+            else o
+            for o in opcoes
+        )
         await _cache.set(
             chave,
             [_as_dict(o) for o in opcoes],
@@ -592,6 +600,23 @@ def _as_dict(option: ShippingOption) -> dict[str, Any]:
         "parcel_prices_cents": list(option.parcel_prices_cents),
         "multi_volume_max": option.multi_volume_max,
     }
+
+
+#: Central de ajuda do Melhor Envio (regras de embarque da Jadlog): saindo do Paraná, a Jadlog
+#: não aceita declaração de conteúdo, só nota fiscal. Implementado pela documentação, sem teste
+#: no sandbox (fato 8 de docs/13-frete-v2.md).
+_JADLOG_PR = "Saindo do Paraná, a Jadlog só aceita envio com nota fiscal."
+
+
+def invoice_only(carrier: str, origin_state: str | None) -> str | None:
+    """Por que este serviço exige nota fiscal saindo desta origem; `None` se aceita DC-e.
+
+    A loja envia sem nota (envio não comercial, com DC-e emitida pelo Melhor Envio), então um
+    serviço que só aceita nota não serve para ela.
+    """
+    if (origin_state or "").strip().upper() == "PR" and "jadlog" in carrier.casefold():
+        return _JADLOG_PR
+    return None
 
 
 def _refusals(options: Sequence[ShippingOption]) -> tuple[str, ...]:

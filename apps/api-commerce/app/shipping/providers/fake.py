@@ -34,6 +34,8 @@ _STATUS: dict[str, TrackingStatus] = {}
 CALLS: list[QuoteRequest] = []
 #: Referências de compra recebidas, na ordem (os testes conferem que nada é comprado duas vezes).
 SHIP_CALLS: list[str] = []
+#: Os pedidos de etiqueta inteiros (os testes conferem a declaração de conteúdo de cada um).
+SHIP_REQUESTS: list[ShipmentRequest] = []
 #: Finais de referência cuja compra falha (".2" = o 2º volume): simula a transportadora
 #: recusando um volume no meio da compra por volume.
 FAIL_SUFFIXES: set[str] = set()
@@ -46,6 +48,7 @@ CEP_INSTAVEL = "77777777"
 def reset() -> None:
     CALLS.clear()
     SHIP_CALLS.clear()
+    SHIP_REQUESTS.clear()
     FAIL_SUFFIXES.clear()
     _SHIPMENTS.clear()
     _BY_REFERENCE.clear()
@@ -113,6 +116,7 @@ class FakeShippingProvider:
         self, credentials: ShippingCredentials, request: ShipmentRequest
     ) -> ShipmentResult:
         SHIP_CALLS.append(request.reference)
+        SHIP_REQUESTS.append(request)
         if any(request.reference.endswith(s) for s in FAIL_SUFFIXES):
             raise ShippingProviderError("volume recusado no teste", http_status=422)
         existente = _BY_REFERENCE.get(request.reference)
