@@ -63,6 +63,11 @@ class ProductKind(StrEnum):
     TICKET = "ticket"
 
 
+# Kinds that travel: picked up, delivered or shipped. Tickets, services and digital goods do not,
+# so they never enter packing, fulfillment or the "unmeasured" lists.
+PHYSICAL_KINDS = frozenset({ProductKind.PHYSICAL.value, ProductKind.MADE_TO_ORDER.value})
+
+
 class EventStatus(StrEnum):
     SCHEDULED = "scheduled"
     POSTPONED = "postponed"  # date to be announced: sales stop, the page stays

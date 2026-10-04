@@ -21,7 +21,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.models import Product, ProductVariant
+from app.catalog.models import PHYSICAL_KINDS, Product, ProductVariant
 from app.core.cache import TtlCache
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -235,7 +235,13 @@ async def parcels_for(
         if par is None:
             continue
         variante, produto = par
-        unidades = max(1, round(line.quantity_milli / 1000))
+        # Ingresso, serviço e digital não viajam: entrar aqui sem medida travava o frete do
+        # carrinho inteiro com `missing_dimensions`, por causa de uma linha que nem vai na caixa.
+        if produto.kind not in PHYSICAL_KINDS:
+            continue
+        # Para cima, nunca para o mais próximo: `round` é bancário (2,5 kg virava 2 peças) e
+        # frete cotado a menos sai do bolso da loja no despacho.
+        unidades = max(1, -(-line.quantity_milli // 1000))
         try:
             itens = item_from_variant(
                 # Peso e medidas são do produto: hoje o catálogo não guarda medida por
@@ -323,7 +329,9 @@ def _cache_key(
     corpo = ";".join(
         f"{p.weight_grams}x{p.width_mm}x{p.height_mm}x{p.depth_mm}:{p.value_cents}" for p in volumes
     )
-    return f"{tenant_id}:{cfg.provider}:{cfg.origin.postal_code}:{destino}:{corpo}"
+    # Os serviços entram na chave: sem eles, desligar o SEDEX só valia depois de o cache vencer.
+    servicos = ",".join(sorted(s.code for s in cfg.services if s.active))
+    return f"{tenant_id}:{cfg.provider}:{cfg.origin.postal_code}:{destino}:{servicos}:{corpo}"
 
 
 def _as_dict(option: ShippingOption) -> dict[str, Any]:

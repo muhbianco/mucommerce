@@ -20,6 +20,7 @@ Fork Chatwoot: `https://github.com/muhbianco/muchatwoot.git`.
 | [08-seguranca-observabilidade-operacao.md](08-seguranca-observabilidade-operacao.md) | RBAC, LGPD, secrets, backup, logs, métricas, alertas, deploy, testes (seção I) |
 | [09-roadmap.md](09-roadmap.md) | Fases 0–6 com critérios de aceite, dependências e rollback (seção J) |
 | [10-backlog.md](10-backlog.md) | Épicos, histórias e tarefas técnicas priorizadas com pontos (seção K) |
+| [13-frete-v2.md](13-frete-v2.md) | Frete v2: motor de embalagem, embalagens, configuração de embalagem no produto, estimativa por CEP e fases F0–F8 |
 | [adr/](adr/README.md) | Architecture Decision Records (0001–0006) |
 
 Convenções usadas em todos os docs:

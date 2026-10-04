@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from app.catalog.models import Product, ProductVariant
+from app.catalog.models import PHYSICAL_KINDS, Product, ProductVariant
 from app.catalog.pricing import ChosenModifier, EffectivePrice
 from app.fulfillment.service import FulfillmentQuote
 
@@ -102,10 +102,6 @@ class Quote:
         if self.fulfillment is None:
             return False
         return not self.fulfillment.problems
-
-
-# Kinds that are picked up or delivered; tickets, services and digital goods are not.
-PHYSICAL_KINDS = frozenset({"physical", "made_to_order"})
 
 
 def line_subtotal(unit_cents: int, quantity_milli: int) -> int:

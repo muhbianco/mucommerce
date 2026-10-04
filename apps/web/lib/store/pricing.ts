@@ -38,3 +38,12 @@ export function freeShippingGap(subtotalCents: number, freeAboveCents: number | 
   const missing = freeAboveCents - subtotalCents;
   return missing > 0 ? missing : 0;
 }
+
+/**
+ * O valor que conta para o frete grátis: o subtotal **depois do cupom**, igual ao backend
+ * (`PricingService.quote` passa `subtotal - discount` ao `evaluate`). Com o subtotal cheio, a
+ * barra prometia frete grátis que o checkout não dava.
+ */
+export function freeShippingBase(subtotalCents: number, discountCents: number): number {
+  return Math.max(0, subtotalCents - Math.max(0, discountCents));
+}

@@ -329,3 +329,31 @@ def test_o_motivo_da_recusa_sobrevive_ao_filtro() -> None:
 
     # Sem erro nenhum (cotação boa) não há o que dizer.
     assert _refusals((ShippingOption("1", "PAC", "Correios", 1500, 5),)) == ()
+
+
+def test_chave_do_cache_muda_com_os_servicos_oferecidos() -> None:
+    """Desligar o SEDEX tem de valer na hora, não quando o cache da cotação vencer."""
+    from app.shipping.provider import Parcel
+    from app.shipping.service import _cache_key
+    from app.tenancy.settings_schemas import ShippingSettings
+
+    origem = {
+        "name": "Loja",
+        "postal_code": "01001000",
+        "address": "Praça da Sé",
+        "number": "1",
+        "district": "Sé",
+        "city": "São Paulo",
+        "state": "SP",
+    }
+    volumes = (Parcel(weight_grams=500, width_mm=200, height_mm=150, depth_mm=100),)
+    todos = ShippingSettings.model_validate({"origin": origem})
+    so_pac = ShippingSettings.model_validate(
+        {"origin": origem, "services": [{"code": "1", "name": "PAC"}]}
+    )
+    pac_desligado = ShippingSettings.model_validate(
+        {"origin": origem, "services": [{"code": "1", "name": "PAC", "active": False}]}
+    )
+    chaves = {_cache_key("t", cfg, "20000000", volumes) for cfg in (todos, so_pac, pac_desligado)}
+    # "Tudo" e "só inativos" pedem a mesma coisa à transportadora (sem filtro); PAC ligado não.
+    assert len(chaves) == 2

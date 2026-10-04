@@ -19,7 +19,14 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.events import EventRepository, lot_state
-from app.catalog.models import ProductKind, ProductStatus, SoldBy, StockPolicy, VariantStatus
+from app.catalog.models import (
+    PHYSICAL_KINDS,
+    ProductKind,
+    ProductStatus,
+    SoldBy,
+    StockPolicy,
+    VariantStatus,
+)
 from app.catalog.pricing import (
     apply_tiers,
     parse_tiers,
@@ -41,7 +48,6 @@ from app.inventory.repository import InventoryRepository
 from app.inventory.service import effective_policy
 from app.pricing.quote import (
     MILLI,
-    PHYSICAL_KINDS,
     CouponQuote,
     LineInput,
     LineProblem,

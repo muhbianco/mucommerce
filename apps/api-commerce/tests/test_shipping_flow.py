@@ -444,3 +444,73 @@ async def test_embalagem_apagada_cai_na_caixa_padrao_em_vez_de_recusar(
 
     assert len(volumes) == 1
     assert (volumes[0].width_mm, volumes[0].height_mm) == (300, 200)
+
+
+async def test_linha_que_nao_viaja_nao_trava_o_frete(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Um serviço sem medida no mesmo carrinho de um produto medido.
+
+    Antes o serviço entrava no empacotador e a cotação inteira voltava `missing_dimensions` —
+    por causa de uma linha que nem vai na caixa.
+    """
+    from app.shipping.service import parcels_for
+    from app.tenancy.settings_schemas import fulfillment_settings
+
+    tenant, owner, _ = await loja(client, session_factory)
+    medido = await product(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        weight_grams=800,
+        width_mm=150,
+        height_mm=100,
+        depth_mm=80,
+    )
+    servico = await product(client, session_factory, tenant, owner, name="Montagem", kind="service")
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        context = await TenantResolver(session).resolve_by_id(tenant.id)
+        cfg = fulfillment_settings(context.settings).shipping
+        volumes = await parcels_for(
+            session,
+            [
+                QuoteLine(medido["variants"][0]["id"], 1000),
+                QuoteLine(servico["variants"][0]["id"], 1000),
+            ],
+            cfg,
+        )
+
+    assert len(volumes) == 1
+    assert volumes[0].weight_grams == 800
+
+
+async def test_quantidade_fracionada_arredonda_para_cima(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """2,5 unidades viram 3 peças na conta do frete, nunca 2 (o `round` bancário dava 2)."""
+    from app.shipping.service import parcels_for
+    from app.tenancy.settings_schemas import fulfillment_settings
+
+    tenant, owner, _ = await loja(client, session_factory)
+    criado = await product(
+        client,
+        session_factory,
+        tenant,
+        owner,
+        weight_grams=1000,
+        width_mm=100,
+        height_mm=100,
+        depth_mm=100,
+    )
+    variant_id = criado["variants"][0]["id"]
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        context = await TenantResolver(session).resolve_by_id(tenant.id)
+        cfg = fulfillment_settings(context.settings).shipping
+        volumes = await parcels_for(session, [QuoteLine(variant_id, 2500)], cfg)
+
+    assert sum(v.weight_grams for v in volumes) == 3000

@@ -83,6 +83,7 @@ const ERRORS: Record<string, string> = {
   data_invalida: "Data inválida.",
   cep_invalido: "Faixa de CEP inválida: use uma por linha, como 01000-000 a 01099-999.",
   numero_invalido: "Número inválido.",
+  medida_invalida: "Medida ou peso inválido: use só números, sem unidade (ex.: 30 ou 30,5).",
   adicionais_invalidos: "Cada grupo precisa de nome e de uma linha por adicional, no formato Nome = 3,50.",
   escolha_produtos: "Escolha ao menos um produto para o bloco de destaques.",
   whatsapp_invalido: "WhatsApp inválido: escreva DDD + número (11 99999-9999).",

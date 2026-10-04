@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { StorePrice } from "../storefront";
 
-import { discountPercent, freeShippingGap, money } from "./pricing";
+import { discountPercent, freeShippingBase, freeShippingGap, money } from "./pricing";
 
 function price(amount: number, compareAt: number | null = null): StorePrice {
   return { amount_cents: amount, compare_at_cents: compareAt, promo_active: false, promo_ends_at: null, currency: "BRL" };
@@ -37,5 +37,17 @@ describe("preço", () => {
   it("fica calado quando a loja não oferece frete grátis", () => {
     expect(freeShippingGap(8000, null)).toBeNull();
     expect(freeShippingGap(8000, 0)).toBeNull();
+  });
+});
+
+describe("freeShippingBase", () => {
+  it("desconta o cupom, como o backend", () => {
+    expect(freeShippingBase(16000, 2000)).toBe(14000);
+    expect(freeShippingGap(freeShippingBase(16000, 2000), 15000), "o cupom tirou do grátis").toBe(1000);
+  });
+
+  it("nunca fica negativo", () => {
+    expect(freeShippingBase(1000, 5000)).toBe(0);
+    expect(freeShippingBase(1000, -10)).toBe(1000);
   });
 });

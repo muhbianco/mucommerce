@@ -7,6 +7,7 @@ import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice, type StorePrice } from "@/lib/storefront";
+import { freeShippingBase } from "@/lib/store/pricing";
 
 import { CART_ERRORS } from "../_store/add-to-cart";
 import {
@@ -241,7 +242,11 @@ export default async function CartPage({
             <div className={styles.summary} aria-label="Resumo do pedido">
               <h2>Resumo</h2>
               {shippingOn ? (
-                <FreeShippingBar subtotalCents={quote.subtotal_cents} freeAboveCents={freeAbove} currency={currency} />
+                <FreeShippingBar
+                  subtotalCents={freeShippingBase(quote.subtotal_cents, quote.discount_cents)}
+                  freeAboveCents={freeAbove}
+                  currency={currency}
+                />
               ) : null}
               <dl className={styles.totals}>
                 {economia ? (
