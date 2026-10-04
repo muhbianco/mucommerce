@@ -37,6 +37,11 @@ O CPF de teste do remetente vai no arquivo do `--cart`, em `"remetente_cpf"`. Os
 etiquetas ficam em `probe-melhorenvio-etiquetas.json` (local: a etiqueta mostra os endereços);
 a saída principal não leva link, chave de documento fiscal nem dado pessoal.
 
+A geração da etiqueta é assíncrona ("Envio encaminhado para geração"): depois de gerar, a sonda
+consulta a etiqueta a cada 10 s, por até 3 min, até a fila terminar ou falhar. `--casos A,B,E`
+roda só esses casos; `--status probe-melhorenvio-dce.json` consulta de novo as etiquetas de uma
+rodada anterior (sem comprar nada).
+
     .venv\\Scripts\\python -m scripts.melhorenvio_probe --cart melhorenvio-partes.json `
         --dce --out probe-melhorenvio-dce.json
 """
@@ -48,6 +53,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -96,7 +102,14 @@ class Sonda:
         self._client.close()
 
     def chama(
-        self, teste: str, metodo: str, caminho: str, corpo: Any = None, *, pessoal: bool = False
+        self,
+        teste: str,
+        metodo: str,
+        caminho: str,
+        corpo: Any = None,
+        *,
+        pessoal: bool = False,
+        registrar: bool = True,
     ) -> Any:
         try:
             resposta = self._client.request(metodo, caminho, json=corpo)
@@ -107,6 +120,8 @@ class Sonda:
             dados: Any = json.loads(texto)
         except ValueError:
             dados = texto[:2000]
+        if not registrar:
+            return dados if 200 <= status < 300 else None
         # Carrinho leva nome, documento, endereço e contato: a saída grava sem eles.
         self.registro.append(
             {
@@ -138,6 +153,7 @@ _PESSOAIS = frozenset(
         "district",
         "postal_code",
         "user",
+        "additional_info",
     }
 )
 
@@ -413,7 +429,87 @@ def _remetentes(partes: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return remetentes
 
 
-def _dce(sonda: Sonda, partes: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+#: Espera da geração assíncrona: a cada 10 s, por até 3 min.
+_ESPERA_S = 10
+_ESPERA_VEZES = 18
+
+
+def _geracao_terminou(etiqueta: Any) -> bool:
+    chave = etiqueta.get("generated_key") if isinstance(etiqueta, dict) else None
+    if not isinstance(chave, dict):
+        return bool(isinstance(etiqueta, dict) and etiqueta.get("generated_at"))
+    return bool(chave.get("finished_at") or chave.get("failed_at") or etiqueta.get("generated_at"))
+
+
+def _aguarda_etiqueta(sonda: Sonda, teste: str, pedido: str) -> Any:
+    """Consulta a etiqueta até a geração terminar (ou o tempo acabar); registra só a última."""
+    for _ in range(_ESPERA_VEZES):
+        etiqueta = sonda.chama(
+            teste, "GET", f"/api/v2/me/orders/{pedido}", pessoal=True, registrar=False
+        )
+        if _geracao_terminou(etiqueta):
+            break
+        time.sleep(_ESPERA_S)
+    return sonda.chama(teste, "GET", f"/api/v2/me/orders/{pedido}", pessoal=True)
+
+
+def _estado(etiqueta: Any) -> dict[str, Any]:
+    """O que interessa da etiqueta, sem valores pessoais: a geração terminou? falhou? saiu
+    rastreio? (só se existe, não o código)."""
+    if not isinstance(etiqueta, dict):
+        return {}
+    bruta = etiqueta.get("generated_key")
+    chave: dict[str, Any] = bruta if isinstance(bruta, dict) else {}
+    return {
+        "status": etiqueta.get("status"),
+        "gerada_em": etiqueta.get("generated_at"),
+        "tem_rastreio": bool(etiqueta.get("tracking") or etiqueta.get("self_tracking")),
+        "fila": {
+            "tentativas": chave.get("attempts"),
+            "terminou_em": chave.get("finished_at"),
+            "falhou_em": chave.get("failed_at"),
+            "dados": _sem_pessoais(chave.get("data")),
+        },
+        "non_commercial": etiqueta.get("non_commercial"),
+        "invoice": "preenchido" if etiqueta.get("invoice") else None,
+        "produtos": len(etiqueta.get("products") or []),
+    }
+
+
+def _status(sonda: Sonda, anterior: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Consulta de novo as etiquetas compradas numa rodada anterior do `--dce`."""
+    pedidos: dict[str, str] = {}
+    for chamada in anterior.get("chamadas", []):
+        teste = str(chamada.get("teste", ""))
+        resposta = chamada.get("resposta")
+        if teste.endswith("-etiqueta") and isinstance(resposta, dict) and resposta.get("id"):
+            pedidos[teste.removeprefix("dce-").removesuffix("-etiqueta")] = str(resposta["id"])
+    linhas: list[dict[str, Any]] = []
+    etiquetas: dict[str, str] = {}
+    for nome, pedido in pedidos.items():
+        etiqueta = sonda.chama(f"status-{nome}", "GET", f"/api/v2/me/orders/{pedido}", pessoal=True)
+        linhas.append(
+            {
+                "caso": nome,
+                "estado": _estado(etiqueta),
+                "campos": _passo(sonda, campos=True)["campos"],
+            }
+        )
+        impresso = sonda.chama(
+            f"status-{nome}-impressao",
+            "POST",
+            "/api/v2/me/shipment/print",
+            {"mode": "private", "orders": [pedido]},
+            pessoal=True,
+        )
+        if isinstance(impresso, dict) and impresso.get("url"):
+            etiquetas[nome] = str(impresso["url"])
+    return linhas, etiquetas
+
+
+def _dce(
+    sonda: Sonda, partes: dict[str, Any], so: set[str] | None = None
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     """Carrinho → pagamento → geração → impressão, por caso; para no primeiro passo recusado.
 
     Devolve o resumo (sem dado pessoal) e os links das etiquetas (só para o arquivo local).
@@ -444,6 +540,8 @@ def _dce(sonda: Sonda, partes: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     etiquetas: dict[str, str] = {}
     caixa = {"height": 10, "width": 15, "length": 20, "weight": 0.68}
     for nome, quem, servico, produtos in casos:
+        if so is not None and nome.split("-", 1)[0] not in so:
+            continue
         linha: dict[str, Any] = {"caso": nome, "servico": servico, "passos": {}}
         linhas.append(linha)
         if servico is None or quem not in remetentes:
@@ -493,8 +591,9 @@ def _dce(sonda: Sonda, partes: dict[str, Any]) -> tuple[list[dict[str, Any]], di
         linha["passos"]["geracao"] = _passo(sonda, campos=True)
         if gerado is None:
             continue
-        sonda.chama(f"dce-{nome}-etiqueta", "GET", f"/api/v2/me/orders/{pedido}", pessoal=True)
+        etiqueta = _aguarda_etiqueta(sonda, f"dce-{nome}-etiqueta", pedido)
         linha["passos"]["etiqueta"] = _passo(sonda, campos=True)
+        linha["estado_final"] = _estado(etiqueta)
         impresso = sonda.chama(
             f"dce-{nome}-impressao",
             "POST",
@@ -530,19 +629,34 @@ def main() -> None:
         action="store_true",
         help="compra de ponta a ponta (gasta saldo do sandbox) para a DC-e (exige --cart)",
     )
+    parser.add_argument("--casos", help="com --dce: só estes casos, ex. A,B,E")
+    parser.add_argument(
+        "--status", help="consulta de novo as etiquetas de uma rodada anterior do --dce"
+    )
     args = parser.parse_args()
     partes = json.loads(Path(args.cart).read_text(encoding="utf-8")) if args.cart else None
     if (args.only_cart or args.dce) and partes is None:
         sys.exit("--only-cart e --dce precisam de --cart <arquivo com from/to>.")
-    if args.dce and partes is not None and not _remetentes(partes).get("cpf"):
-        sys.exit('--dce precisa de "remetente_cpf" (11 dígitos) no arquivo do --cart.')
+    so = {c.strip().upper() for c in args.casos.split(",")} if args.casos else None
+    precisa_cpf = so is None or bool(so & {"A", "B", "E"})
+    if args.dce and partes is not None and precisa_cpf:
+        cpf = _remetentes(partes).get("cpf")
+        destino = "".join(ch for ch in str(partes["to"].get("document") or "") if ch.isdigit())
+        if not cpf:
+            sys.exit('--dce precisa de "remetente_cpf" (11 dígitos) no arquivo do --cart.')
+        if cpf.get("document") == destino:
+            sys.exit('"remetente_cpf" não pode ser o mesmo CPF do destinatário ("to").')
 
     sonda = Sonda(_token(), _user_agent())
     try:
         etiquetas: dict[str, str] = {}
-        if args.dce and partes is not None:
-            casos, etiquetas = _dce(sonda, partes)
-            resultado: dict[str, Any] = {"dce": casos}
+        if args.status:
+            anterior = json.loads(Path(args.status).read_text(encoding="utf-8"))
+            estados, etiquetas = _status(sonda, anterior)
+            resultado: dict[str, Any] = {"status": estados}
+        elif args.dce and partes is not None:
+            casos, etiquetas = _dce(sonda, partes, so)
+            resultado = {"dce": casos}
         elif args.only_cart and partes is not None:
             servicos = sonda.chama("6-servicos", "GET", "/api/v2/me/shipment/services") or []
             resultado = {"2b_carrinho": _carrinho(sonda, partes, servicos)}
