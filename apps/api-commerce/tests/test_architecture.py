@@ -167,3 +167,35 @@ def test_the_prompt_builder_never_touches_the_database() -> None:
     proibidos = ["AsyncSession", "session", "select(", "await "]
     offenders = [termo for termo in proibidos if termo in text]
     assert not offenders, f"prompt.py tocou no banco: {offenders}"
+
+
+def test_the_packing_engine_is_pure_and_deterministic() -> None:
+    """O motor de embalagem (frete v2) é puro: o hash do plano vai na assinatura da cotação e é
+    reconstruído no `place`, então a mesma entrada tem de dar o mesmo plano. Sem banco, sem
+    rede, sem aleatoriedade e sem relógio decidindo nada."""
+    proibidos = {
+        "sqlalchemy",
+        "httpx",
+        "asyncio",
+        "random",
+        "time",
+        "datetime",
+        "app.core",
+        "app.tenancy",
+        "app.catalog",
+    }
+    offenders = []
+    for path in sorted((APP / "shipping" / "packing").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            nomes: list[str] = []
+            if isinstance(node, ast.Import):
+                nomes = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                nomes = [node.module]
+            for nome in nomes:
+                if any(nome == p or nome.startswith(f"{p}.") for p in proibidos):
+                    offenders.append(f"{path.name}: {nome}")
+            if isinstance(node, (ast.Await, ast.AsyncFunctionDef)):
+                offenders.append(f"{path.name}: async")
+    assert not offenders, offenders

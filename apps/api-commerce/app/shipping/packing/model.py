@@ -10,8 +10,10 @@ Convenção de eixos: `length` x `width` no chão da caixa, `height` para cima. 
 
 from __future__ import annotations
 
+import functools
 import itertools
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -82,6 +84,7 @@ class Dims:
         return cls(length=depth_mm, width=width_mm, height=height_mm)
 
 
+@functools.lru_cache(maxsize=4096)
 def orientations(item: Dims, rotation: Rotation) -> tuple[Dims, ...]:
     """As posições permitidas, sem repetidas, em ordem fixa (mais baixa primeiro).
 
@@ -135,3 +138,174 @@ def declared_percent(*, units: int, unit: Dims, inner: Dims) -> int:
         return 10**9
     ocupado = units * unit.volume * 100
     return -(-ocupado // inner.volume)
+
+
+# ----------------------------------------------------------------------------- motor v2
+
+#: Versão do comportamento do motor. Entra no hash do plano: mudou a conta, muda a versão, e a
+#: cotação aberta com a conta antiga vence sozinha no `place` (o cliente recota).
+ENGINE_VERSION = "pack-2026.10.1"
+
+#: Unidades misturadas (de produtos diferentes) num grupo antes de cair no modo degradado.
+MAX_MIXED_UNITS = 120
+#: Teto de checagens de sobreposição por estratégia. Conta operações, nunca milissegundos:
+#: tempo de relógio deixaria o plano depender da máquina. Estourou → modo degradado.
+OPS_PER_STRATEGY = 500_000
+#: Teto separado para encolher volumes já montados. Encolher é otimização: estourou, os volumes
+#: que faltam ficam na caixa em que foram montados (nada degrada).
+SHRINK_OPS = 200_000
+#: Replay de misturados só em caixa que o conteúdo ocupe até isto do volume útil: acima disso o
+#: replay quase sempre falha e só gasta orçamento. Pular é seguro (fica a caixa maior).
+MAX_MIXED_FILL_PERCENT = 95
+#: Pontos candidatos guardados por volume aberto (os mais baixos e mais ao fundo).
+MAX_EXTREME_POINTS = 64
+#: Divisor do peso cúbico (Correios): mm³ / 6000 = gramas.
+CUBIC_DIVISOR = 6000
+
+
+@dataclass(frozen=True, slots=True)
+class PackageSpec:
+    """Uma embalagem ativa da loja, do jeito que o motor precisa (sem ORM)."""
+
+    id: str
+    name: str
+    kind: PackageKind
+    inner: Dims
+    #: O que a transportadora cobra (a informada, ou a de dentro mais a parede).
+    outer: Dims
+    tare_g: int
+    max_g: int
+    material_cents: int = 0
+    auto_select: bool = True
+    is_default: bool = False
+    position: int = 0
+
+    @property
+    def usable_g(self) -> int:
+        return max(0, self.max_g - self.tare_g)
+
+    def space(self, padding_mm: int) -> Dims:
+        return self.inner.inset(padding_mm)
+
+    @property
+    def order(self) -> tuple[int, str]:
+        return self.position, self.id
+
+
+@dataclass(frozen=True, slots=True)
+class ItemClass:
+    """N unidades iguais de uma variação (ou a peça parcial de um vendido a peso)."""
+
+    key: str
+    variant_id: str
+    product_id: str
+    name: str
+    sku: str
+    dims: Dims
+    weight_g: int
+    #: Valor declarado por unidade (0 quando a loja não declara).
+    value_cents: int
+    units: int
+    rotation: Rotation = Rotation.ANY
+    flexible: bool = False
+    ship_alone: bool = False
+    mode: PackingMode = PackingMode.AUTO
+    #: Embalagens que este item aceita (vazio em `own_container`). Resolvido na entrada.
+    allowed: tuple[str, ...] = ()
+    #: Capacidade declarada por embalagem (`product_package_rules.max_units`).
+    declared: Mapping[str, int] = field(default_factory=dict)
+
+    def sort_key(self) -> tuple[int, int, int, str]:
+        """Maiores primeiro (first-fit decreasing); empate pela chave, para ser determinístico."""
+        return (-self.dims.volume, -max(self.dims.sorted_desc()), -self.weight_g, self.key)
+
+
+@dataclass(frozen=True, slots=True)
+class PackingRules:
+    padding_mm: int = 0
+    flexible_fill_percent: int = 85
+    max_parcels: int = 10
+
+
+@dataclass(frozen=True, slots=True)
+class Placed:
+    """Uma unidade posta num volume: canto (x, y, z) e o tamanho já na orientação usada."""
+
+    x: int
+    y: int
+    z: int
+    size: Dims
+    key: str
+
+    def overlaps(self, x: int, y: int, z: int, size: Dims) -> bool:
+        # Encostar não é sobrepor: só conta se cruza nos três eixos.
+        return (
+            x < self.x + self.size.length
+            and self.x < x + size.length
+            and y < self.y + self.size.width
+            and self.y < y + size.width
+            and z < self.z + self.size.height
+            and self.z < z + size.height
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedParcel:
+    """Um volume do plano: o que a etiqueta vai declarar e o que a loja põe dentro."""
+
+    package_id: str | None
+    package_name: str
+    kind: str
+    outer: Dims
+    inner: Dims | None
+    gross_g: int
+    tare_g: int
+    value_cents: int
+    material_cents: int
+    #: `(chave do item, unidades)`, em ordem de chave.
+    contents: tuple[tuple[str, int], ...]
+    #: Vai na embalagem do próprio produto (`own_container`).
+    own: bool = False
+    #: Maior que toda embalagem permitida: viaja sozinho, com a medida dele.
+    oversize: bool = False
+    #: Dependeu de capacidade declarada pela loja (não calculada).
+    declared: bool = False
+    #: Onde cada unidade ficou (para conferir e para a dica de arrumação). Fora do hash.
+    layout: tuple[Placed, ...] = ()
+
+    @property
+    def units(self) -> int:
+        return sum(n for _, n in self.contents)
+
+    @property
+    def cubic_g(self) -> int:
+        return -(-self.outer.volume // CUBIC_DIVISOR)
+
+    @property
+    def billable_g(self) -> int:
+        return max(self.gross_g, self.cubic_g)
+
+
+@dataclass(frozen=True, slots=True)
+class ParcelPlan:
+    strategy: str
+    parcels: tuple[PlannedParcel, ...]
+    degraded: bool
+    hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyStats:
+    strategy: str
+    parcels: int
+    degraded: bool
+    ops: int
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateSet:
+    candidates: tuple[ParcelPlan, ...]
+    #: `too_many_parcels` quando toda combinação passou do teto de volumes da loja.
+    problem: str | None = None
+    stats: tuple[StrategyStats, ...] = ()
