@@ -194,3 +194,43 @@ export const CAPACITY_REASON_TEXT: Record<string, string> = {
   does_not_fit: "não cabe",
   too_heavy: "pesado demais",
 };
+
+/** Um volume do plano congelado no pedido (`order.fulfillment.parcel_plan.parcels[]`). */
+export interface FrozenParcel {
+  n: number;
+  package_name: string;
+  kind: string;
+  own: boolean;
+  oversize: boolean;
+  declared: boolean;
+  outer_mm: number[];
+  inner_mm: number[] | null;
+  weight_grams: number;
+  items: { name: string; sku: string; units: number }[];
+}
+
+/** O plano de volumes com que o pedido foi cotado e pago — a etiqueta sai igual a ele. */
+export interface FrozenPlan {
+  label_mode: string;
+  degraded: boolean;
+  parcels: FrozenParcel[];
+}
+
+/** Lê o plano do `fulfillment` do pedido; pedido do motor antigo (ou de retirada) não tem. */
+export function frozenPlanOf(fulfillment: Record<string, unknown> | null | undefined): FrozenPlan | null {
+  const plano = fulfillment?.parcel_plan;
+  if (!plano || typeof plano !== "object") return null;
+  const { parcels, label_mode, degraded } = plano as Record<string, unknown>;
+  if (!Array.isArray(parcels) || parcels.length === 0) return null;
+  return {
+    label_mode: typeof label_mode === "string" ? label_mode : "single",
+    degraded: degraded === true,
+    parcels: parcels as FrozenParcel[],
+  };
+}
+
+export const LABEL_MODE_TEXT: Record<string, string> = {
+  single: "uma etiqueta",
+  multi_volume: "uma etiqueta para todos os volumes",
+  per_volume: "uma etiqueta por volume",
+};

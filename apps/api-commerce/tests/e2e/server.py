@@ -101,7 +101,7 @@ import httpx  # noqa: E402
 import uvicorn  # noqa: E402
 from fastapi import APIRouter  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import func, select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
 
 from app.audit import outbox  # noqa: E402
@@ -132,12 +132,14 @@ from app.models.all import Base  # noqa: E402  (every model, for create_all)
 from app.models.base import utcnow  # noqa: E402
 from app.notifications.jobs import run_send_notifications  # noqa: E402
 from app.orders.jobs import run_expire_orders  # noqa: E402
+from app.orders.models import Order, OrderItem  # noqa: E402
 from app.payments.config_service import PaymentConfigIn, PaymentConfigService  # noqa: E402
 from app.payments.jobs import run_reconcile_payments  # noqa: E402
 from app.payments.models import Payment  # noqa: E402
 from app.payments.providers import fake  # noqa: E402
 from app.payments.refunds import run_process_refunds  # noqa: E402
 from app.payments.webhooks import run_process_webhooks  # noqa: E402
+from app.shipping.models import OrderShipment, ShipmentStatus  # noqa: E402
 from app.tenancy.context import bind_session_tenant  # noqa: E402
 from app.tenancy.models import Tenant, TenantStatus  # noqa: E402
 from app.tenancy.orm_filter import register_tenant_filter  # noqa: E402
@@ -581,6 +583,175 @@ async def build_landing(body: BuildLandingIn) -> dict[str, str]:
         draft_id=draft_id,
     )
     return {"status": status, "draft_id": draft_id}
+
+
+class ShippingSampleIn(BaseModel):
+    tenant: str = "muhbianco"
+
+
+@e2e.post("/orders/shipping-sample")
+async def shipping_sample(body: ShippingSampleIn) -> dict[str, str]:
+    """Dois pedidos de transportadora com o plano de volumes congelado (frete v2), copiados do
+    último pedido da loja: um aceito (para o "Como embalar" e a prévia do custo) e um já
+    despachado com uma etiqueta por volume. A suíte não tem transportadora: o que se testa é a
+    tela do pedido, e o fluxo de compra da etiqueta tem os testes dele no pytest."""
+    async with SessionFactory() as session:
+        tenant = await TenantService(session).repo.get_by_slug(body.tenant)
+        assert tenant is not None
+        bind_session_tenant(session, tenant.id)
+        modelo = await session.scalar(select(Order).order_by(Order.placed_at.desc()).limit(1))
+        assert modelo is not None, "rode depois de checkout.spec: precisa de um pedido"
+        itens = list(
+            (
+                await session.execute(
+                    select(OrderItem).where(OrderItem.order_id == modelo.id).limit(20)
+                )
+            ).scalars()
+        )
+        numero = int(await session.scalar(select(func.max(Order.number))) or 0)
+        agora = utcnow()
+        endereco = {
+            "recipient": "Bia E2E",
+            "postal_code": "20000000",
+            "street": "Rua do Teste",
+            "number": "10",
+            "district": "Centro",
+            "city": "Rio de Janeiro",
+            "state": "RJ",
+        }
+
+        def plano() -> dict[str, Any]:
+            primeiro = itens[0]
+            nome = f"{primeiro.product_name} {primeiro.variant_name}".strip()
+            item = {"key": primeiro.variant_id, "name": nome, "sku": primeiro.sku}
+            return {
+                "version": 1,
+                "hash": "e2e",
+                "strategy": "consolidate",
+                "label_mode": "per_volume",
+                "declared_value": True,
+                "degraded": False,
+                "parcels": [
+                    {
+                        "n": 1,
+                        "package_name": "Caixa P",
+                        "kind": "box",
+                        "own": False,
+                        "oversize": False,
+                        "declared": False,
+                        "outer_mm": [208, 158, 108],
+                        "inner_mm": [200, 150, 100],
+                        "weight_grams": 980,
+                        "tare_grams": 80,
+                        "value_cents": 6000,
+                        "material_cost_cents": 0,
+                        "items": [{**item, "units": 6}],
+                    },
+                    {
+                        "n": 2,
+                        "package_name": "Caixa P",
+                        "kind": "box",
+                        "own": False,
+                        "oversize": False,
+                        "declared": True,
+                        "outer_mm": [208, 158, 108],
+                        "inner_mm": [200, 150, 100],
+                        "weight_grams": 380,
+                        "tare_grams": 80,
+                        "value_cents": 2000,
+                        "material_cost_cents": 0,
+                        "items": [{**item, "units": 2}],
+                    },
+                ],
+            }
+
+        ids = {}
+        for chave, status in (("accepted", "accepted"), ("shipped", "shipped")):
+            numero += 1
+            colunas = {
+                c.key: getattr(modelo, c.key)
+                for c in Order.__table__.columns
+                if c.key not in ("id", "created_at", "updated_at")
+            }
+            pedido = Order(
+                **colunas
+                | {
+                    # Id baixo de propósito: as listas ordenam por id decrescente, e os pedidos de
+                    # amostra não podem passar na frente dos que os outros specs procuram.
+                    "id": f"00000000-0000-4000-8000-{numero:012d}",
+                    "number": numero,
+                    "status": status,
+                    "cart_id": None,
+                    "idempotency_hash": f"e2e-shipping-{chave}-{numero}",
+                    "fulfillment_type": "shipping",
+                    "delivery_fee_cents": 2590,
+                    "fulfillment": {
+                        "provider": "fake",
+                        "service_code": "fake_economico",
+                        "service_name": "Econômico",
+                        "carrier": "Fake",
+                        "price_cents": 2590,
+                        "address": endereco,
+                        "plan": "e2e:per_volume",
+                        "parcel_plan": plano(),
+                    },
+                    "paid_at": agora,
+                    "accepted_at": agora,
+                    "shipped_at": agora if status == "shipped" else None,
+                    "expires_at": None,
+                    "cancelled_at": None,
+                    "refund_status": "none",
+                    "refunded_cents": 0,
+                    "risk_flags": None,
+                    "version": 1,
+                }
+            )
+            session.add(pedido)
+            await session.flush()
+            for item in itens:
+                copia = {
+                    c.key: getattr(item, c.key)
+                    for c in OrderItem.__table__.columns
+                    if c.key not in ("id", "order_id", "created_at", "updated_at")
+                }
+                session.add(OrderItem(**copia | {"order_id": pedido.id}))
+            if status == "shipped":
+                volumes = [
+                    {
+                        "weight_grams": peso,
+                        "width_mm": 158,
+                        "height_mm": 108,
+                        "depth_mm": 208,
+                        "value_cents": valor,
+                        "provider_shipment_id": f"e2e-{n}",
+                        "tracking_code": f"FKE2E{n}BR",
+                        "label_url": f"https://fake.local/etiquetas/e2e-{n}.pdf",
+                        "cost_cents": 1500 + peso * 2,
+                        "status": "posted" if n == 1 else "purchased",
+                        "carrier": "Fake",
+                    }
+                    for n, peso, valor in ((1, 980, 6000), (2, 380, 2000))
+                ]
+                session.add(
+                    OrderShipment(
+                        order_id=pedido.id,
+                        provider="fake",
+                        status=ShipmentStatus.PURCHASED,
+                        service_code="fake_economico",
+                        service_name="Econômico",
+                        carrier="Fake",
+                        provider_shipment_id="e2e-1",
+                        tracking_code="FKE2E1BR",
+                        label_url=volumes[0]["label_url"],
+                        charged_cents=2590,
+                        cost_cents=sum(int(v["cost_cents"]) for v in volumes),
+                        parcels=volumes,
+                        purchased_at=agora,
+                    )
+                )
+            ids[chave] = pedido.id
+        await session.commit()
+    return ids
 
 
 @e2e.post("/tick")

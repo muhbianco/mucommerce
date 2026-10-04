@@ -11,6 +11,7 @@ clicar para confirmar o que os Correios já confirmaram.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -85,6 +86,17 @@ async def track_one(
         )
         # Marca a tentativa antes de perguntar: provedor mudo não vira consulta em loop.
         remessa.tracked_at = now
+        etiquetas = [
+            (n, str(v["provider_shipment_id"]))
+            for n, v in enumerate(remessa.parcels or [], start=1)
+            if v.get("provider_shipment_id")
+        ]
+        if len(etiquetas) > 1:
+            mudou = await _track_per_volume(
+                session, tenant, provider, credenciais, remessa, etiquetas, now
+            )
+            await session.commit()
+            return "mudou" if mudou else "igual"
         try:
             resultado = await provider.track(credenciais, remessa.provider_shipment_id)
         except ShippingProviderError as exc:
@@ -130,6 +142,77 @@ async def _apply(
         remessa.posted_at = now
     if destino == ShipmentStatus.DELIVERED:
         remessa.delivered_at = resultado.delivered_at or now
+        await _deliver_order(session, tenant, remessa, now)
+    return True
+
+
+#: Ordem de avanço da remessa: com várias etiquetas, a remessa anda junto com a mais atrasada.
+_ORDEM = {
+    ShipmentStatus.PURCHASED: 0,
+    ShipmentStatus.POSTED: 1,
+    ShipmentStatus.IN_TRANSIT: 2,
+    ShipmentStatus.DELIVERED: 3,
+}
+
+
+def combine_statuses(statuses: list[ShipmentStatus]) -> ShipmentStatus:
+    """Estado da remessa com uma etiqueta por volume.
+
+    Entregue só quando **todos** chegaram; devolvido se algum voltou; cancelado se todos foram
+    cancelados; senão, o estado do volume mais atrasado.
+    """
+    if statuses and all(s == ShipmentStatus.DELIVERED for s in statuses):
+        return ShipmentStatus.DELIVERED
+    if ShipmentStatus.RETURNED in statuses:
+        return ShipmentStatus.RETURNED
+    if statuses and all(s == ShipmentStatus.CANCELLED for s in statuses):
+        return ShipmentStatus.CANCELLED
+    andando = [s for s in statuses if s in _ORDEM]
+    return min(andando, key=_ORDEM.__getitem__) if andando else ShipmentStatus.PURCHASED
+
+
+async def _track_per_volume(
+    session: AsyncSession,
+    tenant: TenantContext,
+    provider: Any,
+    credentials: ShippingCredentials,
+    remessa: OrderShipment,
+    etiquetas: list[tuple[int, str]],
+    now: datetime,
+) -> bool:
+    volumes = [dict(v) for v in remessa.parcels or []]
+    estados: list[ShipmentStatus] = []
+    for n, provider_id in etiquetas:
+        atual = ShipmentStatus(volumes[n - 1].get("status") or ShipmentStatus.PURCHASED)
+        try:
+            resultado = await provider.track(credentials, provider_id)
+        except ShippingProviderError as exc:
+            logger.info(
+                "Rastreio indisponível",
+                extra={"shipment_id": remessa.id, "volume": n, "erro": type(exc).__name__},
+            )
+            estados.append(atual)
+            continue
+        if resultado.tracking_code and not volumes[n - 1].get("tracking_code"):
+            volumes[n - 1]["tracking_code"] = resultado.tracking_code
+        for evento in resultado.events:
+            await _record(
+                session, remessa, evento.status, f"Volume {n}: {evento.description}", evento.at
+            )
+        novo = _TO_SHIPMENT.get(resultado.status, atual)
+        volumes[n - 1]["status"] = novo.value
+        estados.append(novo)
+    remessa.parcels = volumes
+    if not remessa.tracking_code and volumes and volumes[0].get("tracking_code"):
+        remessa.tracking_code = volumes[0]["tracking_code"]
+    destino = combine_statuses(estados)
+    if destino == remessa.status:
+        return False
+    remessa.status = destino
+    if destino == ShipmentStatus.POSTED and remessa.posted_at is None:
+        remessa.posted_at = now
+    if destino == ShipmentStatus.DELIVERED:
+        remessa.delivered_at = now
         await _deliver_order(session, tenant, remessa, now)
     return True
 

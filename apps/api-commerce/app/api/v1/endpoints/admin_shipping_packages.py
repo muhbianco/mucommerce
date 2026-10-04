@@ -430,7 +430,7 @@ class SimQuote(BaseModel):
     delivery_min: int | None
     delivery_max: int | None
     error: str | None
-    #: single, multi_volume ou per_volume (este último ainda não vendido: F7).
+    #: single, multi_volume ou per_volume (uma etiqueta por volume, como nos Correios).
     mode: str | None
     #: É a combinação que a vitrine ofereceria para este serviço.
     best: bool
@@ -695,8 +695,6 @@ async def _real_quotes(
         for opcao in resposta or ():
             modo = label_mode(len(plano.parcels), opcao.multi_volume_max) if opcao.usable else None
             erro = opcao.error
-            if modo == "per_volume":
-                erro = "Mais de um volume neste serviço: chega com a etiqueta por volume."
             linhas.append(
                 SimQuote(
                     service_code=opcao.service_code,

@@ -84,9 +84,22 @@ class OrderRead(BaseModel):
     timeline: list[OrderEventRead]
 
 
+#: Chaves de `fulfillment` que são da loja, não do cliente: o plano de volumes congelado traz
+#: nomes de embalagem, custo de material e o hash da cotação.
+_STORE_ONLY_FULFILLMENT = frozenset({"parcel_plan"})
+
+
 def order_read(
-    order: Order, items: list[OrderItem], history: list[OrderStatusHistory] | None = None
+    order: Order,
+    items: list[OrderItem],
+    history: list[OrderStatusHistory] | None = None,
+    *,
+    for_store: bool = False,
 ) -> OrderRead:
+    """`for_store=True` só no painel; o cliente recebe o `fulfillment` sem o que é da loja."""
+    fulfillment = order.fulfillment
+    if fulfillment and not for_store:
+        fulfillment = {k: v for k, v in fulfillment.items() if k not in _STORE_ONLY_FULFILLMENT}
     return OrderRead(
         id=order.id,
         number=order.number,
@@ -98,7 +111,7 @@ def order_read(
         total_cents=order.total_cents,
         fulfillment_type=order.fulfillment_type,
         fulfillment_status=order.fulfillment_status,
-        fulfillment=order.fulfillment,
+        fulfillment=fulfillment,
         scheduled_start=order.scheduled_start,
         scheduled_end=order.scheduled_end,
         placed_at=order.placed_at,

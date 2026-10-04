@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
@@ -60,10 +60,6 @@ QuoteProblem = Literal[
     # Frete v2: toda combinação passou do teto de volumes da loja (regras de embalagem).
     "too_many_parcels",
 ]
-
-#: Recusa que o motor v2 acrescenta enquanto a etiqueta por volume (F7) não existe: a opção
-#: some em vez de vender um envio que o despacho ainda não sabe comprar.
-_PER_VOLUME_PENDING = "Envio em mais de um volume ainda não disponível neste serviço."
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +258,23 @@ class ShippingQuoteService:
             return [], "not_configured"
         return await self._quote_many(provider, credenciais, cfg, destino, plans), None
 
+    async def quote_volumes(
+        self, volumes: tuple[Parcel, ...], *, destination_postal_code: str
+    ) -> tuple[tuple[ShippingOption, ...] | None, QuoteProblem | None]:
+        """Cota volumes prontos (a prévia do custo da etiqueta no pedido)."""
+        cfg = fulfillment_settings(self.tenant.settings).shipping
+        destino = _digits(destination_postal_code)
+        if not cfg.enabled or cfg.origin is None or len(destino) != 8:
+            return None, "shipping_disabled"
+        provider = registry.get_provider(cfg.provider)
+        if provider is None or not registry.flag_on(self.tenant, cfg.provider):
+            return None, "shipping_disabled"
+        credenciais = await self._credentials(cfg)
+        if credenciais is None:
+            return None, "not_configured"
+        resposta = await self._ask(provider, credenciais, cfg, destino, volumes)
+        return resposta, None if resposta is not None else "unavailable"
+
     async def _quote_many(
         self,
         provider: Any,
@@ -403,8 +416,8 @@ def choose_offers(
     charge_material: bool,
 ) -> OfferChoice:
     """Por serviço, a combinação mais barata para a loja: preço + material; empate fica com a
-    de menos volumes e depois com a ordem do ranking. Serviço que exige uma etiqueta por volume
-    não vale para plano com mais de um volume enquanto a F7 não existir (vira recusa)."""
+    de menos volumes e depois com a ordem do ranking. O modo de etiqueta vai junto: serviço que
+    exige uma etiqueta por volume (Correios) compra uma por volume no despacho."""
     melhor: dict[str, tuple[tuple[int, int, int], Offer]] = {}
     recusas: list[ShippingOption] = []
     falhou = False
@@ -418,9 +431,6 @@ def choose_offers(
                 recusas.append(opcao)
                 continue
             modo = label_mode(len(plano.parcels), opcao.multi_volume_max)
-            if modo == "per_volume":
-                recusas.append(replace(opcao, error=_PER_VOLUME_PENDING))
-                continue
             chave = (opcao.price_cents + material, len(plano.parcels), posicao)
             atual = melhor.get(opcao.service_code)
             if atual is None or chave < atual[0]:

@@ -78,7 +78,9 @@ const ERRORS: Record<string, string> = {
   permission_denied: "Seu papel não permite essa ação.",
   email_teste_falhou:
     "O servidor de e-mail recusou. Confira a conta e a senha de app, e tente de novo.",
-  shipping_unavailable: "A transportadora não respondeu. Nada foi comprado; tente de novo.",
+  shipping_unavailable:
+    "A transportadora não respondeu ou recusou. Tente de novo: etiqueta já comprada não é comprada outra vez.",
+  confirmar_custo: "O frete subiu desde a compra. Marque \"Comprar mesmo com o frete mais caro\" para despachar.",
   shipping_insufficient_balance:
     "Sem saldo na carteira da transportadora. Recarregue e despache de novo.",
   shipment_in_progress: "O despacho deste pedido já está em andamento.",

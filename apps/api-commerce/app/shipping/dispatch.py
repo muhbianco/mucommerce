@@ -11,7 +11,8 @@ antes da compra e a compra falhasse, a loja veria "enviado" sem etiqueta nenhuma
 
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -41,7 +42,7 @@ from app.shipping.provider import (
     ShippingParty,
     ShippingProviderError,
 )
-from app.shipping.service import QuoteLine, parcels_for
+from app.shipping.service import QuoteLine, ShippingQuoteService, customer_price, parcels_for
 from app.tenancy.context import TenantContext
 from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import ShippingOrigin, ShippingSettings, fulfillment_settings
@@ -58,6 +59,34 @@ _DONE = frozenset(
         ShipmentStatus.RETURNED,
     }
 )
+
+
+#: Despacho por volume parado em `creating` há mais que isto foi interrompido (processo caiu
+#: no meio): dá para retomar, comprando só os volumes que ainda não têm etiqueta.
+STALE_CREATING = timedelta(minutes=10)
+
+#: Etiqueta que hoje sai mais que isto (%) acima do que foi cotado no checkout pede confirmação
+#: antes da compra: o frete subiu depois que o cliente pagou.
+CONFIRM_ABOVE_PERCENT = 10
+
+
+@dataclass(frozen=True, slots=True)
+class ShipmentPreview:
+    """Quanto a etiqueta custa agora, antes de comprar (a ADR 0015 prometia mostrar)."""
+
+    #: Quantas etiquetas serão compradas (uma por volume nos Correios).
+    labels: int
+    #: O que o cliente pagou de frete (0 com frete grátis).
+    charged_cents: int
+    #: Preço da transportadora hoje, sem acréscimo; `None` = não deu para cotar.
+    price_cents: int | None = None
+    #: Quanto o preço de hoje, com o acréscimo da loja, passa do cotado no checkout (%).
+    increase_percent: int | None = None
+    problem: str | None = None
+
+    @property
+    def needs_confirmation(self) -> bool:
+        return self.increase_percent is not None and self.increase_percent > CONFIRM_ABOVE_PERCENT
 
 
 class ShipmentService:
@@ -93,6 +122,11 @@ class ShipmentService:
             raise ShippingUnavailableError
         credenciais = await self._credentials(cfg)
         pedido = await self._request(order, remessa, cfg)
+        congelado = (order.fulfillment or {}).get("parcel_plan") or {}
+        if congelado.get("label_mode") == "per_volume":
+            return await self._dispatch_per_volume(
+                order, remessa, provider, credenciais, pedido, scopes=scopes
+            )
         try:
             resultado = await provider.ship(credenciais, pedido)
         except InsufficientBalanceError as exc:
@@ -123,6 +157,127 @@ class ShipmentService:
         )
         return remessa
 
+    async def preview(self, order: Order) -> ShipmentPreview:
+        """Cota de novo os volumes do pedido (o plano congelado, ou o recálculo do v1) no serviço
+        que o cliente escolheu. Só leitura: não compra nada.
+
+        A comparação é com o preço **cotado** no checkout, não com o frete cobrado: com frete
+        grátis a loja paga tudo de qualquer jeito; o que interessa é se o frete subiu depois.
+        """
+        cfg = fulfillment_settings(self.tenant.settings).shipping
+        escolhido = order.fulfillment or {}
+        congelado = escolhido.get("parcel_plan")
+        cobrado = int(order.delivery_fee_cents or 0)
+        material = 0
+        if isinstance(congelado, dict):
+            volumes = parcels_from_snapshot(congelado)
+            etiquetas = len(volumes) if congelado.get("label_mode") == "per_volume" else 1
+            if cfg.packing.charge_material:
+                material = sum(
+                    int(v.get("material_cost_cents") or 0) for v in congelado.get("parcels") or []
+                )
+        else:
+            etiquetas = 1
+            try:
+                volumes = await self._legacy_parcels(order, cfg)
+            except ValidationError:
+                return ShipmentPreview(etiquetas, cobrado, problem="missing_dimensions")
+        destino = str((escolhido.get("address") or {}).get("postal_code") or "")
+        if not volumes or not destino:
+            return ShipmentPreview(etiquetas, cobrado, problem="no_parcels")
+        opcoes, problema = await ShippingQuoteService(
+            self.session, self.tenant, self.now
+        ).quote_volumes(volumes, destination_postal_code=destino)
+        servico = str(escolhido.get("service_code") or "")
+        achada = next((o for o in opcoes or () if o.service_code == servico and o.usable), None)
+        if achada is None:
+            return ShipmentPreview(etiquetas, cobrado, problem=problema or "service_unavailable")
+        cotado = int(escolhido.get("price_cents") or 0)
+        aumento = None
+        if cotado > 0:
+            hoje = customer_price(achada.price_cents, material, cfg)
+            aumento = (hoje - cotado) * 100 // cotado
+        return ShipmentPreview(etiquetas, cobrado, achada.price_cents, aumento)
+
+    async def _dispatch_per_volume(
+        self,
+        order: Order,
+        remessa: OrderShipment,
+        provider: Any,
+        credentials: ShippingCredentials,
+        template: ShipmentRequest,
+        *,
+        scopes: frozenset[str],
+    ) -> OrderShipment:
+        """Uma etiqueta por volume (Correios, J&T, Loggi: uma inserção de 1 volume cada).
+
+        Cada etiqueta comprada é **gravada na hora** (commit): o Melhor Envio não tem chave de
+        idempotência, e se o 2º volume falhar depois de o 1º ter sido pago, perder o registro do
+        1º faria a próxima tentativa comprá-lo de novo. A retomada compra só o que falta. O
+        pedido vira `shipped` quando todos os volumes têm etiqueta.
+        """
+        volumes = [dict(v) for v in (remessa.parcels or [])]
+        total = len(volumes)
+        for n, (volume, parcela) in enumerate(zip(volumes, template.parcels, strict=True), start=1):
+            if volume.get("provider_shipment_id"):
+                continue  # comprada numa tentativa anterior
+            pedido = replace(
+                template,
+                reference=f"{remessa.id}.{n}",
+                parcels=(parcela,),
+                insurance_cents=parcela.value_cents,
+                notes=f"Pedido {order.number} - volume {n} de {total}",
+            )
+            try:
+                resultado = await provider.ship(credentials, pedido)
+            except InsufficientBalanceError as exc:
+                await self._fail_kept(remessa, volumes, f"volume {n} de {total}: {exc}")
+                raise ShippingBalanceError from exc
+            except ShippingProviderError as exc:
+                await self._fail_kept(remessa, volumes, f"volume {n} de {total}: {exc}")
+                raise ShippingUnavailableError from exc
+            volumes[n - 1] = volume | {
+                "provider_shipment_id": resultado.provider_shipment_id,
+                "tracking_code": resultado.tracking_code or None,
+                "label_url": resultado.label_url,
+                "cost_cents": resultado.cost_cents,
+                "status": ShipmentStatus.PURCHASED.value,
+                "carrier": resultado.carrier or None,
+            }
+            remessa.parcels = [dict(v) for v in volumes]  # lista nova: o JSON muda de verdade
+            await self.session.commit()
+
+        primeiro = volumes[0] if volumes else {}
+        remessa.status = ShipmentStatus.PURCHASED
+        remessa.provider_shipment_id = primeiro.get("provider_shipment_id")
+        remessa.tracking_code = primeiro.get("tracking_code")
+        remessa.label_url = primeiro.get("label_url")
+        remessa.cost_cents = sum(int(v.get("cost_cents") or 0) for v in volumes)
+        remessa.carrier = str(primeiro.get("carrier") or remessa.carrier)
+        remessa.purchased_at = self.now
+        remessa.last_error = None
+        await self.session.flush()
+        await self._mark_shipped(order, scopes=scopes)
+        logger.info(
+            "Pedido despachado por volume",
+            extra={
+                "order_id": order.id,
+                "service": remessa.service_code,
+                "labels": total,
+                "cost_cents": remessa.cost_cents,
+            },
+        )
+        return remessa
+
+    async def _fail_kept(
+        self, remessa: OrderShipment, volumes: list[dict[str, Any]], motivo: str
+    ) -> None:
+        """Falhou no meio: grava (commit) as etiquetas já compradas e o motivo, antes de o
+        erro desfazer a transação do pedido."""
+        remessa.parcels = [dict(v) for v in volumes]
+        await self._fail(remessa, motivo)
+        await self.session.commit()
+
     # ------------------------------------------------------------------ interno
 
     def _check(self, order: Order, cfg: ShippingSettings) -> None:
@@ -136,8 +291,15 @@ class ShipmentService:
     async def _row(self, order: Order, cfg: ShippingSettings) -> OrderShipment:
         existente = await self.get(order.id)
         if existente is not None:
-            if existente.status == ShipmentStatus.CREATING:
+            parado = (
+                existente.updated_at is not None
+                and self.now - existente.updated_at > STALE_CREATING
+            )
+            por_volume = any(v.get("provider_shipment_id") for v in existente.parcels or [])
+            if existente.status == ShipmentStatus.CREATING and not (parado and por_volume):
                 # Outra chamada está no meio da compra: não dá para saber se ela vai passar.
+                # Exceção: despacho por volume parado há tempo (processo caiu) com etiquetas já
+                # gravadas — retoma comprando só as que faltam.
                 raise ShipmentInProgressError
             if existente.status in _DONE:
                 return existente
@@ -186,17 +348,12 @@ class ShipmentService:
         if isinstance(congelado, dict):
             # Frete v2: a etiqueta sai com os volumes que foram cotados e pagos — nunca recalcula
             # com a medida de hoje. Vale com a flag ligada ou não (desligar não muda pedido feito).
-            if congelado.get("label_mode") == "per_volume":
-                # A cotação v2 não vende isto até a etiqueta por volume existir (F7).
-                raise ValidationError(
-                    "Este pedido precisa de uma etiqueta por volume, que ainda não está disponível."
-                )
             volumes = parcels_from_snapshot(congelado)
         else:
             volumes = await self._legacy_parcels(order, cfg)
         if not volumes:
             raise ValidationError("Pedido sem volume para enviar.")
-        remessa.parcels = [
+        novos = [
             {
                 "weight_grams": p.weight_grams,
                 "width_mm": p.width_mm,
@@ -206,6 +363,14 @@ class ShipmentService:
             }
             for p in volumes
         ]
+        antigos = remessa.parcels or []
+        # Retomada: as etiquetas já compradas (por volume) ficam; só se refaz o que não tem.
+        if len(antigos) == len(novos):
+            novos = [
+                a if a.get("provider_shipment_id") else n
+                for a, n in zip(antigos, novos, strict=True)
+            ]
+        remessa.parcels = novos
         assert cfg.origin is not None
         return ShipmentRequest(
             reference=remessa.id,

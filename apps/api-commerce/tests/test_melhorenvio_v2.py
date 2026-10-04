@@ -133,8 +133,17 @@ async def test_cotacao_manda_seguro_por_volume_e_centimetros_inteiros_para_cima(
     assert corpo["services"] == "1,3"
 
 
+@pytest.mark.parametrize(
+    ("seguro_cents", "esperado"),
+    [(6000, 60.0), (50, 1.0), (0, 1.0)],
+    ids=["valor-do-volume", "abaixo-do-minimo", "sem-valor-declarado"],
+)
 @respx.mock
-async def test_carrinho_mantem_o_seguro_em_options_ate_a_f7() -> None:
+async def test_carrinho_manda_o_seguro_em_options_com_minimo_de_um_real(
+    seguro_cents: int, esperado: float
+) -> None:
+    """Sandbox, 04/10/2026: no `/cart` o `volumes[].insurance` é ignorado, vale o
+    `options.insurance_value`, e abaixo de R$ 1,00 a Jadlog recusa a inserção."""
     rota = respx.post(f"{SANDBOX_URL}/api/v2/me/cart").mock(
         return_value=httpx.Response(422, json={"message": "recusado no teste"})
     )
@@ -154,12 +163,18 @@ async def test_carrinho_mantem_o_seguro_em_options_ate_a_f7() -> None:
         sender=parte,
         recipient=parte,
         parcels=(
-            Parcel(weight_grams=680, width_mm=158, height_mm=108, depth_mm=208, value_cents=6000),
+            Parcel(
+                weight_grams=680,
+                width_mm=158,
+                height_mm=108,
+                depth_mm=208,
+                value_cents=seguro_cents,
+            ),
         ),
-        insurance_cents=6000,
+        insurance_cents=seguro_cents,
     )
     with pytest.raises(ShippingProviderError):  # o carrinho recusa; interessa o corpo enviado
         await MelhorEnvioProvider().ship(CREDENCIAIS, pedido)
     corpo = json.loads(rota.calls.last.request.content)
     assert corpo["volumes"] == [{"height": 11, "width": 16, "length": 21, "weight": 0.68}]
-    assert corpo["options"]["insurance_value"] == 60.0
+    assert corpo["options"]["insurance_value"] == esperado

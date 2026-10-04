@@ -86,6 +86,10 @@ _STATUS: dict[str, TrackingStatus] = {
 _MULTI_VOLUME = {"jadlog": 5}
 
 
+#: Seguro mínimo na compra: com menos de R$ 1,00 a Jadlog recusa a inserção (sandbox).
+MIN_INSURANCE_CENTS = 100
+
+
 def _cm(mm: int) -> int:
     """Milímetros → centímetros inteiros, para cima (a API arredonda e pode cortar para baixo)."""
     return max(1, -(-mm // 10))
@@ -301,10 +305,11 @@ class MelhorEnvioProvider:
                     "unitary_value": _reais(sum(p.value_cents for p in request.parcels)),
                 }
             ],
-            # Na compra o seguro segue em `options` até a F7 conferir o carrinho no sandbox.
+            # No carrinho é o contrário da cotação (sandbox, 04/10/2026): `volumes[].insurance`
+            # é ignorado e o seguro vale em `options`; a Jadlog recusa abaixo de R$ 1,00.
             "volumes": [volume(p, insured=False) for p in request.parcels],
             "options": {
-                "insurance_value": _reais(request.insurance_cents),
+                "insurance_value": _reais(max(request.insurance_cents, MIN_INSURANCE_CENTS)),
                 "receipt": False,
                 "own_hand": False,
                 "reverse": False,

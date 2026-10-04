@@ -99,6 +99,36 @@ class ShipmentEventRead(BaseModel):
     occurred_at: datetime
 
 
+class ShipmentParcelRead(BaseModel):
+    """Um volume da remessa e a etiqueta dele (com uma etiqueta por volume, cada um tem a sua)."""
+
+    n: int
+    weight_grams: int
+    dims_mm: list[int]
+    value_cents: int
+    tracking_code: str | None = None
+    label_url: str | None = None
+    status: str | None = None
+    cost_cents: int | None = None
+
+
+class ShipmentPreviewRead(BaseModel):
+    """Quanto a etiqueta custa agora, antes de comprar (ADR 0015 prometia mostrar)."""
+
+    available: bool
+    #: Preço da transportadora hoje, para o serviço que o cliente escolheu (sem acréscimo).
+    price_cents: int | None
+    #: Quantas etiquetas serão compradas (uma por volume nos Correios).
+    labels: int
+    #: O que o cliente pagou de frete (0 com frete grátis).
+    charged_cents: int
+    #: Quanto o preço de hoje (com o acréscimo da loja) passa do cotado no checkout, em %.
+    increase_percent: int | None = None
+    #: Subiu mais de 10 %: a tela pede confirmação antes de comprar.
+    needs_confirmation: bool = False
+    problem: str | None = None
+
+
 class ShipmentRead(BaseModel):
     id: str
     status: str
@@ -113,6 +143,7 @@ class ShipmentRead(BaseModel):
     purchased_at: datetime | None
     delivered_at: datetime | None
     events: list[ShipmentEventRead] = []
+    parcels: list[ShipmentParcelRead] = []
 
 
 async def _unmeasured(session: AsyncSession, tenant_id: str) -> list[UnmeasuredProduct]:
@@ -417,6 +448,37 @@ async def read_shipment(
     return await _shipment_read(session, remessa)
 
 
+@orders_router.get(
+    "/{order_id}/shipment/preview",
+    response_model=ShipmentPreviewRead,
+    summary="Quanto a etiqueta custa agora (antes de comprar)",
+    dependencies=[Depends(rate_limit("shipping_preview", 30, 60))],
+)
+async def preview_shipment(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Dispatcher,
+    order_id: OrderId,
+) -> ShipmentPreviewRead:
+    """Cota de novo os volumes do pedido no serviço escolhido pelo cliente. Não compra nada."""
+    pedido = await session.get(Order, order_id)
+    if pedido is None:
+        raise NotFoundError("Pedido não encontrado.")
+    previa = await ShipmentService(session, tenant, admin_actor(request, user), utcnow()).preview(
+        pedido
+    )
+    return ShipmentPreviewRead(
+        available=previa.price_cents is not None,
+        price_cents=previa.price_cents,
+        labels=previa.labels,
+        charged_cents=previa.charged_cents,
+        increase_percent=previa.increase_percent,
+        needs_confirmation=previa.needs_confirmation,
+        problem=previa.problem,
+    )
+
+
 @orders_router.post(
     "/{order_id}/shipment",
     response_model=ShipmentRead,
@@ -470,5 +532,22 @@ async def _shipment_read(session: DbSession, remessa: OrderShipment) -> Shipment
         events=[
             ShipmentEventRead(status=e.status, description=e.description, occurred_at=e.occurred_at)
             for e in eventos
+        ],
+        parcels=[
+            ShipmentParcelRead(
+                n=n,
+                weight_grams=int(v.get("weight_grams") or 0),
+                dims_mm=[
+                    int(v.get("depth_mm") or 0),
+                    int(v.get("width_mm") or 0),
+                    int(v.get("height_mm") or 0),
+                ],
+                value_cents=int(v.get("value_cents") or 0),
+                tracking_code=v.get("tracking_code"),
+                label_url=v.get("label_url"),
+                status=v.get("status"),
+                cost_cents=v.get("cost_cents"),
+            )
+            for n, v in enumerate(remessa.parcels or [], start=1)
         ],
     )

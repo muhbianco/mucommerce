@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { api, requireMe } from "@/lib/panel/api";
+import { weightLabel } from "@/lib/panel/measure";
+import { frozenPlanOf } from "@/lib/panel/packaging";
 import { tenantScopes } from "@/lib/panel/scopes";
 import {
   ORDER_STATE,
@@ -24,7 +26,9 @@ import {
   REFUND_KIND_LABEL,
   REFUND_STATUS_LABEL,
   type Shipment,
+  SHIPMENT_PREVIEW_PROBLEM,
   SHIPMENT_STATUS_LABEL,
+  type ShipmentPreview,
   TRANSITION_LABEL,
 } from "@/lib/panel/types";
 
@@ -33,6 +37,7 @@ import { Flash } from "../../flash";
 import { KeyValues, PageHeader, Pill, Section, TableWrap } from "../../ui";
 import { decideRefund, dispatchShipment, moveOrder, requestRefund } from "../actions";
 import local from "./order.module.css";
+import { PackingList } from "./packing-list";
 
 export const metadata: Metadata = { title: "Pedido" };
 
@@ -86,7 +91,20 @@ export default async function OrderPage({
     porTransportadora &&
     scopes.can("orders:transition") &&
     ["accepted", "in_production"].includes(order.status) &&
-    (shipment === null || shipment.status === "failed");
+    // `creating` também: despacho por volume interrompido no meio (processo caiu) é retomado
+    // pelo servidor depois de 10 minutos parado; antes disso ele responde "em andamento".
+    (shipment === null || shipment.status === "failed" || shipment.status === "creating");
+  // Antes de comprar, quanto a etiqueta custa hoje (cotação em cache de 15 min no servidor).
+  // Sem resposta, o botão continua: a prévia informa, não trava.
+  const previa = podeDespachar
+    ? await api<ShipmentPreview>(`/admin/tenants/${tenantId}/orders/${orderId}/shipment/preview`).catch(
+        () => null,
+      )
+    : null;
+  const plano = porTransportadora ? frozenPlanOf(order.fulfillment) : null;
+  const volumes = shipment?.parcels ?? [];
+  // Uma etiqueta por volume (Correios): cada volume tem a sua. Multivolume tem uma só, no topo.
+  const porVolume = volumes.length > 1 && volumes.some((v) => v.label_url);
   const currency = order.currency;
   const when = (iso: string) =>
     new Intl.DateTimeFormat("pt-BR", {
@@ -127,11 +145,23 @@ export default async function OrderPage({
           ? `Retirada em ${place}`
           : order.fulfillment_type === "delivery"
             ? `Entrega: ${place}`
-            : order.fulfillment_type === "none"
-              ? "Sem entrega"
-              : order.fulfillment_type,
+            : order.fulfillment_type === "shipping"
+              ? `Transportadora: ${[order.fulfillment?.carrier, order.fulfillment?.service_name].filter(Boolean).join(" ") || "—"}`
+              : order.fulfillment_type === "none"
+                ? "Sem entrega"
+                : order.fulfillment_type,
     },
   ];
+  if (order.fulfillment_type === "shipping") {
+    const destino = (order.fulfillment?.address ?? null) as Record<string, string | null> | null;
+    if (destino?.street) {
+      const cep = String(destino.postal_code ?? "").replace(/^(\d{5})(\d{3})$/, "$1-$2");
+      receiving.push({
+        label: "Endereço",
+        value: `${destino.street}, ${destino.number ?? "s/n"}${destino.complement ? ` (${destino.complement})` : ""} — ${destino.district ?? ""}, ${destino.city ?? ""}/${destino.state ?? ""} · CEP ${cep}`,
+      });
+    }
+  }
   if (order.scheduled_start) receiving.push({ label: "Horário", value: when(order.scheduled_start) });
 
   return (
@@ -347,6 +377,8 @@ export default async function OrderPage({
             </Section>
           ) : null}
 
+          {plano ? <PackingList plan={plano} orderNumber={order.number} /> : null}
+
           {porTransportadora ? (
             <Section
               title="Envio"
@@ -367,7 +399,9 @@ export default async function OrderPage({
                       },
                       {
                         label: "Rastreio",
-                        value: shipment.tracking_code ?? "Ainda não veio",
+                        value: porVolume
+                          ? `Um código por volume (${volumes.length}), abaixo`
+                          : (shipment.tracking_code ?? "Ainda não veio"),
                       },
                       {
                         label: "Custo da etiqueta",
@@ -381,7 +415,32 @@ export default async function OrderPage({
                         : []),
                     ]}
                   />
-                  {shipment.label_url ? (
+                  {porVolume ? (
+                    <ol className={local.labels} aria-label="Etiquetas por volume">
+                      {volumes.map((v) => (
+                        <li key={v.n}>
+                          <div className={local.labelMain}>
+                            <strong>Volume {v.n}</strong>
+                            <span className={local.parcelMeta}>
+                              {[weightLabel(v.weight_grams), v.tracking_code ?? "rastreio ainda não veio"].join(" · ")}
+                            </span>
+                          </div>
+                          {v.status ? (
+                            <Pill state={stateOf(SHIPMENT_STATE, v.status)}>
+                              {SHIPMENT_STATUS_LABEL[v.status] ?? v.status}
+                            </Pill>
+                          ) : null}
+                          {v.label_url ? (
+                            <a href={v.label_url} target="_blank" rel="noopener noreferrer">
+                              Imprimir etiqueta {v.n}
+                            </a>
+                          ) : (
+                            <span className={styles.hint}>Etiqueta ainda não comprada</span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                  ) : shipment.label_url ? (
                     <p>
                       <a href={shipment.label_url} target="_blank" rel="noopener noreferrer">
                         Imprimir etiqueta
@@ -406,12 +465,46 @@ export default async function OrderPage({
                   Nenhuma etiqueta comprada ainda.
                 </p>
               )}
+              {podeDespachar && previa ? (
+                <div className={local.preview} role="status">
+                  {previa.price_cents !== null ? (
+                    <p>
+                      Custo agora: <strong>{money(previa.price_cents, currency)}</strong>
+                      {previa.labels > 1 ? ` em ${previa.labels} etiquetas` : ""} · cliente pagou{" "}
+                      {previa.charged_cents ? money(previa.charged_cents, currency) : "nada (frete grátis)"}
+                    </p>
+                  ) : (
+                    <p className={styles.hint}>
+                      {SHIPMENT_PREVIEW_PROBLEM[previa.problem ?? ""] ?? "Não deu para ver o custo agora."}{" "}
+                      Dá para tentar despachar mesmo assim.
+                    </p>
+                  )}
+                  {previa.needs_confirmation ? (
+                    <p className={styles.error}>
+                      O frete subiu {previa.increase_percent}% desde que o cliente comprou.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               {podeDespachar ? (
                 <form action={dispatchShipment} className={local.actions}>
                   <input type="hidden" name="tenant_id" value={tenantId} />
                   <input type="hidden" name="order_id" value={orderId} />
+                  {previa?.needs_confirmation ? (
+                    <>
+                      <input type="hidden" name="cost_check" value="1" />
+                      <label className={styles.check}>
+                        <input type="checkbox" name="confirm_cost" required /> Comprar mesmo com o frete mais
+                        caro
+                      </label>
+                    </>
+                  ) : null}
                   <button type="submit" className={styles.button}>
-                    {shipment?.status === "failed" ? "Tentar despachar de novo" : "Despachar agora"}
+                    {shipment?.status === "failed"
+                      ? "Tentar despachar de novo"
+                      : shipment?.status === "creating"
+                        ? "Retomar o despacho"
+                        : "Despachar agora"}
                   </button>
                 </form>
               ) : null}

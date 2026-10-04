@@ -129,6 +129,152 @@
   white-space: nowrap;
 }
 
+/* Como embalar: um bloco por volume, com caixinha de conferir por item (vale no papel). */
+.parcels {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.parcel {
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  break-inside: avoid;
+}
+
+.parcelHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+}
+
+.parcelMeta {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.parcelBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.parcelItems {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.parcelItems li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.check {
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 0.2rem;
+}
+
+.sku {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Só aparece no papel: o cabeçalho do painel não sai na impressão. */
+.printTitle {
+  display: none;
+}
+
+/* Etiquetas por volume: uma linha cada, com selo e link. */
+.labels {
+  list-style: none;
+  margin: 0.75rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.labels li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.labels li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.labelMain {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 12rem;
+}
+
+.labels a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Prévia do custo, logo antes do botão que compra. */
+.preview {
+  margin-top: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.6rem;
+  background: var(--mist);
+}
+
+.preview p {
+  margin: 0;
+}
+
+.preview p + p {
+  margin-top: 0.4rem;
+}
+
+/* Imprimir com a lista de embalagem na página: só ela vai para o papel. */
+@media print {
+  :global(body):has(.packing) * {
+    visibility: hidden;
+  }
+
+  /* Mesmo prefixo da regra de cima: sem ele, `.packing *` perde na especificidade. */
+  :global(body):has(.packing) .packing,
+  :global(body):has(.packing) .packing * {
+    visibility: visible;
+  }
+
+  .packing {
+    position: absolute;
+    inset: 0 0 auto 0;
+  }
+
+  .packing button {
+    display: none;
+  }
+
+  .printTitle {
+    display: block;
+    font-weight: 700;
+    margin: 0 0 0.75rem;
+  }
+}
+
 /* Uma coluna (celular, tablet): a situação, com os botões do próximo passo, vem antes dos itens;
    cliente, entrega e pagamento continuam depois. No computador a lateral fica à direita. */
 @media (max-width: 900px) {

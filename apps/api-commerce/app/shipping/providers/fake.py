@@ -31,6 +31,11 @@ _BY_REFERENCE: dict[str, str] = {}
 _STATUS: dict[str, TrackingStatus] = {}
 #: Cotações recebidas, na ordem (os testes contam chamadas: deduplicação e cache).
 CALLS: list[QuoteRequest] = []
+#: Referências de compra recebidas, na ordem (os testes conferem que nada é comprado duas vezes).
+SHIP_CALLS: list[str] = []
+#: Finais de referência cuja compra falha (".2" = o 2º volume): simula a transportadora
+#: recusando um volume no meio da compra por volume.
+FAIL_SUFFIXES: set[str] = set()
 #: Interruptores de teste: CEP de destino que força um comportamento.
 CEP_SEM_SALDO = "99999999"
 CEP_FORA_DE_AREA = "88888888"
@@ -39,6 +44,8 @@ CEP_INSTAVEL = "77777777"
 
 def reset() -> None:
     CALLS.clear()
+    SHIP_CALLS.clear()
+    FAIL_SUFFIXES.clear()
     _SHIPMENTS.clear()
     _BY_REFERENCE.clear()
     _STATUS.clear()
@@ -104,6 +111,9 @@ class FakeShippingProvider:
     async def ship(
         self, credentials: ShippingCredentials, request: ShipmentRequest
     ) -> ShipmentResult:
+        SHIP_CALLS.append(request.reference)
+        if any(request.reference.endswith(s) for s in FAIL_SUFFIXES):
+            raise ShippingProviderError("volume recusado no teste", http_status=422)
         existente = _BY_REFERENCE.get(request.reference)
         if existente is not None:
             return _SHIPMENTS[existente]  # idempotência: a mesma remessa, não outra etiqueta

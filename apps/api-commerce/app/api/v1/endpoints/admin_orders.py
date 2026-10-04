@@ -212,7 +212,12 @@ async def _detail(
         ).scalars()
     )
     return OrderDetailRead(
-        order=order_read(order, await service.items(order_id), await service.history(order_id)),
+        order=order_read(
+            order,
+            await service.items(order_id),
+            await service.history(order_id),
+            for_store=True,
+        ),
         customer=dict(order.customer_snapshot or {}),
         payments=[payment_read(p) for p in payments],
         refunds=[

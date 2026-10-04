@@ -179,6 +179,28 @@ async def test_pedido_congela_o_plano_e_a_etiqueta_sai_com_ele(
     ]
 
 
+async def test_plano_congelado_aparece_no_painel_e_nao_para_o_cliente(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """O plano de volumes traz nome de embalagem, custo de material e o hash da cotação: é da
+    loja. O cliente vê o pedido sem ele; o painel, com ele (o "Como embalar" sai dali)."""
+    tenant, owner, me = await loja(client, session_factory)
+    _, cotacao, endereco = await rabiolas(client, session_factory, tenant, owner, me, 4)
+    carrinho = await escolher(client, me, endereco, cotacao["options"][0])
+    resposta = await place(client, me, order_body(carrinho))
+    assert resposta.status_code == 201, resposta.text
+    assert "parcel_plan" not in (resposta.json()["fulfillment"] or {})
+    order_id = resposta.json()["id"]
+
+    do_cliente = await client.get(f"/api/v1/me/orders/{order_id}", headers=me)
+    assert do_cliente.status_code == 200, do_cliente.text
+    assert "parcel_plan" not in (do_cliente.json()["fulfillment"] or {})
+    assert do_cliente.json()["fulfillment"]["service_code"]
+
+    do_painel = await client.get(f"{base(tenant)}/orders/{order_id}", headers=owner)
+    assert do_painel.json()["order"]["fulfillment"]["parcel_plan"]["parcels"][0]["n"] == 1
+
+
 async def test_plano_que_mudou_entre_cotacao_e_pedido_obriga_a_recotar(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
@@ -206,15 +228,18 @@ async def test_plano_adulterado_nao_confere(
     assert carrinho["quote"]["fulfillment"]["problems"] == ["quote_invalid"]
 
 
-async def test_varios_volumes_so_onde_a_etiqueta_aceita(
+async def test_varios_volumes_cada_servico_com_o_seu_modo_de_etiqueta(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """8 rabiolas só com a Caixa P: 2 volumes. O Econômico (uma etiqueta por volume, como os
-    Correios) some até a etiqueta por volume existir; o Expresso (multivolume) fica."""
+    """8 rabiolas só com a Caixa P: 2 volumes (6 + 2). O Econômico (como os Correios) compra uma
+    etiqueta por volume e cobra a soma; o Expresso (multivolume) cobra a remessa numa só."""
     tenant, owner, me = await loja(client, session_factory, caixas=(CAIXA_P,))
     _, cotacao, _ = await rabiolas(client, session_factory, tenant, owner, me, 8)
-    assert [o["service_code"] for o in cotacao["options"]] == ["fake_expresso"]
-    expresso = cotacao["options"][0]
+    por_servico = {o["service_code"]: o for o in cotacao["options"]}
+    economico, expresso = por_servico["fake_economico"], por_servico["fake_expresso"]
+    assert economico["plan"].endswith(":per_volume")
+    # Volume 1: 80 + 6 x 150 = 980 g; volume 2: 80 + 2 x 150 = 380 g.
+    assert economico["price_cents"] == (1500 + 980 * 2 + DISTANCIA) + (1500 + 380 * 2 + DISTANCIA)
     assert expresso["plan"].endswith(":multi_volume")
     # Remessa inteira: 2 caixas (160 g) + 8 rabiolas (1200 g) = 1360 g, cobrada em dobro.
     assert expresso["price_cents"] == (1500 + 1360 * 2 + DISTANCIA) * 2
@@ -329,11 +354,11 @@ def test_escolha_por_servico_tolera_combinacao_que_falhou() -> None:
     )
     assert escolha.failed is True, "a terceira combinação falhou e mesmo assim há ofertas"
     por_servico = {o.option.service_code: o for o in escolha.offers}
-    # PAC com 2 volumes exige 2 etiquetas: até a F7 vale só a combinação de 1 volume.
-    assert por_servico["pac"].plan is um and por_servico["pac"].mode == "single"
-    assert por_servico["pac"].charged_material_cents == 300
+    # PAC: a combinação de 2 volumes sai mais barata (1500 contra 2000 + 300 de material) e é
+    # comprada com uma etiqueta por volume.
+    assert por_servico["pac"].plan is dois and por_servico["pac"].mode == "per_volume"
+    assert por_servico["pac"].charged_material_cents == 0
     assert por_servico["jad"].plan is dois and por_servico["jad"].mode == "multi_volume"
-    assert any("mais de um volume" in (r.error or "") for r in escolha.refusals)
 
     vazia = choose_offers([um], [None], charge_material=False)
     assert (vazia.offers, vazia.failed) == ((), True)
@@ -368,4 +393,195 @@ async def test_simulador_com_cep_mostra_o_preco_real_e_a_vencedora_de_cada_servi
     duas_p = next(p for p in corpo["plans"] if len(p["parcels"]) == 2)
     economico_em_duas = next(q for q in duas_p["quotes"] if q["service_code"] == "fake_economico")
     assert economico_em_duas["mode"] == "per_volume"
-    assert economico_em_duas["error"], "explica por que este serviço não vale aqui (ainda)"
+    assert economico_em_duas["error"] is None
+    assert economico_em_duas["price_cents"] > 0
+
+
+# ----------------------------------------------------------------------------- F7
+
+
+async def _pedido_por_volume(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> tuple[Any, dict[str, str], str]:
+    """8 rabiolas, só a Caixa P, Econômico (uma etiqueta por volume): 2 etiquetas a comprar."""
+    tenant, owner, me = await loja(client, session_factory, caixas=(CAIXA_P,))
+    _, cotacao, endereco = await rabiolas(client, session_factory, tenant, owner, me, 8)
+    economico = next(o for o in cotacao["options"] if o["service_code"] == "fake_economico")
+    assert economico["plan"].endswith(":per_volume")
+    carrinho = await escolher(client, me, endereco, economico)
+    resposta = await place(client, me, order_body(carrinho))
+    assert resposta.status_code == 201, resposta.text
+    order_id = str(resposta.json()["id"])
+    await _aceitar(session_factory, tenant, order_id)
+    return tenant, owner, order_id
+
+
+async def test_correios_compra_uma_etiqueta_por_volume(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner, order_id = await _pedido_por_volume(client, session_factory)
+    remessa = await _despachar(session_factory, tenant, order_id)
+    assert remessa.status == "purchased"
+    assert [f"{remessa.id}.1", f"{remessa.id}.2"] == fake_shipping.SHIP_CALLS
+    assert all(v["provider_shipment_id"] and v["label_url"] for v in remessa.parcels)
+    assert remessa.cost_cents == sum(v["cost_cents"] for v in remessa.parcels)
+    assert remessa.label_url == remessa.parcels[0]["label_url"]
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, order_id)
+        assert pedido is not None
+        assert pedido.status == "shipped"
+
+    lido = await client.get(f"{base(tenant)}/orders/{order_id}/shipment", headers=owner)
+    assert [p["n"] for p in lido.json()["parcels"]] == [1, 2]
+    assert all(p["label_url"] for p in lido.json()["parcels"])
+
+
+async def test_falha_no_segundo_volume_nao_recompra_o_primeiro(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """O 1º volume foi pago e o 2º falhou: a 1ª etiqueta fica gravada (o erro desfaz a transação
+    do pedido, não a compra) e a nova tentativa compra só o 2º."""
+    from sqlalchemy import select
+
+    from app.core.exceptions import ShippingUnavailableError
+    from app.shipping.models import OrderShipment
+
+    tenant, _owner, order_id = await _pedido_por_volume(client, session_factory)
+    fake_shipping.FAIL_SUFFIXES.add(".2")
+    with pytest.raises(ShippingUnavailableError):
+        await _despachar(session_factory, tenant, order_id)
+    fake_shipping.FAIL_SUFFIXES.clear()
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        remessa = (
+            await session.execute(select(OrderShipment).where(OrderShipment.order_id == order_id))
+        ).scalar_one()
+        remessa_id = remessa.id
+        assert remessa.status == "failed"
+        assert remessa.parcels[0]["provider_shipment_id"], "a etiqueta paga ficou gravada"
+        assert not remessa.parcels[1].get("provider_shipment_id")
+        assert "volume 2 de 2" in (remessa.last_error or "")
+
+    fake_shipping.SHIP_CALLS.clear()
+    remessa = await _despachar(session_factory, tenant, order_id)
+    assert remessa.id == remessa_id
+    assert remessa.status == "purchased"
+    assert [f"{remessa.id}.2"] == fake_shipping.SHIP_CALLS, "só o volume que faltava"
+
+
+async def test_despacho_por_volume_interrompido_so_retoma_depois_de_parado(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """O processo caiu no meio (linha em `creating` com a 1ª etiqueta gravada): enquanto ela é
+    recente pode ser outra chamada comprando, e nada acontece; parada há mais de 10 minutos, a
+    retomada compra só o volume que falta."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app.core.exceptions import ShipmentInProgressError, ShippingUnavailableError
+    from app.models.base import utcnow
+    from app.shipping.models import OrderShipment, ShipmentStatus
+
+    tenant, _owner, order_id = await _pedido_por_volume(client, session_factory)
+    fake_shipping.FAIL_SUFFIXES.add(".2")
+    with pytest.raises(ShippingUnavailableError):
+        await _despachar(session_factory, tenant, order_id)
+    fake_shipping.FAIL_SUFFIXES.clear()
+
+    async def parada_ha(minutos: int) -> None:
+        async with session_factory() as session:
+            bind_session_tenant(session, tenant.id)
+            remessa = (
+                await session.execute(
+                    select(OrderShipment).where(OrderShipment.order_id == order_id)
+                )
+            ).scalar_one()
+            remessa.status = ShipmentStatus.CREATING
+            remessa.updated_at = utcnow() - timedelta(minutes=minutos)
+            await session.commit()
+
+    await parada_ha(5)
+    fake_shipping.SHIP_CALLS.clear()
+    with pytest.raises(ShipmentInProgressError):
+        await _despachar(session_factory, tenant, order_id)
+    assert fake_shipping.SHIP_CALLS == []
+
+    await parada_ha(15)
+    remessa = await _despachar(session_factory, tenant, order_id)
+    assert remessa.status == "purchased"
+    assert [f"{remessa.id}.2"] == fake_shipping.SHIP_CALLS
+
+
+async def test_rastreio_por_volume_so_entrega_quando_todos_chegam(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    from datetime import timedelta
+
+    from app.models.base import utcnow
+    from app.shipping.jobs import run_track_shipments
+
+    tenant, _owner, order_id = await _pedido_por_volume(client, session_factory)
+    remessa = await _despachar(session_factory, tenant, order_id)
+    primeiro, segundo = (v["provider_shipment_id"] for v in remessa.parcels)
+
+    fake_shipping.advance(primeiro, "delivered")
+    fake_shipping.advance(segundo, "in_transit")
+    await run_track_shipments(session_factory, utcnow())
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, order_id)
+        assert pedido is not None
+        assert pedido.status == "shipped", "falta um volume chegar"
+
+    fake_shipping.advance(segundo, "delivered")
+    await run_track_shipments(session_factory, utcnow() + timedelta(hours=5))
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, order_id)
+        assert pedido is not None
+        assert pedido.status == "delivered"
+
+
+def test_estado_da_remessa_com_varias_etiquetas() -> None:
+    from app.shipping.jobs import combine_statuses
+    from app.shipping.models import ShipmentStatus as S
+
+    assert combine_statuses([S.DELIVERED, S.IN_TRANSIT]) == S.IN_TRANSIT
+    assert combine_statuses([S.DELIVERED, S.DELIVERED]) == S.DELIVERED
+    assert combine_statuses([S.POSTED, S.RETURNED]) == S.RETURNED
+    assert combine_statuses([S.PURCHASED, S.POSTED]) == S.PURCHASED
+
+
+async def test_previa_do_custo_da_etiqueta_antes_de_comprar(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    tenant, owner, order_id = await _pedido_por_volume(client, session_factory)
+    previa = await client.get(f"{base(tenant)}/orders/{order_id}/shipment/preview", headers=owner)
+    assert previa.status_code == 200, previa.text
+    corpo = previa.json()
+    assert corpo["available"] is True
+    assert corpo["labels"] == 2
+    esperado = (1500 + 980 * 2 + DISTANCIA) + (1500 + 380 * 2 + DISTANCIA)
+    assert corpo["price_cents"] == esperado
+    assert corpo["charged_cents"] == esperado  # loja de teste sem acréscimo
+    assert corpo["increase_percent"] == 0
+    assert corpo["needs_confirmation"] is False
+    assert fake_shipping.SHIP_CALLS == [], "prévia não compra nada"
+
+    # O checkout cotou mais barato do que a etiqueta sai hoje (o frete subiu depois): a compra
+    # pede confirmação. Com frete grátis o cobrado é 0, e o que vale é o cotado, não o cobrado.
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, order_id)
+        assert pedido is not None
+        pedido.fulfillment = {**(pedido.fulfillment or {}), "price_cents": esperado * 100 // 115}
+        pedido.delivery_fee_cents = 0
+        await session.commit()
+    corpo = (
+        await client.get(f"{base(tenant)}/orders/{order_id}/shipment/preview", headers=owner)
+    ).json()
+    assert corpo["charged_cents"] == 0
+    assert corpo["increase_percent"] == 15
+    assert corpo["needs_confirmation"] is True

@@ -581,7 +581,40 @@ export interface Shipment {
   purchased_at: string | null;
   delivered_at: string | null;
   events: { status: string; description: string; occurred_at: string }[];
+  /** Os volumes da remessa; com uma etiqueta por volume, cada um tem a sua e o seu rastreio. */
+  parcels?: ShipmentParcel[];
 }
+
+export interface ShipmentParcel {
+  n: number;
+  weight_grams: number;
+  dims_mm: number[];
+  value_cents: number;
+  tracking_code: string | null;
+  label_url: string | null;
+  status: string | null;
+  cost_cents: number | null;
+}
+
+/** Quanto a etiqueta custa agora, antes de comprar (`GET …/orders/{id}/shipment/preview`). */
+export interface ShipmentPreview {
+  available: boolean;
+  price_cents: number | null;
+  labels: number;
+  charged_cents: number;
+  increase_percent: number | null;
+  needs_confirmation: boolean;
+  problem: string | null;
+}
+
+export const SHIPMENT_PREVIEW_PROBLEM: Record<string, string> = {
+  service_unavailable: "O serviço que o cliente escolheu não aparece mais na cotação de hoje.",
+  unavailable: "A transportadora não respondeu agora.",
+  not_configured: "Conecte a conta da transportadora para ver o custo.",
+  shipping_disabled: "O envio por transportadora está desligado.",
+  missing_dimensions: "Algum produto do pedido está sem peso ou medida.",
+  no_parcels: "Faltam o endereço ou os volumes do pedido.",
+};
 
 export const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   creating: "Comprando etiqueta",

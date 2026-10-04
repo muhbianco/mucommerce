@@ -112,6 +112,10 @@ export async function dispatchShipment(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   const orderId = id(text(form, "order_id"));
   await run(`${page}/pedidos/${orderId}`, "despachado", async () => {
+    // A tela pediu confirmação (o frete subiu mais de 10% desde a compra) e ela não veio.
+    if (text(form, "cost_check") === "1" && form.get("confirm_cost") !== "on") {
+      throw new FormError("confirmar_custo");
+    }
     await api(`${path}/orders/${orderId}/shipment`, { method: "POST", json: {} });
   });
 }
