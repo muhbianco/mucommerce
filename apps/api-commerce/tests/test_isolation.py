@@ -79,6 +79,10 @@ COVERED_TENANT_SCOPED_TABLES = {
     "landing_briefs",
     "landing_drafts",
     "landing_generation_usage",
+    # Frete v2: embalagem de outra loja dá 404 e não serve de regra de produto — exercitado em
+    # `test_shipping_packages.py::test_embalagem_de_outra_loja_nao_existe_aqui`.
+    "shipping_packages",
+    "product_package_rules",
 }
 
 

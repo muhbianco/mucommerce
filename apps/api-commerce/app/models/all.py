@@ -41,7 +41,12 @@ from app.payments.models import (
     TenantPaymentConfig,
 )
 from app.production.models import Supplier, Supply, SupplyMovement, SupplyReceipt
-from app.shipping.models import OrderShipment, ShipmentEvent
+from app.shipping.models import (
+    OrderShipment,
+    ProductPackageRule,
+    ShipmentEvent,
+    ShippingPackage,
+)
 from app.tenancy.models import (
     Tenant,
     TenantDomain,
@@ -88,9 +93,11 @@ __all__ = [
     "ProcessedEvent",
     "Product",
     "ProductCategory",
+    "ProductPackageRule",
     "ProductVariant",
     "Refund",
     "ShipmentEvent",
+    "ShippingPackage",
     "StockAdjustment",
     "Supplier",
     "Supply",

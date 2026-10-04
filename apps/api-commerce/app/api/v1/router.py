@@ -17,6 +17,7 @@ from app.api.v1.endpoints import (
     admin_payments,
     admin_refunds,
     admin_shipping,
+    admin_shipping_packages,
     admin_supplies,
     admin_tenants,
     auth,
@@ -99,6 +100,13 @@ TAGS_METADATA: list[dict[str, object]] = [
         ),
     },
     {
+        "name": "Painel — Embalagens",
+        "description": (
+            "Embalagens da loja para o frete v2: a padrão, as outras, medida por dentro e por "
+            "fora (módulo `checkout`, escopo `catalog:*`)."
+        ),
+    },
+    {
         "name": "Painel — Estoque",
         "description": "Saldos, ajustes com ledger e alertas de estoque baixo (flag `inventory`).",
     },
@@ -153,6 +161,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_email.router,
     admin_shipping.router,
     admin_shipping.orders_router,
+    admin_shipping_packages.router,
     admin_refunds.router,
     admin_supplies.router,
     admin_inventory.router,

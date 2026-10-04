@@ -68,6 +68,16 @@ class ValidationError(DomainError):
     message = "Dados inválidos."
 
 
+class PackingInvalidError(ValidationError):
+    """Configuração de embalagem que o motor não pode honrar (frete v2).
+
+    `details["reason"]` diz qual regra quebrou — a tela traduz cada uma em frase do lojista.
+    """
+
+    error_code = "packing_invalid"
+    message = "Configuração de embalagem inválida."
+
+
 class AuthenticationError(DomainError):
     status_code = 401
     error_code = "authentication_failed"

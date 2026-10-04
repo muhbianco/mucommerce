@@ -43,6 +43,7 @@ from app.catalog.models import (
     Tag,
     VariantStatus,
 )
+from app.catalog.packing import PACKING_FIELDS, check_legacy_box, check_packing
 from app.catalog.pricing import (
     EffectivePrice,
     check_promotion,
@@ -70,6 +71,7 @@ from app.core.exceptions import (
     ConflictError,
     InvalidTransitionError,
     NotFoundError,
+    PackingInvalidError,
     ValidationError,
 )
 from app.core.ids import new_id
@@ -78,6 +80,7 @@ from app.inventory.models import InventoryBalance
 from app.media.models import MediaAsset, MediaOwner, MediaStatus
 from app.media.repository import MediaRepository
 from app.models.base import utcnow
+from app.shipping.models import ProductPackageRule
 from app.tenancy.context import TenantContext
 from app.tenancy.repository import TenantRepository
 from app.tenancy.service import Actor
@@ -105,6 +108,7 @@ class ProductView:
     category_ids: list[str]
     media: list[MediaAsset] = field(default_factory=list)
     tags: list[Tag] = field(default_factory=list)
+    package_rules: list[ProductPackageRule] = field(default_factory=list)
 
 
 def product_price(product: Product, now: datetime) -> EffectivePrice:
@@ -159,6 +163,15 @@ class CatalogService:
             [t.model_dump() for t in data.price_tiers] if data.price_tiers else None,
             base_cents=data.base_price_cents,
         )
+        if data.packing_mode == "restricted":
+            # Regras só chegam no PATCH: criar já restrito deixaria o produto sem embalagem.
+            raise PackingInvalidError(
+                "Crie o produto e escolha as embalagens depois.",
+                reason="restricted_needs_packages",
+            )
+        await check_packing(self.session, product=None, changes=data.model_dump(), rules_in=None)
+        if data.shipping_box_id:
+            await check_legacy_box(self.session, self.tenant.settings, data.shipping_box_id)
         category_ids = await self._checked_category_ids(data.category_ids)
         tags = await self._resolve_tags(data.tags)
         sku = data.sku or await self._generate_sku()
@@ -210,13 +223,16 @@ class CatalogService:
         categories = (await self.repo.category_ids_for([product.id])).get(product.id, [])
         media = await MediaRepository(self.session).for_owner(MediaOwner.PRODUCT, product.id)
         tags = (await self.repo.tags_for([product.id])).get(product.id, [])
-        return ProductView(product, variants, categories, list(media), tags)
+        rules = await self.repo.package_rules_for(product.id)
+        return ProductView(product, variants, categories, list(media), tags, rules)
 
     async def update_product(self, product_id: str, data: ProductUpdate) -> ProductView:
         product = await self._product_or_404(product_id)
         if product.status == ProductStatus.ARCHIVED:
             raise ConflictError("Produto arquivado não pode ser editado.")
-        changes = data.model_dump(exclude_unset=True, exclude={"category_ids", "seo", "tags"})
+        changes = data.model_dump(
+            exclude_unset=True, exclude={"category_ids", "seo", "tags", "package_rules"}
+        )
         nulled = sorted(k for k, v in changes.items() if v is None and k in PRODUCT_REQUIRED_FIELDS)
         if nulled:
             raise ValidationError("Campos obrigatórios não podem ser nulos.", fields=nulled)
@@ -250,6 +266,19 @@ class CatalogService:
             if changes["slug"] in taken:
                 raise ConflictError("Slug já usado nesta loja.", slug=changes["slug"])
 
+        if changes.get("shipping_box_id"):
+            await check_legacy_box(self.session, self.tenant.settings, changes["shipping_box_id"])
+        rules_before = await self.repo.package_rules_for(product.id)
+        new_rules: list[tuple[str, int | None]] | None = None
+        if data.package_rules is not None or PACKING_FIELDS & changes.keys():
+            new_rules = await check_packing(
+                self.session,
+                product=product,
+                changes=changes,
+                rules_in=data.package_rules,
+                current_rules=rules_before,
+            )
+
         # Read before mutating: a query after setattr autoflushes, and a unique conflict there
         # would escape `_flush_unique` as a 500 instead of a 409.
         categories_before = (await self.repo.category_ids_for([product.id])).get(product.id, [])
@@ -278,6 +307,10 @@ class CatalogService:
                 product.id, [t.id for t in tags], current=tag_ids_before
             )
             changed.append("tags")
+        if new_rules is not None and await self.repo.replace_package_rules(
+            product.id, new_rules, current=rules_before
+        ):
+            changed.append("package_rules")
         if not changed:
             return await self.get_product(product.id)
 
@@ -293,7 +326,8 @@ class CatalogService:
         await self._audit("product.updated", product, before=before, after=after)
         await self._emit(product, "product.updated")
         variants = (await self.repo.variants_for([product.id])).get(product.id, [])
-        return ProductView(product, variants, categories, tags=tags)
+        rules = await self.repo.package_rules_for(product.id)
+        return ProductView(product, variants, categories, tags=tags, package_rules=rules)
 
     async def archive_product(self, product_id: str) -> None:
         product = await self._product_or_404(product_id)
@@ -379,7 +413,24 @@ class CatalogService:
             siblings = (await self.repo.variants_for([product.id])).get(product.id, [])
             if not any(v.status in LIVE_VARIANT_STATUSES and v.id != variant.id for v in siblings):
                 raise ConflictError("Produto publicado precisa de ao menos uma variante ativa.")
-        fields = ("name", "price_cents", "cost_cents", "status")
+        medidas = ("width_mm", "height_mm", "depth_mm")
+        finais = [changes.get(name, getattr(variant, name)) for name in medidas]
+        if any(v is not None for v in finais) and not all(v is not None for v in finais):
+            # Meia medida não vira caixa: ou a variação tem as três, ou herda as três.
+            raise ValidationError(
+                "Informe as três medidas da variação, ou deixe as três vazias.",
+                fields=[name for name, v in zip(medidas, finais, strict=True) if v is None],
+            )
+        fields = (
+            "name",
+            "price_cents",
+            "cost_cents",
+            "status",
+            "weight_grams",
+            "width_mm",
+            "height_mm",
+            "depth_mm",
+        )
         before = _snapshot(variant, fields)
         for name, value in changes.items():
             setattr(variant, name, value)

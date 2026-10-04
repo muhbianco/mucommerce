@@ -206,6 +206,9 @@ DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
     "payments.pagbank": False,
     # Etapa J: envio por transportadora. Convive com `delivery` (frota própria).
     "shipping.melhorenvio": False,
+    # Frete v2 (motor de embalagem, docs/13-frete-v2.md): a MuhBianco liga por loja enquanto o
+    # motor novo entra; desligar volta ao v1 sem perder pedido (o pedido congela o plano dele).
+    "shipping.packing_v2": False,
     # Phase A: store customers sign in with Google; phone check by WhatsApp code.
     "customer_login": False,
     "customer_phone_otp": False,

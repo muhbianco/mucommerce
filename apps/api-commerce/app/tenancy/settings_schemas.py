@@ -205,6 +205,26 @@ class ShippingService(_Setting):
     active: bool = True
 
 
+class PackingSettings(_Setting):
+    """Regras de embalagem da loja para o motor v2 (docs/13-frete-v2.md §3).
+
+    Aditivo, com padrão em tudo: linha antiga valida sem mudar de versão.
+    """
+
+    #: Folga por lado (plástico-bolha, papel), descontada da medida de dentro de toda embalagem.
+    padding_mm: Annotated[int, Field(ge=0, le=50)] = 0
+    #: Quanto do espaço um produto flexível ocupa de verdade (amassa, mas não some).
+    flexible_fill_percent: Annotated[int, Field(ge=50, le=100)] = 85
+    #: Quantas combinações de caixas cotar por cálculo (cada uma é chamada à transportadora).
+    max_candidates: Annotated[int, Field(ge=1, le=4)] = 3
+    #: Teto de volumes num pedido; acima disso a combinação é descartada.
+    max_parcels: Annotated[int, Field(ge=1, le=20)] = 10
+    #: Declarar o valor dos produtos (seguro). Desligado, o frete fica mais barato e sem seguro.
+    declare_value: bool = True
+    #: Somar o custo cadastrado da embalagem ao frete cobrado do cliente.
+    charge_material: bool = False
+
+
 class ShippingSettings(_Setting):
     """Envio por transportadora (ADR 0015). Convive com retirada e entrega por zona."""
 
@@ -225,6 +245,8 @@ class ShippingSettings(_Setting):
     free_above_cents: Cents | None = None
     #: Dias de preparo somados ao prazo da transportadora.
     handling_days: Annotated[int, Field(ge=0, le=30)] = 0
+    #: Frete v2: regras do motor de embalagem (só valem com a flag `shipping.packing_v2`).
+    packing: PackingSettings = PackingSettings()
 
 
 class FulfillmentV2(_Setting):

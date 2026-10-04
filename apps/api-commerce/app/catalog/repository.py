@@ -20,6 +20,7 @@ from app.catalog.models import (
     ProductVariant,
     Tag,
 )
+from app.shipping.models import MAX_RULES_PER_PRODUCT, ProductPackageRule
 
 # Bounds for the slug-suffix lookup and for a tenant's category tree.
 SLUG_SCAN_LIMIT = 1000
@@ -170,6 +171,44 @@ class CatalogRepository:
             )
         for category_id in sorted(wanted - existing):
             self.session.add(ProductCategory(product_id=product_id, category_id=category_id))
+
+    # ------------------------------------------------------------------ package rules
+    async def package_rules_for(self, product_id: str) -> list[ProductPackageRule]:
+        stmt = (
+            select(ProductPackageRule)
+            .where(ProductPackageRule.product_id == product_id)
+            .order_by(ProductPackageRule.created_at, ProductPackageRule.id)
+            .limit(MAX_RULES_PER_PRODUCT)
+        )
+        return list((await self.session.execute(stmt)).scalars())
+
+    async def replace_package_rules(
+        self,
+        product_id: str,
+        rules: Sequence[tuple[str, int | None]],
+        *,
+        current: Sequence[ProductPackageRule],
+    ) -> bool:
+        """Deixa as regras do produto iguais a `rules`. Devolve se algo mudou."""
+        wanted = dict(rules)
+        mudou = False
+        for rule in current:
+            if rule.package_id not in wanted:
+                await self.session.delete(rule)
+                mudou = True
+            elif rule.max_units != wanted[rule.package_id]:
+                rule.max_units = wanted[rule.package_id]
+                mudou = True
+        existentes = {rule.package_id for rule in current}
+        for package_id, max_units in rules:
+            if package_id not in existentes:
+                self.session.add(
+                    ProductPackageRule(
+                        product_id=product_id, package_id=package_id, max_units=max_units
+                    )
+                )
+                mudou = True
+        return mudou
 
     # ------------------------------------------------------------------ tags
     async def tags_for(self, product_ids: Collection[str]) -> dict[str, list[Tag]]:

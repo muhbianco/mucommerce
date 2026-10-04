@@ -13,6 +13,7 @@ from app.catalog.schemas import (
     CategoryRead,
     CategoryUpdate,
     ModifierGroupRead,
+    PackageRuleRead,
     PauseRequest,
     PriceRead,
     ProductCreate,
@@ -97,6 +98,14 @@ def _product_read(view: ProductView) -> ProductRead:
         height_mm=product.height_mm,
         depth_mm=product.depth_mm,
         shipping_box_id=product.shipping_box_id,
+        packing_mode=product.packing_mode,
+        packing_rotation=product.packing_rotation,
+        packing_flexible=product.packing_flexible,
+        packing_ship_alone=product.packing_ship_alone,
+        package_rules=[
+            PackageRuleRead(package_id=r.package_id, max_units=r.max_units)
+            for r in view.package_rules
+        ],
         lead_time_hours=product.lead_time_hours,
         daily_capacity=product.daily_capacity,
         has_variants=product.has_variants,
@@ -122,6 +131,10 @@ def _product_read(view: ProductView) -> ProductRead:
                 status=v.status,
                 position=v.position,
                 price=_price(price_of_variant(product, v, now)),
+                weight_grams=v.weight_grams,
+                width_mm=v.width_mm,
+                height_mm=v.height_mm,
+                depth_mm=v.depth_mm,
                 paused_at=v.paused_at,
                 paused_reason=v.paused_reason,
             )

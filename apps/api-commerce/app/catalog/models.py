@@ -37,6 +37,7 @@ from app.models.base import (
     UtcDateTime,
     UUIDPrimaryKeyMixin,
 )
+from app.shipping.packing.model import PackingMode, Rotation
 
 # Up to ~20k characters of Markdown: TEXT tops out at 64 KiB, too small for 4-byte UTF-8.
 LONG_TEXT = Text().with_variant(mysql.MEDIUMTEXT(), "mysql", "mariadb")
@@ -169,7 +170,17 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     #: Em qual embalagem da loja este produto vai (`fulfillment.shipping.boxes[].id`). Nulo usa a
     #: caixa padrão. Id solto e não chave estrangeira porque a embalagem mora numa setting, não
     #: numa tabela; o empacotador trata id que não existe mais como "sem escolha".
+    #: Legado do motor v1: o v2 usa `packing_mode` + `product_package_rules` (a migration 0037
+    #: copia este id para uma regra) e a coluna sai na contração.
     shipping_box_id: Mapped[str | None] = mapped_column(String(36))
+    #: Frete v2 (docs/13-frete-v2.md §3): como o produto é embalado.
+    packing_mode: Mapped[str] = mapped_column(String(16), nullable=False, default=PackingMode.AUTO)
+    packing_rotation: Mapped[str] = mapped_column(String(16), nullable=False, default=Rotation.ANY)
+    #: Dobra ou amassa sem estragar: ocupa volume, não posição; e só ele aceita capacidade
+    #: declarada acima da geometria.
+    packing_flexible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Nunca divide caixa com outro produto (variações do mesmo produto podem).
+    packing_ship_alone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     lead_time_hours: Mapped[int | None] = mapped_column(Integer)
     daily_capacity: Mapped[int | None] = mapped_column(Integer)
     has_variants: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -210,6 +221,12 @@ class ProductVariant(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, Tenan
     price_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     cost_cents: Mapped[int | None] = mapped_column(BigInteger)
     stock_policy: Mapped[str | None] = mapped_column(String(16))
+    #: Peso e medidas próprios da variação (P e GG não pesam igual). NULL herda do produto; as
+    #: três medidas andam juntas, o peso pode vir sozinho.
+    weight_grams: Mapped[int | None] = mapped_column(Integer)
+    width_mm: Mapped[int | None] = mapped_column(Integer)
+    height_mm: Mapped[int | None] = mapped_column(Integer)
+    depth_mm: Mapped[int | None] = mapped_column(Integer)
     # Points at media_assets (phase 1, S4); the FK arrives with that table.
     media_id: Mapped[str | None] = mapped_column(String(36))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=VariantStatus.ACTIVE)

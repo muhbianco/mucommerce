@@ -419,6 +419,7 @@ async def test_embalagem_apagada_cai_na_caixa_padrao_em_vez_de_recusar(
     Recusar a cotação puniria o cliente por uma edição da loja; cair na caixa padrão é o pior
     que pode acontecer e ainda é uma venda.
     """
+    from app.catalog.models import Product
     from app.shipping.service import parcels_for
     from app.tenancy.settings_schemas import fulfillment_settings
 
@@ -432,9 +433,15 @@ async def test_embalagem_apagada_cai_na_caixa_padrao_em_vez_de_recusar(
         width_mm=150,
         height_mm=100,
         depth_mm=80,
-        shipping_box_id="01a00000-0000-7000-8000-000000000000",
     )
     variant_id = criado["variants"][0]["id"]
+    # A API não aceita mais apontar para embalagem inexistente; aqui ela "sumiu" depois.
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        linha = await session.get(Product, criado["id"])
+        assert linha is not None
+        linha.shipping_box_id = "01a00000-0000-7000-8000-000000000000"
+        await session.commit()
 
     async with session_factory() as session:
         bind_session_tenant(session, tenant.id)

@@ -29,6 +29,10 @@ Dimension = Annotated[int, Field(ge=0, le=1_000_000)]
 Position = Annotated[int, Field(ge=-1_000_000, le=1_000_000)]
 
 ProductKindIn = Literal["physical", "made_to_order", "service", "digital", "ticket"]
+PackingModeIn = Literal["auto", "restricted", "own_container"]
+RotationIn = Literal["any", "upright"]
+#: Medida própria da variação: positiva, ou null para herdar do produto.
+VariantMeasure = Annotated[int, Field(ge=1, le=1_000_000)]
 StockPolicyIn = Literal["tracked", "untracked", "made_to_order", "unlimited"]
 ProductStatusFilter = Literal["draft", "active", "paused", "inactive", "archived"]
 
@@ -39,6 +43,7 @@ MAX_OPTION_VALUES = 20
 MAX_VARIANTS = 100
 MAX_MODIFIER_GROUPS = 10
 MAX_MODIFIERS_PER_GROUP = 30
+MAX_PACKAGE_RULES = 10  # = app.shipping.models.MAX_RULES_PER_PRODUCT
 
 # A tag is given by name; its slug (and the tag itself, on first use) come from it.
 TagName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
@@ -75,10 +80,28 @@ class _ProductFields(StrictModel):
     depth_mm: Dimension | None = None
     #: Em qual embalagem da loja este produto viaja. Nulo usa a caixa padrão.
     shipping_box_id: EntityId | None = None
+    #: Frete v2: como o produto é embalado (docs/13-frete-v2.md §3).
+    packing_mode: PackingModeIn = "auto"
+    packing_rotation: RotationIn = "any"
+    packing_flexible: bool = False
+    packing_ship_alone: bool = False
     lead_time_hours: Annotated[int, Field(ge=0, le=8760)] | None = None
     daily_capacity: Annotated[int, Field(ge=0, le=100_000)] | None = None
     position: Position = 0
     seo: ProductSeo | None = None
+
+
+class PackageRuleIn(StrictModel):
+    """Regra "este produto vai nesta embalagem", com a capacidade declarada opcional."""
+
+    package_id: EntityId
+    #: Declaração da loja, não cálculo: no rígido só reduz; no flexível vale até 200% do volume.
+    max_units: Annotated[int, Field(ge=1, le=100_000)] | None = None
+
+
+class PackageRuleRead(BaseModel):
+    package_id: str
+    max_units: int | None
 
 
 class ProductCreate(_ProductFields):
@@ -118,6 +141,12 @@ class ProductUpdate(StrictModel):
     height_mm: Dimension | None = None
     depth_mm: Dimension | None = None
     shipping_box_id: EntityId | None = None
+    packing_mode: PackingModeIn | None = None
+    packing_rotation: RotationIn | None = None
+    packing_flexible: bool | None = None
+    packing_ship_alone: bool | None = None
+    #: A lista inteira: regra que não vier aqui é apagada. Omitido = não mexe nas regras.
+    package_rules: Annotated[list[PackageRuleIn], Field(max_length=MAX_PACKAGE_RULES)] | None = None
     lead_time_hours: Annotated[int, Field(ge=0, le=8760)] | None = None
     daily_capacity: Annotated[int, Field(ge=0, le=100_000)] | None = None
     position: Position | None = None
@@ -140,6 +169,10 @@ PRODUCT_REQUIRED_FIELDS = frozenset(
         "sold_by",
         "unit_label",
         "position",
+        "packing_mode",
+        "packing_rotation",
+        "packing_flexible",
+        "packing_ship_alone",
     }
 )
 
@@ -150,6 +183,11 @@ class VariantUpdate(StrictModel):
     price_cents: Money | None = None
     cost_cents: Money | None = None
     status: Literal["active", "inactive"] | None = None
+    # null → herda do produto. As três medidas andam juntas; o peso pode vir sozinho.
+    weight_grams: VariantMeasure | None = None
+    width_mm: VariantMeasure | None = None
+    height_mm: VariantMeasure | None = None
+    depth_mm: VariantMeasure | None = None
 
 
 OptionLabel = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
@@ -244,6 +282,11 @@ class VariantRead(BaseModel):
     status: str
     position: int
     price: PriceRead
+    # Sem default: esquecer no `_product_read` não compila (mesma lição do `price_tiers`).
+    weight_grams: int | None
+    width_mm: int | None
+    height_mm: int | None
+    depth_mm: int | None
     paused_at: datetime | None = None
     paused_reason: str | None = None
 
@@ -282,6 +325,11 @@ class ProductRead(ProductSummary):
     height_mm: int | None
     depth_mm: int | None
     shipping_box_id: str | None = None
+    packing_mode: str
+    packing_rotation: str
+    packing_flexible: bool
+    packing_ship_alone: bool
+    package_rules: list[PackageRuleRead]
     lead_time_hours: int | None
     daily_capacity: int | None
     has_variants: bool
