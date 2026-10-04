@@ -41,3 +41,6 @@ apps/web/test-results/
 apps/web/playwright-report/
 apps/web/e2e/test-results/
 apps/web/e2e/playwright-report/
+
+# Saída da sondagem do sandbox do Melhor Envio (frete v2, portão F2.5)
+probe-melhorenvio*.json

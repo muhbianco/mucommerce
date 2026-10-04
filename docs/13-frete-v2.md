@@ -601,7 +601,7 @@ Dependências:
 
 **Como a F2.5 roda sem segredo passar pelo Claude:**
 - O dono cria a conta sandbox no Melhor Envio e guarda o token fora do repositório.
-- O Claude escreve `infra/scripts/melhorenvio-probe.py`, que lê o token por variável de ambiente,
+- O Claude escreve `apps/api-commerce/scripts/melhorenvio_probe.py`, que lê o token por variável de ambiente,
   nunca o imprime, executa os seis testes e grava respostas saneadas (sem token, sem dados
   pessoais).
 - O Claude lê só essa saída.
@@ -719,16 +719,18 @@ pior em tempo e em volume. O motor roda em `asyncio.to_thread` na cotação.
 
 ## Fatos verificados do Melhor Envio (portão F2.5)
 
-> Vazio de propósito. Cada premissa da tabela da §13 entra aqui com data, fonte (link da doc oficial
-> ou saída saneada de `infra/scripts/melhorenvio-probe.py` no sandbox), exemplo de pedido/resposta
-> sem token nem dado pessoal, e a decisão que ela destrava. Sem este registro aprovado pelo dono,
-> não se escreve código de provedor (`melhorenvio.py`, `quoting.py`, despacho por volume).
+Conferência feita em **04/10/2026** na documentação oficial (referência da API em
+docs.melhorenvio.com.br e central de ajuda). O sandbox ainda não rodou: ele depende da conta e do
+token do dono e do script `apps/api-commerce/scripts/melhorenvio_probe.py`. **Nenhum código de
+provedor foi escrito.** Sem a aprovação do dono neste registro, a F3 não começa.
 
-| # | Premissa | Status | Data | Fonte | Decisão |
+| # | Premissa | O que a doc oficial diz | Fonte | Status | Decisão que destrava |
 |---|---|---|---|---|---|
-| 1 | Seguro por volume no modo `volumes` | a verificar | | | |
-| 2 | Correios/J&T/Loggi: 1 volume por item do `/cart` | a verificar | | | |
-| 3 | Limites, cubagem e medidas mínimas | a verificar | | | |
-| 4 | Campos do pedido e da resposta | a verificar | | | |
-| 5 | `delivery_time`/`delivery_range` em dias úteis | a verificar | | | |
-| 6 | Endpoint de lista de serviços | a verificar | | | |
+| 1 | Seguro por volume no modo `volumes` | O OpenAPI da cotação descreve `volumes[].insurance` (não `insurance_value`). A comunidade relata que `insurance_value` por volume é ignorado e que `options.insurance_value` vale só para o 1º volume; nenhum funcionário respondeu | [Referência da cotação](https://docs.melhorenvio.com.br/reference/calculo-de-fretes-por-produtos), [comunidade](https://docs.melhorenvio.com.br/discuss/67ae194c9c0e48006fc7cddb) | **diverge: sandbox decide** | Se `volumes[].insurance` funcionar, uma cotação multivolume basta para a Jadlog e a soma por volume fica só para os Correios; senão, cotação por volume com `options.insurance_value` |
+| 2 | Correios, J&T e Loggi: 1 volume por item do `/cart` | Confirmado: "Este formato utilizando múltiplos volumes não funciona para a transportadora Correios, J&T e Loggi, nem para o serviço .package Centralizado"; nos Correios (serviços 1, 2 e 17), *n* inserções de 1 volume. A central acrescenta a Total Express ("aceita somente envios de volume único") | [Compra de fretes](https://docs.melhorenvio.com.br/docs/compra-de-fretes), [central: formatos e tamanhos](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/31220431416852) | **confirmado na doc**; sandbox opcional | F7 compra uma etiqueta por volume para Correios, J&T, Loggi, .package Centralizado e Total Express (`multi_volume_max = 1`); multivolume só para quem a doc não restringe (Jadlog) |
+| 3 | Limites, cubagem e medidas mínimas | Correios (PAC/SEDEX): mín. **13 x 8 x 1 cm** (não 15x10x1 nem 16x11x2), máx. 100 cm por lado e 200 cm na soma, 30 kg. Fator de cubagem 6000; com os Correios pelo Melhor Envio, cubado até 5 kg é desconsiderado. **Novos:** lado acima de 70 cm e formato cilíndrico/esférico/disforme pagam "taxa de não mecanizáveis", que a cotação não mostra; o Melhor Envio não cota cilindro (só caixa com altura, largura e comprimento). Mini Envios: até 24 x 16 x 4 cm e 300 g. Jadlog: até 80 x 80 x 80 cm e 100 kg | [Central: formatos e tamanhos](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/31220431416852), [central: peso cúbico](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/31220711844116) | **confirmado na doc** | `scoring.CORREIOS` já usa 6000/5 kg/100/200/30 kg; falta penalizar lado acima de 70 cm (F3b, na calibração); tubo continua cotado como caixa (comprimento x diâmetro x diâmetro), e a tela avisa da taxa de não mecanizável; mínimo de 13 x 8 x 1 cm entra no envio, a confirmar no sandbox se a API arredonda ou recusa |
+| 4 | Campos do pedido e da resposta | O OpenAPI escreve os volumes como `width`, **`heigth`**, **`lenght`**, `weight`, `insurance` (grafia errada na própria especificação). O código atual manda `height`/`length` e o seguro em `options.insurance_value`. Resposta: `price`, `custom_price`, `delivery_time`, `delivery_range{min,max}`, `custom_delivery_time`, `custom_delivery_range`, `packages[]` (`price`, `discount`, `format`, `dimensions`, `weight`, `insurance_value`, `products`), `company{id,name,picture}`, `error`. `services` é texto separado por vírgula ("1,2,18") | [Referência da cotação](https://docs.melhorenvio.com.br/reference/calculo-de-fretes-por-produtos) | **diverge: sandbox decide** | O sandbox diz qual grafia a API aceita (ou se aceita as duas) antes de mexer em `melhorenvio.py`; usar `custom_delivery_range` para a faixa de prazo |
+| 5 | Prazo em dias úteis | A central: "Conte apenas dias úteis, de segunda a sexta-feira", a partir do 1º dia útil após a postagem. A referência da API não fala em dias úteis | [Central: data estimada](https://centraldeajuda.melhorenvio.com.br/hc/pt-br/articles/39933307558164) | **confirmado na central**; sandbox opcional (comparar com a calculadora) | Vitrine mostra "dias úteis"; `handling_days` passa a somar como dias úteis |
+| 6 | Endpoint de lista de serviços | Existe: `GET /api/v2/me/shipment/services` (sem token; `User-Agent` obrigatório), devolvendo `id`, `name`, `type`, `range`, `company`, `restrictions`, `requirements`, `optionals` | [Listar serviços](https://docs.melhorenvio.com.br/reference/listar-servicos) | **confirmado na doc** | A tela "Serviços oferecidos" (F4) lê desta lista; o plano B (última cotação) não é necessário |
+
+**Aprovação do dono:** pendente.
