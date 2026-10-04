@@ -78,7 +78,9 @@ class Sonda:
     def close(self) -> None:
         self._client.close()
 
-    def chama(self, teste: str, metodo: str, caminho: str, corpo: Any = None) -> Any:
+    def chama(
+        self, teste: str, metodo: str, caminho: str, corpo: Any = None, *, pessoal: bool = False
+    ) -> Any:
         try:
             resposta = self._client.request(metodo, caminho, json=corpo)
             status, texto = resposta.status_code, resposta.text
@@ -88,17 +90,47 @@ class Sonda:
             dados: Any = json.loads(texto)
         except ValueError:
             dados = texto[:2000]
+        # Carrinho leva nome, documento, endereço e contato: a saída grava sem eles.
         self.registro.append(
             {
                 "teste": teste,
                 "metodo": metodo,
                 "caminho": caminho,
-                "pedido": corpo,
+                "pedido": _sem_pessoais(corpo) if pessoal else corpo,
                 "status": status,
-                "resposta": dados,
+                "resposta": _sem_pessoais(dados) if pessoal else dados,
             }
         )
         return dados if 200 <= status < 300 else None
+
+
+#: Campos que identificam pessoa ou empresa: nunca vão para o arquivo de saída.
+_PESSOAIS = frozenset(
+    {
+        "from",
+        "to",
+        "name",
+        "document",
+        "company_document",
+        "state_register",
+        "email",
+        "phone",
+        "address",
+        "number",
+        "complement",
+        "district",
+        "postal_code",
+        "user",
+    }
+)
+
+
+def _sem_pessoais(dados: Any) -> Any:
+    if isinstance(dados, dict):
+        return {k: ("<omitido>" if k in _PESSOAIS else _sem_pessoais(v)) for k, v in dados.items()}
+    if isinstance(dados, list):
+        return [_sem_pessoais(v) for v in dados]
+    return dados
 
 
 def _volume(
@@ -242,6 +274,11 @@ def rodar(sonda: Sonda, partes: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _carrinho(sonda: Sonda, partes: dict[str, Any], servicos: list[Any]) -> list[dict[str, Any]]:
+    """Inserção no carrinho do sandbox (não compra nada; o que entrar é apagado em seguida).
+
+    Responde a F7: os Correios recusam vários volumes numa inserção? E na compra o seguro vai em
+    `volumes[].insurance` (como na cotação) ou em `options.insurance_value`?
+    """
     jadlog = next(
         (
             s.get("id")
@@ -252,37 +289,54 @@ def _carrinho(sonda: Sonda, partes: dict[str, Any], servicos: list[Any]) -> list
         ),
         None,
     )
+    caixa = {"height": 15, "width": 20, "length": 30, "weight": 1.0}
+    casos: list[tuple[str, Any, list[dict[str, Any]], float | None]] = [
+        ("pac-2-volumes", 1, [caixa, caixa], 100.0),
+        ("pac-1-volume-seguro-no-volume", 1, [caixa | {"insurance": 100.0}], None),
+        ("pac-1-volume-seguro-em-options", 1, [caixa], 100.0),
+    ]
+    if jadlog is not None:
+        casos += [
+            ("jadlog-2-volumes-seguro-em-options", jadlog, [caixa, caixa], 100.0),
+            (
+                "jadlog-2-volumes-seguro-no-volume",
+                jadlog,
+                [caixa | {"insurance": 50.0}, caixa | {"insurance": 50.0}],
+                None,
+            ),
+        ]
     linhas = []
-    for servico in [1, jadlog]:
-        if servico is None:
-            continue
+    for nome, servico, volumes, seguro_options in casos:
+        opcoes: dict[str, Any] = {"receipt": False, "own_hand": False, "non_commercial": True}
+        if seguro_options is not None:
+            opcoes["insurance_value"] = seguro_options
         corpo = {
             "service": servico,
             "from": partes["from"],
             "to": partes["to"],
             "products": [{"name": "Teste de sondagem", "quantity": 2, "unitary_value": 50.0}],
-            "volumes": [
-                {"height": 15, "width": 20, "length": 30, "weight": 1.0},
-                {"height": 15, "width": 20, "length": 30, "weight": 1.0},
-            ],
-            "options": {
-                "insurance_value": 100.0,
-                "receipt": False,
-                "own_hand": False,
-                "non_commercial": True,
-            },
+            "volumes": volumes,
+            "options": opcoes,
         }
-        dados = sonda.chama(f"2b-carrinho-{servico}", "POST", "/api/v2/me/cart", corpo)
+        dados = sonda.chama(f"2b-{nome}", "POST", "/api/v2/me/cart", corpo, pessoal=True)
+        resposta = sonda.registro[-1]["resposta"]
         linhas.append(
             {
+                "caso": nome,
                 "servico": servico,
                 "aceitou": dados is not None,
-                "resposta": sonda.registro[-1]["resposta"],
+                "status": sonda.registro[-1]["status"],
+                "preco": resposta.get("price") if isinstance(resposta, dict) else None,
+                "seguro": resposta.get("insurance_value") if isinstance(resposta, dict) else None,
+                "volumes": len(resposta.get("volumes") or [])
+                if isinstance(resposta, dict)
+                else None,
+                "erro": None if dados is not None else resposta,
             }
         )
         item = dados.get("id") if isinstance(dados, dict) else None
         if item:
-            sonda.chama(f"2b-limpa-{servico}", "DELETE", f"/api/v2/me/cart/{item}")
+            sonda.chama(f"2b-limpa-{nome}", "DELETE", f"/api/v2/me/cart/{item}", pessoal=True)
     return linhas
 
 
@@ -290,12 +344,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="probe-melhorenvio.json")
     parser.add_argument("--cart", help="JSON com {from, to} para testar a inserção no carrinho")
+    parser.add_argument(
+        "--only-cart", action="store_true", help="roda só os testes de carrinho (exige --cart)"
+    )
     args = parser.parse_args()
     partes = json.loads(Path(args.cart).read_text(encoding="utf-8")) if args.cart else None
+    if args.only_cart and partes is None:
+        sys.exit("--only-cart precisa de --cart <arquivo com from/to>.")
 
     sonda = Sonda(_token(), _user_agent())
     try:
-        resultado = rodar(sonda, partes)
+        if args.only_cart and partes is not None:
+            servicos = sonda.chama("6-servicos", "GET", "/api/v2/me/shipment/services") or []
+            resultado = {"2b_carrinho": _carrinho(sonda, partes, servicos)}
+        else:
+            resultado = rodar(sonda, partes)
     finally:
         sonda.close()
     saida = {

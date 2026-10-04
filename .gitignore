@@ -44,3 +44,5 @@ apps/web/e2e/playwright-report/
 
 # Saída da sondagem do sandbox do Melhor Envio (frete v2, portão F2.5)
 probe-melhorenvio*.json
+# Remetente e destinatário de teste do carrinho do sandbox: dados pessoais, nunca no git
+melhorenvio-partes*.json
