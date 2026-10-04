@@ -52,7 +52,11 @@ test.describe("vitrine pública (loja modelo)", () => {
     const product = items.find((item) => item["@type"] === "Product") as { offers?: { "@type"?: string } };
     expect(product.offers?.["@type"]).toBe("AggregateOffer");
 
-    await page.getByRole("link", { name: "algodão" }).first().click();
+    // The tags sit folded at the end of the page: open the fold before clicking one.
+    const tags = page.locator("details").filter({ has: page.locator("summary", { hasText: "Etiquetas" }) });
+    await expect(tags).not.toHaveAttribute("open");
+    await tags.locator("summary").click();
+    await tags.getByRole("link", { name: "algodão" }).click();
     await expect(page).toHaveURL(/\/loja\?tag=algodao$/);
     await expect(page.getByText("Camiseta MuhBianco")).toBeVisible();
     await expect(page.getByText("Brownie de chocolate")).toHaveCount(0);
