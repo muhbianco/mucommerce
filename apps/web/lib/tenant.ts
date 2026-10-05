@@ -44,6 +44,8 @@ export interface StorefrontContext {
   } & Record<string, unknown>;
   /** Meios aceitos e teto de parcelamento, para a vitrine anunciar antes do carrinho. */
   payments?: PublicPayments;
+  /** O que o checkout pede além do básico (a loja escolhe no painel). */
+  checkout?: { require_whatsapp?: boolean };
   chatwoot_url?: string | null;
 }
 

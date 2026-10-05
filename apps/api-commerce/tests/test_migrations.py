@@ -195,3 +195,51 @@ def test_backfill_copia_as_caixas_sem_mudar_o_frete(sqlite_url: str) -> None:
             dict(conn.execute(text("SELECT sku, packing_mode FROM products")).all()).values()
         ) == {"auto"}
     engine.dispose()
+
+
+def test_whatsapp_obrigatorio_so_na_sgpipas(sqlite_url: str) -> None:
+    """0039: liga `require_whatsapp` só na SGPipas, sem passar por cima de escolha já feita."""
+    import json as _json
+
+    from sqlalchemy import text
+
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "0038_address_recipient_document")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    lojas = {
+        "sgpipas": "01a00000-0000-7000-8000-0000000000a1",
+        "outra": "01a00000-0000-7000-8000-0000000000a2",
+    }
+    checkout = {"pix_ttl_minutes": 30, "max_open_orders": 3}
+    with engine.begin() as conn:
+        for n, (slug, tenant_id) in enumerate(lojas.items()):
+            _insert(conn, "tenants", id=tenant_id, slug=slug)
+            _insert(
+                conn,
+                "tenant_settings",
+                id=f"01a00000-0000-7000-8000-0000000000b{n}",
+                tenant_id=tenant_id,
+                key="checkout",
+                value=_json.dumps(checkout),
+            )
+    engine.dispose()
+
+    def ler(slug: str) -> dict[str, Any]:
+        engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+        with engine.connect() as conn:
+            valor = conn.execute(
+                text("SELECT value FROM tenant_settings WHERE tenant_id = :t AND key = 'checkout'"),
+                {"t": lojas[slug]},
+            ).scalar_one()
+        engine.dispose()
+        # O `_insert` grava o JSON já serializado numa coluna JSON (fica com duas camadas).
+        while isinstance(valor, str):
+            valor = _json.loads(valor)
+        return dict(valor)
+
+    command.upgrade(config, "0039_require_whatsapp_sgpipas")
+    assert ler("sgpipas") == checkout | {"require_whatsapp": True}
+    assert ler("outra") == checkout
+
+    command.downgrade(config, "0038_address_recipient_document")
+    assert ler("sgpipas") == checkout

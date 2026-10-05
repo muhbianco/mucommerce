@@ -37,4 +37,6 @@ class StorefrontContext(BaseModel):
     fulfillment: dict[str, Any]
     #: Meios aceitos e teto de parcelamento — a vitrine anuncia "em até 12x" antes do carrinho.
     payments: dict[str, Any] = {}
+    #: O que o checkout pede além do básico (hoje: se o WhatsApp do cliente é obrigatório).
+    checkout: dict[str, Any] = {}
     chatwoot_url: str | None = None

@@ -226,6 +226,7 @@ export interface CheckoutSettings {
   customer_cancel_until: "payment_confirmed" | "accepted";
   max_open_orders: number;
   refund_four_eyes_threshold_cents: number;
+  require_whatsapp?: boolean;
 }
 
 export interface TagRef {

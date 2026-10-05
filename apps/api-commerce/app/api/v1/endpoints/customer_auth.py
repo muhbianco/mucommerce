@@ -35,6 +35,7 @@ from app.customers.phone import PhoneVerificationService
 from app.customers.repository import CustomerSessionRepository
 from app.identity.models import Customer
 from app.models.base import utcnow
+from app.orders.contact import known_phone
 from app.schemas.common import StrictModel
 
 router = APIRouter(tags=["Clientes"])
@@ -65,6 +66,8 @@ class CustomerRead(BaseModel):
     name: str | None
     email_masked: str | None
     phone_verified: bool
+    #: O WhatsApp que o checkout usa se o campo ficar em branco (mascarado).
+    phone_masked: str | None = None
 
 
 class CompleteResponse(BaseModel):
@@ -219,7 +222,9 @@ async def my_session(session: DbSession, viewer: CurrentCustomer) -> SessionRead
     customer = await session.get(Customer, viewer.customer_id)
     if customer is None:
         raise NotFoundError("Cliente não encontrado.")
-    return SessionRead(customer=customer_read(customer), access_status=viewer.access_status)
+    lido = customer_read(customer)
+    lido.phone_masked = mask_phone(await known_phone(session, customer))
+    return SessionRead(customer=lido, access_status=viewer.access_status)
 
 
 @router.post(

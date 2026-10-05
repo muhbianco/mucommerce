@@ -60,6 +60,8 @@ test("checkout: revisa, aceita os termos quando houver e faz o pedido", async ({
   await expect(page).toHaveURL(`${STORE}/checkout`);
   await expect(page.getByText(/Retirada em Loja MuhBianco/)).toBeVisible();
   await expect(page.getByRole("complementary")).toContainText(/Total\s*R\$\s*79,00/);
+  // A loja do E2E deixa o WhatsApp opcional; preenchido, ele vai no pedido (o lojista fala com o cliente).
+  await page.getByLabel("WhatsApp (opcional)").fill("(11) 98765-4321");
   const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
   if (await accept.count()) await accept.check();
   await page.getByRole("button", { name: "Fazer pedido" }).click();

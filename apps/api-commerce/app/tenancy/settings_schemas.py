@@ -332,6 +332,9 @@ class CheckoutV1(_Setting):
     max_open_orders: Annotated[int, Field(ge=1, le=10)] = 3
     # Refunds above this need a second person to approve (four eyes).
     refund_four_eyes_threshold_cents: Annotated[int, Field(ge=0, le=100_000_000)] = 20_000
+    # O cliente deixa o WhatsApp no checkout (o lojista fala com ele sobre o pedido). Desligado,
+    # o campo continua lá, opcional.
+    require_whatsapp: bool = False
 
 
 class EmailV1(_Setting):

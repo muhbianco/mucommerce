@@ -466,6 +466,19 @@ export default async function Fulfillment({
                 <span className={styles.fieldHint}>Acima desse valor, outra pessoa da loja precisa aprovar a devolução.</span>
               </label>
               <label className={`${styles.check} ${styles.fieldWide}`}>
+                <input
+                  type="checkbox"
+                  name="require_whatsapp"
+                  defaultChecked={checkout.require_whatsapp ?? false}
+                />
+                <span className={local.checkText}>
+                  WhatsApp do cliente obrigatório no checkout
+                  <span className={styles.fieldHint}>
+                    Para você falar com o cliente sobre o pedido. Desligado, o campo continua lá, opcional.
+                  </span>
+                </span>
+              </label>
+              <label className={`${styles.check} ${styles.fieldWide}`}>
                 <input type="checkbox" name="auto_accept" defaultChecked={checkout.auto_accept ?? false} />
                 <span className={local.checkText}>
                   Aceitar pedidos pagos automaticamente

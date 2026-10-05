@@ -138,7 +138,26 @@ export default async function OrderPage({
   if (order.cancelled_at) situation.push({ label: "Cancelado em", value: when(order.cancelled_at) });
 
   const person: { label: string; value: ReactNode }[] = [{ label: "Nome", value: customer.name ?? "—" }];
-  if (customer.phone) person.push({ label: "Telefone", value: <a href={`tel:${customer.phone}`}>{customer.phone}</a> });
+  if (customer.phone) {
+    // Pedido novo guarda o número em E.164 (`5511999998888`); antigos podem ter texto livre.
+    const digitos = String(customer.phone).replace(/\D/g, "");
+    const exibido = /^55\d{10,11}$/.test(digitos)
+      ? `(${digitos.slice(2, 4)}) ${digitos.slice(4, -4)}-${digitos.slice(-4)}`
+      : customer.phone;
+    person.push({
+      label: "WhatsApp",
+      value: /^55\d{10,11}$/.test(digitos) ? (
+        <>
+          <a href={`https://wa.me/${digitos}`} target="_blank" rel="noopener noreferrer">
+            {exibido}
+          </a>{" "}
+          · <a href={`tel:+${digitos}`}>ligar</a>
+        </>
+      ) : (
+        <a href={`tel:${customer.phone}`}>{customer.phone}</a>
+      ),
+    });
+  }
   if (customer.email) person.push({ label: "E-mail", value: <a href={`mailto:${customer.email}`}>{customer.email}</a> });
 
   const receiving: { label: string; value: ReactNode }[] = [

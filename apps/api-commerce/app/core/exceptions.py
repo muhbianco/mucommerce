@@ -326,6 +326,16 @@ class RecipientDocumentInvalidError(ValidationError):
     message = "CPF ou CNPJ de quem recebe inválido. Confira os números."
 
 
+class WhatsappRequiredError(ValidationError):
+    error_code = "whatsapp_required"
+    message = "Informe seu WhatsApp: a loja usa para falar com você sobre o pedido."
+
+
+class WhatsappInvalidError(ValidationError):
+    error_code = "whatsapp_invalid"
+    message = "WhatsApp inválido. Use DDD e número, como (11) 99999-8888."
+
+
 class ConsentRequiredError(ValidationError):
     error_code = "consent_required"
     message = "Aceite os termos e a política de privacidade vigentes para finalizar."

@@ -47,6 +47,7 @@ from app.inventory.reservations import ReservationService
 from app.inventory.service import effective_policy
 from app.models.base import utcnow
 from app.orders.commands import CartSource, PlaceOrder
+from app.orders.contact import order_phone
 from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.orders.state_machine import (
     STAMP,
@@ -154,8 +155,11 @@ class OrderService:
             raise FulfillmentInvalidError(problems=["quote_expired"])
         consents = await self._consents(cmd, now)
 
-        number = await TenantRepository(self.session).next_sequence(ORDER_SEQUENCE)
         customer = await self.session.get(Customer, cmd.customer_id)
+        telefone = await order_phone(
+            self.session, customer, cmd.contact.phone, required=settings.require_whatsapp
+        )
+        number = await TenantRepository(self.session).next_sequence(ORDER_SEQUENCE)
         fq = quote.fulfillment
         assert fq is not None  # _check_quote
         fulfillment = dict(fq.snapshot)
@@ -191,7 +195,7 @@ class OrderService:
             customer_snapshot={
                 "name": cmd.contact.name,
                 "email": customer.email_normalized if customer else None,
-                "phone": cmd.contact.phone or (customer.phone_e164 if customer else None),
+                "phone": telefone,
                 "phone_verified": bool(customer and customer.phone_verified_at),
             },
             consents=consents or None,

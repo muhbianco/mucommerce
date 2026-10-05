@@ -14,6 +14,7 @@ from app.schemas.internal import StorefrontContext, StorefrontTenant
 from app.tenancy.context import TenantContext
 from app.tenancy.models import DomainPurpose
 from app.tenancy.repository import TenantRepository
+from app.tenancy.settings_schemas import checkout_settings
 
 
 async def _branding_and_seo(
@@ -66,6 +67,7 @@ async def build_storefront_context(
         seo=seo,
         fulfillment=public_fulfillment(tenant),
         payments=await load_public_payments(session, tenant),
+        checkout={"require_whatsapp": checkout_settings(tenant.settings).require_whatsapp},
         chatwoot_url=(
             settings.chatwoot_public_url if internal and tenant.feature("chatwoot") else None
         ),

@@ -103,6 +103,7 @@ export async function saveCheckout(form: FormData): Promise<void> {
           reservation_mode: "reserve_on_place",
           pix_ttl_minutes: int(form, "pix_ttl_minutes", 30),
           auto_accept: checked(form, "auto_accept"),
+          require_whatsapp: checked(form, "require_whatsapp"),
           customer_cancel_until: text(form, "customer_cancel_until") === "payment_confirmed" ? "payment_confirmed" : "accepted",
           max_open_orders: int(form, "max_open_orders", 3),
           refund_four_eyes_threshold_cents: money(form, "refund_threshold") ?? 0,

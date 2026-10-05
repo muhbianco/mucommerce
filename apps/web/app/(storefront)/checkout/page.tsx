@@ -36,7 +36,7 @@ interface Cart {
 }
 
 interface Session {
-  customer: { name: string | null };
+  customer: { name: string | null; phone_masked?: string | null };
 }
 
 interface Policies {
@@ -49,6 +49,8 @@ const ERRORS: Record<string, string> = {
   too_many_open_orders: "Você tem pedidos aguardando pagamento. Pague ou cancele antes de fazer outro.",
   validation_error: "Confira seu nome e telefone.",
   rate_limited: "Muitas tentativas seguidas. Aguarde um minuto.",
+  whatsapp_required: "Informe seu WhatsApp: a loja usa para falar com você sobre o pedido.",
+  whatsapp_invalid: "WhatsApp inválido. Use DDD e número, como (11) 99999-8888.",
   recipient_document_required: "Informe o CPF ou CNPJ de quem recebe: a transportadora exige para a etiqueta.",
   recipient_document_invalid: "CPF ou CNPJ de quem recebe inválido. Confira os números.",
 };
@@ -89,6 +91,10 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const porTransportadora = quote.fulfillment?.type === "shipping";
   const enderecoEscolhido = cart.options.addresses.find((a) => a.id === cart.fulfillment?.address_id);
   const pedeDocumento = porTransportadora && !enderecoEscolhido?.has_document;
+  // WhatsApp: a loja escolhe se é obrigatório. Quem já tem um conhecido (da conta ou do último
+  // pedido) pode deixar em branco — o servidor usa aquele.
+  const whatsappConhecido = session.customer.phone_masked ?? null;
+  const whatsappObrigatorio = Boolean(context.checkout?.require_whatsapp) && !whatsappConhecido;
 
   return (
     <StoreShell context={context}>
@@ -148,9 +154,22 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               <input name="name" required maxLength={120} defaultValue={session.customer.name ?? ""} autoComplete="name" />
             </label>
             <label className={styles.field}>
-              Telefone (opcional)
-              <input name="phone" inputMode="tel" maxLength={20} autoComplete="tel" />
-              <span className={styles.fieldHint}>Ajuda a loja a falar com você se algo mudar.</span>
+              {context.checkout?.require_whatsapp ? "WhatsApp" : "WhatsApp (opcional)"}
+              <input
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                maxLength={20}
+                autoComplete="tel"
+                placeholder={whatsappConhecido ?? "(11) 99999-8888"}
+                required={whatsappObrigatorio}
+                aria-describedby="whatsapp-hint"
+              />
+              <span className={styles.fieldHint} id="whatsapp-hint">
+                {whatsappConhecido
+                  ? `Em branco, a loja usa o seu WhatsApp de antes (${whatsappConhecido}).`
+                  : "A loja usa para falar com você sobre o pedido."}
+              </span>
             </label>
             {pedeDocumento ? (
               <label className={styles.field}>
