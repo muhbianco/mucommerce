@@ -3,9 +3,11 @@
 Regras que moram aqui (e em nenhum outro lugar):
 - no máximo `MAX_PACKAGES_PER_TENANT` embalagens por loja, contando as arquivadas;
 - nome único por loja, sem diferenciar maiúscula;
-- **exatamente uma padrão** quando existe alguma: a primeira nasce padrão; a padrão não arquiva
-  nem apaga; trocar a padrão tira a marca da antiga e põe na nova na mesma transação (o UNIQUE
-  sobre `default_marker` segura "no máximo uma" até contra corrida);
+- **uma padrão** enquanto houver outra ativa: a primeira nasce padrão; com outras ativas, a padrão
+  não arquiva nem apaga (troque a padrão antes); sendo a **única** ativa, ela arquiva (e perde a
+  marca) ou apaga — embalagem é opcional, e sem nenhuma o frete sai em caixa sob medida. Trocar a
+  padrão tira a marca da antiga e põe na nova na mesma transação (o UNIQUE sobre `default_marker`
+  segura "no máximo uma" até contra corrida);
 - medida de fora, quando informada, vem inteira e nunca menor que a de dentro; tubo tem largura =
   altura (o diâmetro); o peso máximo passa da caixa vazia;
 - apagar só embalagem que nenhuma regra de produto usa; usada, arquiva-se.
@@ -80,7 +82,10 @@ class PackageLimitError(ConflictError):
 
 class DefaultPackageError(ConflictError):
     error_code = "default_package"
-    message = "A embalagem padrão não pode ser arquivada nem apagada. Escolha outra padrão antes."
+    message = (
+        "Com outras embalagens ativas, a padrão não pode ser arquivada nem apagada. "
+        "Escolha outra padrão antes."
+    )
 
 
 class PackageInUseError(ConflictError):
@@ -193,7 +198,11 @@ class PackageService:
             await self._name_free(str(changes["name"]), exclude_id=package.id)
         _apply(package, changes)
         if package.is_default and not package.active:
-            raise DefaultPackageError()
+            if await self._other_active(package.id):
+                raise DefaultPackageError()
+            # A única ativa saindo: a loja fica sem embalagem (caixa sob medida); a próxima que
+            # ela criar nasce padrão.
+            package.default_marker = None
         _validate(package)
         if _snapshot(package) == before:
             return package
@@ -201,6 +210,15 @@ class PackageService:
         await self._flush()
         await self._audit("shipping_package.updated", package, before=before)
         return package
+
+    async def _other_active(self, package_id: str) -> bool:
+        """Há outra embalagem ativa além desta? (A padrão só sai quando é a única.)"""
+        outra = await self.session.scalar(
+            select(ShippingPackage.id)
+            .where(ShippingPackage.active.is_(True), ShippingPackage.id != package_id)
+            .limit(1)
+        )
+        return outra is not None
 
     async def make_default(self, package_id: str) -> ShippingPackage:
         package = await self.get(package_id)
@@ -228,7 +246,7 @@ class PackageService:
 
     async def delete(self, package_id: str) -> None:
         package = await self.get(package_id)
-        if package.is_default:
+        if package.is_default and await self._other_active(package.id):
             raise DefaultPackageError()
         usos = (await self.rules_count([package.id])).get(package.id, 0)
         if usos:

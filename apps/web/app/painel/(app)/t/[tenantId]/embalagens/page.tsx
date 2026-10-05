@@ -197,13 +197,33 @@ export default async function Packages({
       ) : (
         <>
           {padrao ? (
-            <Section title="Embalagem padrão" description="A que você mais usa; não pode ser arquivada.">
+            <Section
+              title="Embalagem padrão"
+              description={
+                outras.length
+                  ? "A que você mais usa. Para arquivar, torne outra padrão antes."
+                  : "É a única. Sem ela, os pedidos saem em caixa sob medida."
+              }
+            >
               <div className={styles.rows}>
                 {row(
                   padrao,
-                  <Link href={`${base}/embalagens/${padrao.id}`} className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
-                    Editar
-                  </Link>,
+                  <>
+                    <Link href={`${base}/embalagens/${padrao.id}`} className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
+                      Editar
+                    </Link>
+                    {/* Embalagem é opcional: a única pode sair (e a loja volta à caixa sob medida). */}
+                    {canWrite && !outras.length ? (
+                      <form action={setActive}>
+                        {shared}
+                        <input type="hidden" name="package_id" value={padrao.id} />
+                        <input type="hidden" name="active" value="0" />
+                        <button type="submit" className={styles.buttonSmall}>
+                          Arquivar
+                        </button>
+                      </form>
+                    ) : null}
+                  </>,
                 )}
               </div>
             </Section>

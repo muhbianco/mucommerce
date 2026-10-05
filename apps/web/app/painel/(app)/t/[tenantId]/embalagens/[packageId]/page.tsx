@@ -45,7 +45,7 @@ export default async function PackageDetail({
     if (error instanceof ApiError && error.status === 404) notFound();
     throw error;
   }
-  const [previa, usos] = await Promise.all([
+  const [previa, usos, todas] = await Promise.all([
     api<PackagePreview>(`${path}/packing-preview/package`, {
       json: {
         kind: pkg.kind,
@@ -60,8 +60,12 @@ export default async function PackageDetail({
       },
     }),
     api<PackageUsage[]>(`${path}/packages/${packageId}/products`),
+    api<ShippingPackage[]>(`${path}/packages`),
   ]);
   const canWrite = scopes.can("catalog:write");
+  // A padrão só sai quando é a única ativa (embalagem é opcional: sem ela, caixa sob medida).
+  const unica = pkg.is_default && !todas.some((p) => p.active && p.id !== pkg.id);
+  const podeArquivar = pkg.active && (!pkg.is_default || unica);
   const base = `/t/${context.tenant_id}`;
   const hidden = (
     <>
@@ -104,8 +108,17 @@ export default async function PackageDetail({
           </Section>
 
           {canWrite ? (
-            <Section title="Situação" description={pkg.is_default ? "A padrão não arquiva nem apaga." : undefined}>
-              {pkg.is_default ? (
+            <Section
+              title="Situação"
+              description={
+                pkg.is_default
+                  ? unica
+                    ? "É a única embalagem: sem ela, os pedidos saem em caixa sob medida."
+                    : "Com outras ativas, a padrão não arquiva nem apaga."
+                  : undefined
+              }
+            >
+              {pkg.is_default && !unica ? (
                 <p className={styles.hint}>
                   Para arquivar esta embalagem, torne outra embalagem padrão antes, na lista de Embalagens.
                 </p>
@@ -133,7 +146,7 @@ export default async function PackageDetail({
                   </form>
                 ) : null}
               </div>
-              {!pkg.is_default && pkg.active ? (
+              {podeArquivar ? (
                 <details>
                   <summary>Arquivar esta embalagem</summary>
                   {usos.length ? (

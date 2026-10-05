@@ -133,7 +133,8 @@ const ERRORS: Record<string, string> = {
   tipo_invalido: "Escolha o tipo da embalagem.",
   package_name_taken: "Já existe uma embalagem com esse nome.",
   package_limit: "A loja pode ter até 30 embalagens. Arquive ou apague uma antes.",
-  default_package: "A embalagem padrão não pode ser arquivada nem apagada. Torne outra padrão antes.",
+  default_package:
+    "Com outras embalagens ativas, a padrão não pode ser arquivada nem apagada. Torne outra padrão antes.",
   package_in_use: "Há produtos que usam esta embalagem. Arquive em vez de apagar.",
   "conflict.package_inactive": "Embalagem arquivada não pode ser a padrão. Reative antes.",
   "conflict.package_conflict": "A embalagem mudou ao mesmo tempo em outra tela. Recarregue e tente de novo.",

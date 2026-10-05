@@ -143,6 +143,35 @@ async def test_padrao_nao_arquiva_e_trocar_a_padrao_e_atomico(
     assert volta.status_code == 409
 
 
+async def test_a_unica_padrao_sai_e_a_loja_volta_a_caixa_sob_medida(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Embalagem é opcional: a padrão, sendo a única ativa, arquiva (e perde a marca) e apaga;
+    a próxima que a loja criar nasce padrão."""
+    tenant, owner = await loja(client, session_factory)
+    m = await nova(client, tenant, owner)
+
+    arquivar = await client.patch(
+        f"{pkgs(tenant)}/{m['id']}", json={"active": False}, headers=owner
+    )
+    assert arquivar.status_code == 200, arquivar.text
+    assert arquivar.json()["is_default"] is False
+    assert arquivar.json()["active"] is False
+
+    p = await nova(client, tenant, owner, name="Caixa P")
+    assert p["is_default"] is True, "a primeira ativa depois de ficar sem nenhuma nasce padrão"
+
+    sozinha = await nova(client, tenant, owner, name="Só ela")
+    assert sozinha["is_default"] is False
+    # Com outra ativa, a padrão volta a não sair; sendo a única de novo, sai até apagando.
+    assert (await client.delete(f"{pkgs(tenant)}/{p['id']}", headers=owner)).status_code == 409
+    assert (
+        await client.patch(f"{pkgs(tenant)}/{sozinha['id']}", json={"active": False}, headers=owner)
+    ).status_code == 200
+    apagar = await client.delete(f"{pkgs(tenant)}/{p['id']}", headers=owner)
+    assert apagar.status_code == 204, apagar.text
+
+
 async def test_apagar_so_o_que_nenhum_produto_usa(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
