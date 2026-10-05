@@ -116,6 +116,11 @@ export async function dispatchShipment(form: FormData): Promise<void> {
     if (text(form, "cost_check") === "1" && form.get("confirm_cost") !== "on") {
       throw new FormError("confirmar_custo");
     }
-    await api(`${path}/orders/${orderId}/shipment`, { method: "POST", json: {} });
+    // Pedido sem CPF/CNPJ de quem recebe (feito antes de o checkout pedir): quem despacha informa.
+    const documento = text(form, "recipient_document").slice(0, 20);
+    await api(`${path}/orders/${orderId}/shipment`, {
+      method: "POST",
+      json: documento ? { recipient_document: documento } : {},
+    });
   });
 }

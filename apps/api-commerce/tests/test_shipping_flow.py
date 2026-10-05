@@ -59,6 +59,8 @@ ENDERECO = {
     "district": "Centro",
     "city": "Rio de Janeiro",
     "state": "RJ",
+    # CPF de exemplo (dígitos válidos): a transportadora exige o documento de quem recebe.
+    "document": "123.456.789-09",
 }
 
 

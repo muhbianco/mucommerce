@@ -103,6 +103,8 @@ class AddressOption(BaseModel):
     label: str | None
     summary: str
     is_default: bool
+    #: Tem CPF/CNPJ de quem recebe (o checkout por transportadora pede quando não tem).
+    has_document: bool = False
 
 
 class FulfillmentOptions(BaseModel):

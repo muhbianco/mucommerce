@@ -26,6 +26,7 @@ para o operador achar o pedido do lado deles.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -442,8 +443,32 @@ class MelhorEnvioProvider:
                 detalhe or "recusado",
                 http_status=response.status_code,
                 definitive=400 <= response.status_code < 500 and response.status_code != 429,
+                reason=refusal_reason(detalhe),
             )
         return response.json() if response.content else {}
+
+
+def refusal_reason(body: str) -> str | None:
+    """A frase da recusa: `{"error": "..."}` ou `{"message": "...", "errors": {campo: [...]}}`."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    partes: list[str] = []
+    for chave in ("error", "message"):
+        valor = data.get(chave)
+        if isinstance(valor, str) and valor.strip():
+            partes.append(valor.strip())
+            break
+    erros = data.get("errors")
+    if isinstance(erros, dict):
+        for mensagens in erros.values():
+            lista = mensagens if isinstance(mensagens, list) else [mensagens]
+            partes.extend(str(m).strip() for m in lista if str(m).strip())
+    texto = " ".join(dict.fromkeys(partes))  # sem repetir a mesma frase
+    return texto[:200] or None
 
 
 def _MARCOS(

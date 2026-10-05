@@ -101,6 +101,10 @@ export default async function OrderPage({
         () => null,
       )
     : null;
+  // Pedido feito antes de o checkout pedir o CPF/CNPJ de quem recebe: o formulário pede aqui (a
+  // leitura do pedido só traz o número mascarado, e só quando existe).
+  const semDocumento =
+    porTransportadora && !(order.fulfillment?.address as { document_masked?: string } | undefined)?.document_masked;
   const plano = porTransportadora ? frozenPlanOf(order.fulfillment) : null;
   const volumes = shipment?.parcels ?? [];
   // Uma etiqueta por volume (Correios): cada volume tem a sua. Multivolume tem uma só, no topo.
@@ -159,6 +163,10 @@ export default async function OrderPage({
       receiving.push({
         label: "Endereço",
         value: `${destino.street}, ${destino.number ?? "s/n"}${destino.complement ? ` (${destino.complement})` : ""} — ${destino.district ?? ""}, ${destino.city ?? ""}/${destino.state ?? ""} · CEP ${cep}`,
+      });
+      receiving.push({
+        label: "CPF/CNPJ de quem recebe",
+        value: destino.document_masked ?? "Não informado (pedido para despachar)",
       });
     }
   }
@@ -496,6 +504,23 @@ export default async function OrderPage({
                 <form action={dispatchShipment} className={local.actions}>
                   <input type="hidden" name="tenant_id" value={tenantId} />
                   <input type="hidden" name="order_id" value={orderId} />
+                  {semDocumento ? (
+                    <label className={styles.field}>
+                      CPF ou CNPJ de quem recebe
+                      <input
+                        name="recipient_document"
+                        required
+                        inputMode="numeric"
+                        maxLength={18}
+                        placeholder="000.000.000-00"
+                        aria-describedby="recipient-document-hint"
+                      />
+                      <span className={styles.hint} id="recipient-document-hint">
+                        A transportadora exige para emitir a etiqueta. Este pedido foi feito sem ele: peça ao
+                        cliente. Fica gravado no pedido.
+                      </span>
+                    </label>
+                  ) : null}
                   {previa?.needs_confirmation ? (
                     <>
                       <input type="hidden" name="cost_check" value="1" />

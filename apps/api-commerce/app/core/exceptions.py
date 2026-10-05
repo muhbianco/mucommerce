@@ -154,6 +154,17 @@ class ShippingUnavailableError(IntegrationUnavailableError):
     message = "A transportadora não respondeu agora. Nada foi comprado; tente de novo."
 
 
+class ShippingRefusedError(DomainError):
+    """A transportadora recusou a etiqueta por um motivo que repetir não muda.
+
+    O motivo dela fica em `order_shipments.last_error` (o painel mostra no quadro do envio).
+    """
+
+    status_code = 422
+    error_code = "shipping_refused"
+    message = "A transportadora recusou a etiqueta. Nada foi comprado."
+
+
 class ShippingBalanceError(DomainError):
     """Carteira do frete sem saldo: operação da loja, não defeito do pedido."""
 
@@ -301,6 +312,18 @@ class CartProblemsError(ConflictError):
 class FulfillmentInvalidError(ConflictError):
     error_code = "fulfillment_invalid"
     message = "Escolha de retirada ou entrega inválida para este pedido."
+
+
+class RecipientDocumentRequiredError(ValidationError):
+    """Envio por transportadora sem CPF/CNPJ de quem recebe: a etiqueta seria recusada."""
+
+    error_code = "recipient_document_required"
+    message = "Informe o CPF ou CNPJ de quem recebe: a transportadora exige para a etiqueta."
+
+
+class RecipientDocumentInvalidError(ValidationError):
+    error_code = "recipient_document_invalid"
+    message = "CPF ou CNPJ de quem recebe inválido. Confira os números."
 
 
 class ConsentRequiredError(ValidationError):

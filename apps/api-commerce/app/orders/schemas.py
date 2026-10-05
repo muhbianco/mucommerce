@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
+from app.core.br_document import mask_document
 from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.pricing.quote import MILLI
 from app.schemas.common import StrictModel
@@ -33,6 +34,9 @@ class PlaceOrderIn(StrictModel):
     contact: ContactIn
     notes: Annotated[str, Field(max_length=500)] | None = None
     consent: ConsentIn = ConsentIn()
+    #: CPF/CNPJ de quem recebe, quando o endereço escolhido ainda não tem (envio por
+    #: transportadora). Fica gravado no endereço para a próxima compra.
+    recipient_document: Annotated[str, Field(max_length=20)] | None = None
 
 
 class OrderModifierRead(BaseModel):
@@ -89,6 +93,16 @@ class OrderRead(BaseModel):
 _STORE_ONLY_FULFILLMENT = frozenset({"parcel_plan"})
 
 
+def _masked_address(fulfillment: dict[str, Any] | None) -> dict[str, Any] | None:
+    """O CPF/CNPJ de quem recebe só serve à etiqueta: nenhuma leitura devolve o número."""
+    address = (fulfillment or {}).get("address")
+    if not isinstance(address, dict) or not address.get("document"):
+        return fulfillment
+    masked = {k: v for k, v in address.items() if k != "document"}
+    masked["document_masked"] = mask_document(str(address["document"]))
+    return {**(fulfillment or {}), "address": masked}
+
+
 def order_read(
     order: Order,
     items: list[OrderItem],
@@ -100,6 +114,7 @@ def order_read(
     fulfillment = order.fulfillment
     if fulfillment and not for_store:
         fulfillment = {k: v for k, v in fulfillment.items() if k not in _STORE_ONLY_FULFILLMENT}
+    fulfillment = _masked_address(fulfillment)
     return OrderRead(
         id=order.id,
         number=order.number,

@@ -38,3 +38,5 @@ class PlaceOrder:
     channel_refs: dict[str, Any] | None = None
     ip: str | None = None
     user_agent: str | None = None
+    # CPF/CNPJ de quem recebe, digitado no checkout quando o endereço ainda não tem.
+    recipient_document: str | None = None

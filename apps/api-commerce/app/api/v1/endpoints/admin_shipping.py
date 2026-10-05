@@ -163,6 +163,15 @@ class ShipmentPreviewRead(BaseModel):
     #: Subiu mais de 10 %: a tela pede confirmação antes de comprar.
     needs_confirmation: bool = False
     problem: str | None = None
+    #: Falta o CPF/CNPJ de quem recebe: a tela pede no formulário de despacho.
+    recipient_document_missing: bool = False
+
+
+class DispatchIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    #: CPF/CNPJ de quem recebe, quando o pedido não tem (fica gravado no pedido).
+    recipient_document: Annotated[str, Field(max_length=20)] | None = None
 
 
 class ShipmentRead(BaseModel):
@@ -633,6 +642,7 @@ async def preview_shipment(
         increase_percent=previa.increase_percent,
         needs_confirmation=previa.needs_confirmation,
         problem=previa.problem,
+        recipient_document_missing=previa.recipient_document_missing,
     )
 
 
@@ -648,12 +658,17 @@ async def dispatch(
     user: CurrentAdmin,
     tenant: Dispatcher,
     order_id: OrderId,
+    body: DispatchIn | None = None,
 ) -> Any:
     pedido = await session.get(Order, order_id)
     if pedido is None:
         raise NotFoundError("Pedido não encontrado.")
     service = ShipmentService(session, tenant, admin_actor(request, user), utcnow())
-    remessa = await service.dispatch(pedido, scopes=await _scopes(session, user, tenant))
+    remessa = await service.dispatch(
+        pedido,
+        scopes=await _scopes(session, user, tenant),
+        recipient_document=body.recipient_document if body else None,
+    )
     return await _shipment_read(session, remessa)
 
 

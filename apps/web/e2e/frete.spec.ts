@@ -103,6 +103,30 @@ test("o preço da estimativa é o mesmo do carrinho com o endereço", async ({ p
   await esvaziar(page);
 });
 
+test("fechar por transportadora pede o CPF ou CNPJ de quem recebe", async ({ page }) => {
+  // O Melhor Envio recusa a etiqueta sem o documento do destinatário (pedido #9 da loja de teste).
+  await entrar(page, BIA, "/carrinho");
+  await esvaziar(page);
+
+  await page.goto(CAMISETA);
+  await page.getByRole("radio", { name: "P" }).check();
+  await page.getByRole("button", { name: "Comprar", exact: true }).click();
+  await expect(page).toHaveURL(/\/carrinho/);
+  await page.getByRole("radio", { name: /trabalho/ }).check();
+  await page.getByRole("button", { name: "Calcular frete" }).click();
+  await page.locator("label", { hasText: "Fake Econômico" }).click();
+  await page.getByRole("button", { name: "Usar este frete" }).click();
+  await page.getByRole("link", { name: "Finalizar compra" }).click();
+  await expect(page).toHaveURL(/\/checkout/);
+
+  const documento = page.getByLabel("CPF ou CNPJ de quem recebe");
+  await expect(documento).toBeVisible();
+  await expect(documento).toHaveAttribute("required", "");
+  await expect(page.getByText(/A transportadora exige para emitir a etiqueta/)).toBeVisible();
+
+  await esvaziar(page);
+});
+
 test("no carrinho, quem ainda não tem endereço estima pelo CEP", async ({ page }) => {
   await entrar(page, CAIO, "/loja/produto/camiseta-muhbianco");
   await page.getByRole("radio", { name: "P" }).check();

@@ -20,9 +20,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import PHYSICAL_KINDS
+from app.core.br_document import normalize_document
 from app.core.exceptions import (
     ShipmentInProgressError,
     ShippingBalanceError,
+    ShippingRefusedError,
     ShippingUnavailableError,
     ValidationError,
 )
@@ -91,6 +93,8 @@ class ShipmentPreview:
     #: Quanto o preço de hoje, com o acréscimo da loja, passa do cotado no checkout (%).
     increase_percent: int | None = None
     problem: str | None = None
+    #: O pedido não tem CPF/CNPJ de quem recebe: a tela pede antes de comprar.
+    recipient_document_missing: bool = False
 
     @property
     def needs_confirmation(self) -> bool:
@@ -114,7 +118,13 @@ class ShipmentService:
         stmt = select(OrderShipment).where(OrderShipment.order_id == order_id)
         return (await self.session.execute(stmt)).scalars().first()
 
-    async def dispatch(self, order: Order, *, scopes: frozenset[str]) -> OrderShipment:
+    async def dispatch(
+        self,
+        order: Order,
+        *,
+        scopes: frozenset[str],
+        recipient_document: str | None = None,
+    ) -> OrderShipment:
         """Compra a etiqueta e leva o pedido para `shipped`. Idempotente por pedido."""
         cfg = fulfillment_settings(self.tenant.settings).shipping
         # Primeiro a remessa, depois as regras: pedido já despachado responde o que existe em
@@ -123,6 +133,7 @@ class ShipmentService:
         if pronta is not None and pronta.status in _DONE:
             return pronta
         self._check(order, cfg)
+        self._recipient_document(order, recipient_document)
         remessa = await self._row(order, cfg)
 
         provider = registry.get_provider(cfg.provider)
@@ -138,11 +149,11 @@ class ShipmentService:
         try:
             resultado = await provider.ship(credenciais, pedido)
         except InsufficientBalanceError as exc:
-            await self._fail(remessa, str(exc))
+            await self._fail(remessa, str(exc), keep=True)
             raise ShippingBalanceError from exc
         except ShippingProviderError as exc:
-            await self._fail(remessa, str(exc))
-            raise ShippingUnavailableError from exc
+            await self._fail(remessa, _motivo(exc), keep=True)
+            raise _dispatch_error(exc) from exc
 
         remessa.status = ShipmentStatus.PURCHASED
         remessa.provider_shipment_id = resultado.provider_shipment_id
@@ -193,19 +204,31 @@ class ShipmentService:
         destino = str((escolhido.get("address") or {}).get("postal_code") or "")
         if not volumes or not destino:
             return ShipmentPreview(etiquetas, cobrado, problem="no_parcels")
+        sem_documento = not (escolhido.get("address") or {}).get("document")
         opcoes, problema = await ShippingQuoteService(
             self.session, self.tenant, self.now
         ).quote_volumes(volumes, destination_postal_code=destino)
         servico = str(escolhido.get("service_code") or "")
         achada = next((o for o in opcoes or () if o.service_code == servico and o.usable), None)
         if achada is None:
-            return ShipmentPreview(etiquetas, cobrado, problem=problema or "service_unavailable")
+            return ShipmentPreview(
+                etiquetas,
+                cobrado,
+                problem=problema or "service_unavailable",
+                recipient_document_missing=sem_documento,
+            )
         cotado = int(escolhido.get("price_cents") or 0)
         aumento = None
         if cotado > 0:
             hoje = customer_price(achada.price_cents, material, cfg)
             aumento = (hoje - cotado) * 100 // cotado
-        return ShipmentPreview(etiquetas, cobrado, achada.price_cents, aumento)
+        return ShipmentPreview(
+            etiquetas,
+            cobrado,
+            achada.price_cents,
+            aumento,
+            recipient_document_missing=sem_documento,
+        )
 
     async def _dispatch_per_volume(
         self,
@@ -245,8 +268,8 @@ class ShipmentService:
                 await self._fail_kept(remessa, volumes, f"volume {n} de {total}: {exc}")
                 raise ShippingBalanceError from exc
             except ShippingProviderError as exc:
-                await self._fail_kept(remessa, volumes, f"volume {n} de {total}: {exc}")
-                raise ShippingUnavailableError from exc
+                await self._fail_kept(remessa, volumes, f"volume {n} de {total}: {_motivo(exc)}")
+                raise _dispatch_error(exc) from exc
             volumes[n - 1] = volume | {
                 "provider_shipment_id": resultado.provider_shipment_id,
                 "tracking_code": resultado.tracking_code or None,
@@ -290,6 +313,34 @@ class ShipmentService:
         await self.session.commit()
 
     # ------------------------------------------------------------------ interno
+
+    def _recipient_document(self, order: Order, typed: str | None) -> None:
+        """A transportadora recusa a etiqueta sem CPF/CNPJ de quem recebe. Pedido feito antes de
+        o checkout pedir (ou por outro caminho) recebe o número aqui, digitado por quem despacha.
+        """
+        endereco = dict((order.fulfillment or {}).get("address") or {})
+        if typed and typed.strip():
+            try:
+                documento = normalize_document(typed)
+            except ValueError as exc:
+                raise ValidationError(
+                    "CPF ou CNPJ de quem recebe inválido.", reason="recipient_document_invalid"
+                ) from exc
+            if endereco.get("document") != documento:
+                order.fulfillment = {
+                    **(order.fulfillment or {}),
+                    "address": {**endereco, "document": documento},
+                }
+                logger.info(
+                    "Documento de quem recebe informado no despacho",
+                    extra={"order_id": order.id, "actor": self.actor.id},
+                )
+            return
+        if not endereco.get("document"):
+            raise ValidationError(
+                "Informe o CPF ou CNPJ de quem recebe: a transportadora exige para a etiqueta.",
+                reason="recipient_document",
+            )
 
     def _check(self, order: Order, cfg: ShippingSettings) -> None:
         if order.fulfillment_type != "shipping":
@@ -443,10 +494,14 @@ class ShipmentService:
         )
         return list((await self.session.execute(stmt)).scalars())
 
-    async def _fail(self, remessa: OrderShipment, motivo: str) -> None:
+    async def _fail(self, remessa: OrderShipment, motivo: str, *, keep: bool = False) -> None:
+        """`keep`: grava (commit) antes de o erro desfazer a transação do pedido — sem isso a
+        remessa e o motivo sumiam, e o painel não tinha o que mostrar."""
         remessa.status = ShipmentStatus.FAILED
         remessa.last_error = motivo[:300]
         await self.session.flush()
+        if keep:
+            await self.session.commit()
 
     async def _mark_shipped(self, order: Order, *, scopes: frozenset[str]) -> None:
         if order.status == OrderStatus.SHIPPED:
@@ -457,6 +512,20 @@ class ShipmentService:
             reason="etiqueta emitida",
             scopes=scopes | {Scope.ORDERS_TRANSITION},
         )
+
+
+def _motivo(exc: ShippingProviderError) -> str:
+    """O que fica em `last_error` e o painel mostra: a frase do provedor, quando ela existe."""
+    if exc.definitive and exc.reason:
+        return f"A transportadora recusou: {exc.reason}"
+    return str(exc)
+
+
+def _dispatch_error(exc: ShippingProviderError) -> Exception:
+    """Recusa definitiva (repetir igual não adianta) não é "não respondeu, tente de novo"."""
+    if exc.definitive:
+        return ShippingRefusedError(_motivo(exc))
+    return ShippingUnavailableError()
 
 
 def _sender(origin: ShippingOrigin) -> ShippingParty:
@@ -489,6 +558,7 @@ def _recipient(order: Order) -> ShippingParty:
         city=str(endereco.get("city") or ""),
         state=str(endereco.get("state") or ""),
         complement=endereco.get("complement"),
+        document=str(endereco.get("document") or "") or None,
         phone=str(endereco.get("phone") or contato.get("phone") or "") or None,
         email=str(contato.get("email") or "") or None,
     )

@@ -22,6 +22,7 @@ from app.audit.writer import audit
 from app.cart.models import Cart, CartItem, CartStatus
 from app.cart.service import CartService
 from app.catalog.models import Event, EventStatus, StockPolicy
+from app.core.br_document import normalize_document
 from app.core.exceptions import (
     CartAlreadyConvertedError,
     CartChangedError,
@@ -30,11 +31,14 @@ from app.core.exceptions import (
     ConsentRequiredError,
     FulfillmentInvalidError,
     NotFoundError,
+    RecipientDocumentInvalidError,
+    RecipientDocumentRequiredError,
     StaleOrderError,
     TooManyOpenOrdersError,
 )
 from app.core.metrics import ORDERS_PLACED
 from app.coupons.service import CouponService
+from app.customers.address_models import CustomerAddress
 from app.customers.addresses import address_snapshot
 from app.customers.legal import Acceptance, LegalService
 from app.identity.models import Customer
@@ -85,6 +89,20 @@ class OrderService:
         self.actor = actor
 
     # ------------------------------------------------------------------ place
+    @staticmethod
+    def _recipient_document(address: CustomerAddress, typed: str | None) -> None:
+        """Transportadora exige CPF/CNPJ de quem recebe (o Melhor Envio recusa a etiqueta sem).
+
+        O digitado no checkout vale e fica no endereço — a próxima compra não pede de novo.
+        """
+        if typed and typed.strip():
+            try:
+                address.document = normalize_document(typed)
+            except ValueError as exc:
+                raise RecipientDocumentInvalidError() from exc
+        if not address.document:
+            raise RecipientDocumentRequiredError()
+
     async def place(self, cmd: PlaceOrder) -> PlacedOrder:
         now = utcnow()
         ihash = idempotency_hash(cmd.origin, cmd.customer_id, cmd.idempotency_key)
@@ -143,6 +161,8 @@ class OrderService:
         fulfillment = dict(fq.snapshot)
         # The coupon was locked before the balances, so what the quote used is what is charged.
         applied = quote.coupon if quote.coupon and quote.coupon.discount_cents else None
+        if address is not None and fq.type == "shipping":
+            self._recipient_document(address, cmd.recipient_document)
         if address is not None and fq.type in ("delivery", "shipping"):
             fulfillment["address"] = address_snapshot(address)
         if plano is not None and fq.type == "shipping":

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.br_document import mask_document, normalize_document
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.phone import normalize_br_phone
 from app.customers.address_models import MAX_ADDRESSES, CustomerAddress
@@ -74,6 +75,13 @@ class _AddressFields(StrictModel):
             raise ValueError("UF inválida")
         return value.upper()
 
+    @field_validator("document", check_fields=False)
+    @classmethod
+    def _document(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        return normalize_document(value)
+
     @field_validator("phone", check_fields=False)
     @classmethod
     def _phone(cls, value: str | None) -> str | None:
@@ -97,6 +105,8 @@ class AddressCreate(_AddressFields):
     city: Short
     state: str
     reference: Annotated[str, Field(max_length=160)] | None = None
+    #: CPF ou CNPJ de quem recebe; exigido no checkout quando o envio é por transportadora.
+    document: Annotated[str, Field(max_length=20)] | None = None
     is_default: bool = False
 
 
@@ -114,6 +124,7 @@ class AddressUpdate(_AddressFields):
     city: Short | None = None
     state: str | None = None
     reference: Annotated[str, Field(max_length=160)] | None = None
+    document: Annotated[str, Field(max_length=20)] | None = None
     is_default: bool | None = None
 
 
@@ -131,6 +142,8 @@ class AddressRead(BaseModel):
     state: str
     reference: str | None
     is_default: bool
+    #: Mascarado: a tela mostra que existe, nunca o número inteiro.
+    document_masked: str | None = None
 
 
 _REQUIRED = frozenset(
@@ -153,12 +166,21 @@ def address_read(address: CustomerAddress) -> AddressRead:
         state=address.state,
         reference=address.reference,
         is_default=address.is_default,
+        document_masked=mask_document(address.document),
     )
 
 
 def address_snapshot(address: CustomerAddress) -> dict[str, Any]:
-    """What an order keeps of the address (the customer may edit or delete it later)."""
-    return address_read(address).model_dump(exclude={"id", "is_default", "label"})
+    """What an order keeps of the address (the customer may edit or delete it later).
+
+    O documento vai inteiro: é o pedido que o despacho lê. Toda leitura do pedido o mascara.
+    """
+    snapshot = address_read(address).model_dump(
+        exclude={"id", "is_default", "label", "document_masked"}
+    )
+    if address.document:
+        snapshot["document"] = address.document
+    return snapshot
 
 
 class AddressService:

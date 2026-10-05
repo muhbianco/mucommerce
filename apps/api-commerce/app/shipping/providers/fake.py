@@ -117,6 +117,14 @@ class FakeShippingProvider:
     ) -> ShipmentResult:
         SHIP_CALLS.append(request.reference)
         SHIP_REQUESTS.append(request)
+        if not request.recipient.document:
+            # O que o Melhor Envio responde no /me/cart (verificado em produção, 05/10/2026).
+            raise ShippingProviderError(
+                '{"error":"CNPJ ou CPF do destinatário é obrigatório"}',
+                http_status=422,
+                definitive=True,
+                reason="CNPJ ou CPF do destinatário é obrigatório",
+            )
         if any(request.reference.endswith(s) for s in FAIL_SUFFIXES):
             raise ShippingProviderError("volume recusado no teste", http_status=422)
         existente = _BY_REFERENCE.get(request.reference)

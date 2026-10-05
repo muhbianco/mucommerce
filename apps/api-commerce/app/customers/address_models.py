@@ -32,4 +32,6 @@ class CustomerAddress(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
     city: Mapped[str] = mapped_column(String(80), nullable=False)
     state: Mapped[str] = mapped_column(String(2), nullable=False)
     reference: Mapped[str | None] = mapped_column(String(160))
+    # CPF ou CNPJ de quem recebe (só dígitos). A transportadora recusa a etiqueta sem ele.
+    document: Mapped[str | None] = mapped_column(String(14))
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

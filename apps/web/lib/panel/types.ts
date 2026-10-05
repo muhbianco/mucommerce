@@ -605,6 +605,7 @@ export interface ShipmentPreview {
   increase_percent: number | null;
   needs_confirmation: boolean;
   problem: string | null;
+  recipient_document_missing?: boolean;
 }
 
 export const SHIPMENT_PREVIEW_PROBLEM: Record<string, string> = {

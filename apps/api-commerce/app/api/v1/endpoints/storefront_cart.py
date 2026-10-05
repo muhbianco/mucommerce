@@ -141,6 +141,7 @@ def cart_read(view: CartView, tenant: TenantContext) -> CartRead:
                     label=a.label,
                     summary=f"{a.street}, {a.number} — {a.district}, {a.city}/{a.state}",
                     is_default=a.is_default,
+                    has_document=bool(a.document),
                 )
                 for a in view.addresses
             ],

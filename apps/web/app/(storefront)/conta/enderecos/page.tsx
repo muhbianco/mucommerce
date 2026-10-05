@@ -30,6 +30,7 @@ interface Address {
   state: string;
   reference: string | null;
   is_default: boolean;
+  document_masked: string | null;
 }
 
 const OK: Record<string, string> = {
@@ -129,6 +130,12 @@ export default async function AddressesPage({
                     <br />
                     Recebe: {address.recipient_name}
                     {address.phone ? ` · ${address.phone}` : ""}
+                  </>
+                ) : null}
+                {address.document_masked ? (
+                  <>
+                    <br />
+                    Documento: {address.document_masked}
                   </>
                 ) : null}
               </p>
@@ -249,6 +256,22 @@ export default async function AddressesPage({
               />
             </label>
           </div>
+
+          <label className={styles.field}>
+            CPF ou CNPJ de quem recebe
+            <input
+              name="document"
+              inputMode="numeric"
+              maxLength={18}
+              placeholder={editing?.document_masked ?? "000.000.000-00"}
+              aria-describedby="document-hint"
+            />
+            <span className={styles.fieldHint} id="document-hint">
+              {editing?.document_masked
+                ? "Já informado. Preencha só para trocar."
+                : "Exigido para envio por transportadora (etiqueta e declaração de conteúdo)."}
+            </span>
+          </label>
 
           <label className={styles.field}>
             Ponto de referência

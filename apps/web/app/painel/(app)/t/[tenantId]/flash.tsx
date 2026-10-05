@@ -82,6 +82,11 @@ const ERRORS: Record<string, string> = {
   shipping_unavailable:
     "A transportadora não respondeu ou recusou. Tente de novo: etiqueta já comprada não é comprada outra vez.",
   confirmar_custo: "O frete subiu desde a compra. Marque \"Comprar mesmo com o frete mais caro\" para despachar.",
+  shipping_refused:
+    "A transportadora recusou a etiqueta e nada foi comprado. O motivo está no quadro do envio, abaixo.",
+  "validation_error.recipient_document":
+    "Informe o CPF ou CNPJ de quem recebe: a transportadora exige para a etiqueta.",
+  "validation_error.recipient_document_invalid": "CPF ou CNPJ de quem recebe inválido. Confira os números.",
   shipping_insufficient_balance:
     "Sem saldo na carteira da transportadora. Recarregue e despache de novo.",
   shipment_in_progress: "O despacho deste pedido já está em andamento.",

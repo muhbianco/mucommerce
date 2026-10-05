@@ -46,6 +46,10 @@ export async function saveAddress(form: FormData): Promise<void> {
     reference: field(form, "reference") || null,
     is_default: form.get("is_default") === "on",
   };
+  // Documento só vai quando digitado: na edição a tela não mostra o número inteiro, e campo vazio
+  // não pode apagar o que já está salvo.
+  const document = field(form, "document").slice(0, 20);
+  const payload = document ? { ...body, document } : body;
   // Quem veio do carrinho cadastrar um endereço volta para o carrinho, não para a lista: o
   // objetivo dela era comprar, e obrigá-la a achar o caminho de volta é onde a venda se perde.
   const next = field(form, "next");
@@ -54,8 +58,8 @@ export async function saveAddress(form: FormData): Promise<void> {
     addressId ? "salvo" : "criado",
     () =>
       addressId
-        ? customerApi(`/me/addresses/${addressId}`, { method: "PATCH", json: body })
-        : customerApi("/me/addresses", { json: body }),
+        ? customerApi(`/me/addresses/${addressId}`, { method: "PATCH", json: payload })
+        : customerApi("/me/addresses", { json: payload }),
     back,
   );
 }

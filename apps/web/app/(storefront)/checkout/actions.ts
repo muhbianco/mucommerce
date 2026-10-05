@@ -47,6 +47,7 @@ export async function placeOrder(form: FormData): Promise<void> {
         contact: { name: field(form, "name").slice(0, 120), phone: field(form, "phone").slice(0, 20) || null },
         notes: field(form, "notes").slice(0, 500) || null,
         consent: { terms_version: terms, privacy_version: privacy },
+        recipient_document: field(form, "recipient_document").slice(0, 20) || null,
       },
       headers: { "Idempotency-Key": key },
       timeoutMs: 15000,

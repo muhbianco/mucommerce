@@ -44,11 +44,14 @@ class ShippingProviderError(Exception):
         http_status: int | None = None,
         code: str | None = None,
         definitive: bool = False,
+        reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.http_status = http_status
         self.code = code
         self.definitive = definitive
+        #: O motivo como o provedor escreveu (frase para o lojista, sem o JSON em volta).
+        self.reason = reason
 
 
 class InsufficientBalanceError(ShippingProviderError):

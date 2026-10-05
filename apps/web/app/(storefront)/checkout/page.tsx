@@ -31,6 +31,8 @@ interface Cart {
     fulfillment: { type: string; snapshot: Record<string, unknown> } | null;
     can_checkout: boolean;
   };
+  fulfillment: { type?: string; address_id?: string | null } | null;
+  options: { addresses: { id: string; has_document: boolean }[] };
 }
 
 interface Session {
@@ -47,6 +49,8 @@ const ERRORS: Record<string, string> = {
   too_many_open_orders: "Você tem pedidos aguardando pagamento. Pague ou cancele antes de fazer outro.",
   validation_error: "Confira seu nome e telefone.",
   rate_limited: "Muitas tentativas seguidas. Aguarde um minuto.",
+  recipient_document_required: "Informe o CPF ou CNPJ de quem recebe: a transportadora exige para a etiqueta.",
+  recipient_document_invalid: "CPF ou CNPJ de quem recebe inválido. Confira os números.",
 };
 
 function fulfillmentLabel(quote: Cart["quote"]): string {
@@ -80,6 +84,11 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const docs = policies.kind === "ok" ? policies.data : { terms: null, privacy: null };
   const { erro } = await searchParams;
   const { quote } = cart;
+  // Transportadora (Melhor Envio) recusa a etiqueta sem o documento de quem recebe. O endereço
+  // que já tem o número não pede de novo; o digitado aqui fica salvo nele.
+  const porTransportadora = quote.fulfillment?.type === "shipping";
+  const enderecoEscolhido = cart.options.addresses.find((a) => a.id === cart.fulfillment?.address_id);
+  const pedeDocumento = porTransportadora && !enderecoEscolhido?.has_document;
 
   return (
     <StoreShell context={context}>
@@ -143,6 +152,23 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               <input name="phone" inputMode="tel" maxLength={20} autoComplete="tel" />
               <span className={styles.fieldHint}>Ajuda a loja a falar com você se algo mudar.</span>
             </label>
+            {pedeDocumento ? (
+              <label className={styles.field}>
+                CPF ou CNPJ de quem recebe
+                <input
+                  name="recipient_document"
+                  required
+                  inputMode="numeric"
+                  maxLength={18}
+                  placeholder="000.000.000-00"
+                  aria-describedby="recipient-document-hint"
+                />
+                <span className={styles.fieldHint} id="recipient-document-hint">
+                  A transportadora exige para emitir a etiqueta e a declaração de conteúdo. Fica salvo neste
+                  endereço.
+                </span>
+              </label>
+            ) : null}
             <label className={styles.field}>
               Observações para a loja
               <textarea name="notes" rows={3} maxLength={500} />

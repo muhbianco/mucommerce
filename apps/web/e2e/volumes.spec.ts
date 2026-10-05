@@ -45,6 +45,9 @@ test("pedido aceito: Como embalar com os volumes do plano, e só ele vai para o 
   await expect(lista.getByText(/Confira ao fechar/)).toBeVisible();
   await expect(lista.getByRole("button", { name: "Imprimir lista" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Despachar agora" })).toBeVisible();
+  // Pedido sem CPF/CNPJ de quem recebe (como os feitos antes de o checkout pedir): o despacho pede.
+  await expect(page.getByText("Não informado (pedido para despachar)")).toBeVisible();
+  await expect(page.getByLabel("CPF ou CNPJ de quem recebe")).toBeVisible();
 
   // Na impressão, só a lista: o resto da página (andamento, pagamento) some.
   await page.emulateMedia({ media: "print" });

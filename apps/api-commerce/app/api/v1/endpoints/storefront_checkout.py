@@ -101,6 +101,7 @@ async def place_order(
             notes=body.notes,
             ip=client_ip(request),
             user_agent=request.headers.get("user-agent"),
+            recipient_document=body.recipient_document,
         )
     )
     return await customer_order_read(session, service, placed.order)
