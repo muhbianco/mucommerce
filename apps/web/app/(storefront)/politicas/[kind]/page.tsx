@@ -35,7 +35,8 @@ export default async function PolicyPage({ params }: { params: Promise<{ kind: s
         <>
           <p className="muted">
             Versão {result.data.version}, publicada em{" "}
-            {new Date(result.data.published_at).toLocaleDateString("pt-BR")}.
+            {/* Renderiza no servidor (UTC): sem timeZone, o publicado às 22h saía com o dia seguinte. */}
+            {new Date(result.data.published_at).toLocaleDateString("pt-BR", { timeZone: context.tenant.timezone })}.
           </p>
           {result.data.content.split(/\n\s*\n/).map((paragraph, index) => (
             <p key={index} style={{ whiteSpace: "pre-line" }}>

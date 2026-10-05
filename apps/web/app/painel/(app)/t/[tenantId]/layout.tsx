@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { requireMe } from "@/lib/panel/api";
+import { parseInstant } from "@/lib/panel/format";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
@@ -8,16 +9,21 @@ import styles from "../../../panel.module.css";
 import { type NavItem, PanelNav } from "./panel-nav";
 
 /** Assinatura em atraso: o lojista precisa saber antes de a vitrine sair do ar. */
-function BillingNotice({ status, graceUntil }: { status: string; graceUntil: string | null }) {
+function BillingNotice({
+  status,
+  graceUntil,
+  timeZone,
+}: {
+  status: string;
+  graceUntil: string | null;
+  timeZone: string;
+}) {
   if (status !== "suspended") return null;
-  const deadline = graceUntil ? new Date(`${graceUntil}Z`) : null;
+  // A API já manda o offset: um `Z` a mais dava Invalid Date e o `format` derrubava o painel.
+  const deadline = parseInstant(graceUntil);
   const inGrace = deadline !== null && deadline.getTime() > Date.now();
   const when = deadline
-    ? new Intl.DateTimeFormat("pt-BR", {
-        dateStyle: "short",
-        timeStyle: "short",
-        timeZone: "America/Sao_Paulo",
-      }).format(deadline)
+    ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(deadline)
     : null;
   return (
     <p className={styles.error}>
@@ -86,7 +92,11 @@ export default async function TenantLayout({
           </a>
         ) : null}
       </header>
-      <BillingNotice status={context.status} graceUntil={context.billing_grace_until} />
+      <BillingNotice
+        status={context.status}
+        graceUntil={context.billing_grace_until}
+        timeZone={context.timezone}
+      />
       <PanelNav items={items} base={base} />
       {children}
     </>

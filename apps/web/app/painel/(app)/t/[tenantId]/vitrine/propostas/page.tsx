@@ -280,7 +280,8 @@ export default async function PropostasPage({
                   <div className={local.itemHead}>
                     <Pill state={estado.state}>{estado.label}</Pill>
                     <span className={local.itemWhen}>
-                      {new Date(draft.created_at).toLocaleString("pt-BR")}
+                      {/* Renderiza no servidor (UTC): sem timeZone, 10:59 saía 13:59. */}
+                      {new Date(draft.created_at).toLocaleString("pt-BR", { timeZone: context.timezone })}
                     </span>
                     {draft.source === "refine" ? (
                       <span className={local.itemNote}>

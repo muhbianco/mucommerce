@@ -415,6 +415,33 @@ async def test_janela_torta_e_recusada_em_vez_de_corrigida(
     assert gigante.status_code == 422
 
 
+def test_o_dia_do_resumo_e_o_da_loja_e_nao_o_do_utc() -> None:
+    """Às 22h de 04/10 em Brasília (01h de 05/10 em UTC), "hoje" ainda é 04/10.
+
+    Com o dia do UTC, o resumo de hoje já era o de amanhã, e o pedido das 22h caía no dia seguinte.
+    """
+    from datetime import UTC, date, datetime
+
+    from app.api.v1.endpoints.internal_agent import _window
+
+    agora = datetime(2026, 10, 5, 1, 0, tzinfo=UTC)
+    comeco, termino, _, dia_fim = _window(None, None, timezone="America/Sao_Paulo", now=agora)
+    assert dia_fim == date(2026, 10, 4)
+    # O dia 04/10 de Brasília vai de 03h de 04/10 a 02h59 de 05/10 em UTC.
+    assert termino == datetime(2026, 10, 5, 2, 59, 59, 999999, tzinfo=UTC)
+    _, termino_dia, _, _ = _window(
+        date(2026, 10, 4), date(2026, 10, 4), timezone="America/Sao_Paulo"
+    )
+    assert termino_dia == termino
+    inicio_dia, _, _, _ = _window(
+        date(2026, 10, 4), date(2026, 10, 4), timezone="America/Sao_Paulo"
+    )
+    assert inicio_dia == datetime(2026, 10, 4, 3, 0, tzinfo=UTC)
+    # O pedido das 22h de 04/10 (01h de 05/10 em UTC) está dentro do dia 04/10.
+    assert inicio_dia <= agora <= termino
+    assert comeco < inicio_dia
+
+
 async def test_o_resumo_de_uma_loja_nao_conta_a_outra(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],

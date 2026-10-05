@@ -8,9 +8,30 @@ import {
   parseCepRanges,
   parseModifierLines,
   parseMoney,
+  parseInstant,
   parseQuantity,
   utcToLocalInput,
 } from "./format";
+
+describe("parseInstant", () => {
+  it("reads what the API sends, with the offset it already has", () => {
+    // O painel acrescentava "Z" a isto: Invalid Date, e o Intl.format derrubava a página.
+    expect(parseInstant("2026-10-08T13:59:00+00:00")?.toISOString()).toBe("2026-10-08T13:59:00.000Z");
+    expect(parseInstant("2026-10-08T13:59:00Z")?.toISOString()).toBe("2026-10-08T13:59:00.000Z");
+    expect(parseInstant("2026-10-08T10:59:00-03:00")?.toISOString()).toBe("2026-10-08T13:59:00.000Z");
+  });
+
+  it("reads a string without offset as UTC, never as server time", () => {
+    expect(parseInstant("2026-10-08T13:59:00")?.toISOString()).toBe("2026-10-08T13:59:00.000Z");
+  });
+
+  it("gives null instead of an Invalid Date", () => {
+    expect(parseInstant(null)).toBeNull();
+    expect(parseInstant("")).toBeNull();
+    expect(parseInstant("amanhã")).toBeNull();
+    expect(parseInstant("2026-10-08T13:59:00+00:00Z")).toBeNull();
+  });
+});
 
 describe("money", () => {
   it("parses what people type", () => {

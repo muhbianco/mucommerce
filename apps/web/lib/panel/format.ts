@@ -79,6 +79,19 @@ function offsetMinutes(instant: Date, timeZone: string): number {
   return Math.round((asUtc - instant.getTime()) / 60000);
 }
 
+/**
+ * Instant from the API → Date, or null when it can't be read. The API sends ISO with an offset;
+ * appending "Z" on top of that made an Invalid Date, and `Intl.format` then threw and took the
+ * whole panel down. A string without an offset (legacy) is read as UTC, never as server time.
+ */
+export function parseInstant(iso: string | null | undefined): Date | null {
+  const raw = (iso ?? "").trim();
+  if (!raw) return null;
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const instant = new Date(hasZone ? raw : `${raw}Z`);
+  return Number.isNaN(instant.getTime()) ? null : instant;
+}
+
 /** `<input type="datetime-local">` value in the tenant's zone → ISO UTC. Empty → null. */
 export function localToUtcIso(local: string, timeZone: string): string | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(local.trim());

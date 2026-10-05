@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
@@ -750,17 +751,28 @@ class SummaryRead(BaseModel):
     insumos_em_falta: int
 
 
-def _window(de: date | None, ate: date | None) -> tuple[datetime, datetime, date, date]:
-    """A janela pedida, ou os últimos 30 dias. Invertida ou gigante é recusada, não corrigida."""
-    fim = ate or utcnow().date()
+def _window(
+    de: date | None,
+    ate: date | None,
+    *,
+    timezone: str,
+    now: datetime | None = None,
+) -> tuple[datetime, datetime, date, date]:
+    """A janela pedida, ou os últimos 30 dias. Invertida ou gigante é recusada, não corrigida.
+
+    Os dias são os da loja, não os do UTC: com UTC, "hoje" virava amanhã depois das 21h e o
+    pedido das 22h de 04/10 caía no resumo de 05/10.
+    """
+    zone = ZoneInfo(timezone)
+    fim = ate or (now or utcnow()).astimezone(zone).date()
     inicio = de or (fim - DEFAULT_WINDOW)
     if inicio > fim:
         raise ValidationError("A data inicial é depois da final.", fields=["de", "ate"])
     if fim - inicio > MAX_WINDOW:
         raise ValidationError("Peça no máximo um ano por vez.", fields=["de", "ate"])
     return (
-        datetime.combine(inicio, time.min, tzinfo=UTC),
-        datetime.combine(fim, time.max, tzinfo=UTC),
+        datetime.combine(inicio, time.min, tzinfo=zone).astimezone(UTC),
+        datetime.combine(fim, time.max, tzinfo=zone).astimezone(UTC),
         inicio,
         fim,
     )
@@ -777,7 +789,7 @@ async def read_summary(
     de: Annotated[date | None, Query()] = None,
     ate: Annotated[date | None, Query()] = None,
 ) -> SummaryRead:
-    comeco, termino, dia_inicio, dia_fim = _window(de, ate)
+    comeco, termino, dia_inicio, dia_fim = _window(de, ate, timezone=store.context.timezone)
     janela = (Order.placed_at >= comeco, Order.placed_at <= termino)
     pago = Order.paid_at.is_not(None)
 
