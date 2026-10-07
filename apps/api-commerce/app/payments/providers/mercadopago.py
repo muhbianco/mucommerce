@@ -16,7 +16,7 @@ O que muda em relação à API antiga, e que sangra se passar batido:
 - **O que importa está dentro da transação.** `transactions.payments[0]` carrega status, QR do
   Pix e valor; a order por fora é rede de segurança.
 - **Estorno é da order**, `POST /v1/orders/{id}/refund`, e o parcial identifica o pagamento de
-  dentro (`transactions: [{id, amount}]`). Total manda a lista vazia.
+  dentro (`transactions: [{id, amount}]`). Total vai sem corpo — a lista vazia leva 400.
 
 O que **não** muda: todo create leva `X-Idempotency-Key` = o id do nosso pagamento, então
 tentativa repetida não cobra duas vezes; e o webhook continua sendo só uma dica — quem diz o que
@@ -393,7 +393,11 @@ class MercadoPagoProvider:
                 extra={"mp_status": status, "mp_path": path, "mp_body": response.text[:500]},
             )
             raise ProviderError(
-                str(data.get("message") or f"Mercado Pago refused ({status})")[:200],
+                str(
+                    data.get("message")
+                    or _orders_error(data, "message")
+                    or f"Mercado Pago refused ({status})"
+                )[:200],
                 http_status=status,
                 code=_error_code(data, status),
                 definitive=True,
@@ -470,18 +474,33 @@ class MercadoPagoProvider:
     ) -> RefundResult:
         """`POST /v1/orders/{id}/refund`, com o nosso id de devolução como chave de idempotência.
 
-        Total manda a lista vazia; parcial identifica o pagamento de dentro da order e o valor.
-        Por isso o parcial lê a order antes: o `PAY…` não é o id que guardamos, é o de dentro.
+        Total vai **sem corpo** — é o que a referência pede ("o body deve ser enviado vazio") e o
+        que o `refundTotal.ts` do SDK oficial faz. `{"transactions": []}` parece a mesma coisa e
+        não é: o validador deles exige ao menos um item e responde 400 `minimum_items` (o
+        estorno do pedido #9 da SG Pipas morreu assim em 07/10/2026). Parcial identifica o
+        pagamento de dentro da order e o valor; por isso lemos a order antes: o `PAY…` não é o
+        id que guardamos, é o de dentro.
+
+        Sem o valor do pagamento, ou sem o `PAY…` para um parcial, recusamos aqui: cair no total
+        nesses casos devolveria mais do que foi pedido.
         """
         order_id = _checked_id(ref.provider_payment_id or "")
-        body: dict[str, Any] = {"transactions": []}
         _, order = await self._request(creds, "GET", f"/v1/orders/{order_id}")
         payment = first_payment(order)
         total = to_cents(payment.get("amount") or order.get("total_amount")) or 0
-        if 0 < amount_cents < total and payment.get("id"):
+        body: dict[str, Any] | None
+        if total > 0 and amount_cents == total:
+            body = None
+        elif 0 < amount_cents < total and payment.get("id"):
             body = {
                 "transactions": [{"id": str(payment["id"]), "amount": to_amount_str(amount_cents)}]
             }
+        else:
+            raise ProviderError(
+                "refund amount does not fit the Mercado Pago payment",
+                code="refund_amount_mismatch",
+                definitive=True,
+            )
         _, data = await self._request(
             creds,
             "POST",
@@ -584,10 +603,27 @@ def _checked_id(value: str) -> str:
     return value
 
 
+def _orders_error(data: Mapping[str, Any], field: str) -> str | None:
+    """A recusa da Orders API vem em `{"errors": [{"code", "message", "details"}]}`, não no
+    `message`/`cause` da API de Pagamentos. A mensagem leva o código junto, porque "Minimum
+    items" sozinho não diz qual regra foi."""
+    errors = data.get("errors")
+    first = errors[0] if isinstance(errors, list) and errors else None
+    if not isinstance(first, Mapping) or not first.get("code"):
+        return None
+    if field == "code":
+        return str(first["code"])
+    message = first.get("message")
+    return f"{first['code']}: {message}" if message else str(first["code"])
+
+
 def _error_code(data: Mapping[str, Any], status: int) -> str:
     cause = data.get("cause")
     if isinstance(cause, list) and cause and isinstance(cause[0], dict) and cause[0].get("code"):
         return f"mp_{cause[0]['code']}"[:64]
     if status in (401, 403):
         return "credentials_refused"
+    orders_code = _orders_error(data, "code")
+    if orders_code:
+        return f"mp_{orders_code}"[:64]
     return str(data.get("error") or f"http_{status}")[:64]

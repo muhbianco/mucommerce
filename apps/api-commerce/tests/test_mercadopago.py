@@ -370,28 +370,52 @@ async def test_cancel_reports_an_approval_that_won_the_race() -> None:
     assert cancelled is not None and cancelled.status == PaymentStatus.CANCELLED
 
 
+def mp_refund(req: httpx.Request) -> httpx.Response:
+    """O `/refund` como o Mercado Pago responde. Lista vazia é recusada pelo validador deles —
+    a resposta abaixo é a que derrubou o estorno do pedido #9 da SG Pipas em 07/10/2026; um
+    dublê que aceitasse qualquer corpo deixou esse contrato errado passar."""
+    body = json.loads(req.content) if req.content else None
+    if body is not None and not body.get("transactions"):
+        return httpx.Response(
+            400,
+            json={
+                "errors": [
+                    {
+                        "code": "minimum_items",
+                        "message": "Minimum items",
+                        "details": [
+                            "'$.transactions' - minimum 1 items required, but found 0 items"
+                        ],
+                    }
+                ]
+            },
+        )
+    amount = body["transactions"][0]["amount"] if body else "30.50"
+    return httpx.Response(
+        201,
+        json={
+            "id": "ORD01JTESTE0000000000000001",
+            "status": "processed",
+            "status_detail": "refunded" if body is None else "partially_refunded",
+            "transactions": {
+                "refunds": [{"id": "REF01J", "amount": amount, "status": "processed"}]
+            },
+        },
+    )
+
+
 async def test_refund_sends_the_whole_order_or_the_payment_inside_it() -> None:
-    """Total manda a lista vazia; parcial precisa do `PAY…` de dentro, que não é o id que
-    guardamos — por isso o parcial lê a order antes de estornar."""
+    """Total vai sem corpo (referência + `refundTotal.ts` do SDK oficial); parcial precisa do
+    `PAY…` de dentro, que não é o id que guardamos — por isso o estorno lê a order antes."""
     mp = FakeMP()
     mp.routes[("GET", "/v1/orders/ORD01JTESTE0000000000000001")] = lambda r: httpx.Response(
         200, json=pix_order(status="approved")
     )
-    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/refund")] = lambda r: httpx.Response(
-        200,
-        json={
-            "id": "ORD01JTESTE0000000000000001",
-            "status": "processed",
-            "status_detail": "refunded",
-            "transactions": {
-                "refunds": [{"id": "REF01J", "amount": "30.50", "status": "processed"}]
-            },
-        },
-    )
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/refund")] = mp_refund
     ref = ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
     total = await mp.provider().refund(CREDS, ref, 3050, idempotency="dev-1")
     assert (total.status, total.provider_refund_id) == ("completed", "REF01J")
-    assert json.loads(mp.requests[-1].content) == {"transactions": []}
+    assert mp.requests[-1].content == b""
     assert mp.requests[-1].headers["X-Idempotency-Key"] == "dev-1"
 
     parcial = await mp.provider().refund(CREDS, ref, 1000, idempotency="dev-2")
@@ -399,6 +423,48 @@ async def test_refund_sends_the_whole_order_or_the_payment_inside_it() -> None:
     assert json.loads(mp.requests[-1].content) == {
         "transactions": [{"id": "PAY01JTESTE0000000000000001", "amount": "10.00"}]
     }
+
+
+async def test_the_empty_list_is_refused_with_the_reason_kept() -> None:
+    """O que o Mercado Pago responde quando a lista vem vazia, e o motivo que chega na
+    devolução: antes ficava só "Mercado Pago refused (400)" e o porquê morava no log."""
+    mp = FakeMP()
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/refund")] = mp_refund
+    with pytest.raises(ProviderError) as caught:
+        await mp.provider()._request(
+            CREDS,
+            "POST",
+            "/v1/orders/ORD01JTESTE0000000000000001/refund",
+            body={"transactions": []},
+            idempotency="dev-0",
+        )
+    assert caught.value.definitive
+    assert caught.value.code == "mp_minimum_items"
+    assert str(caught.value) == "minimum_items: Minimum items"
+
+
+@pytest.mark.parametrize(
+    ("amount_cents", "payment", "order_total"),
+    [
+        (4000, {}, "30.50"),  # mais do que o pagamento: o total devolveria menos do que contamos
+        (1000, {"amount": None}, None),  # sem valor para comparar
+        (1000, {"id": None}, "30.50"),  # parcial sem o `PAY…`: cair no total devolveria tudo
+    ],
+)
+async def test_a_refund_that_does_not_fit_the_payment_is_refused_before_sending(
+    amount_cents: int, payment: dict[str, Any], order_total: str | None
+) -> None:
+    mp = FakeMP()
+    order = pix_order(status="approved", payment=payment) | {"total_amount": order_total}
+    mp.routes[("GET", "/v1/orders/ORD01JTESTE0000000000000001")] = lambda r: httpx.Response(
+        200, json=order
+    )
+    mp.routes[("POST", "/v1/orders/ORD01JTESTE0000000000000001/refund")] = mp_refund
+    ref = ProviderRef("ORD01JTESTE0000000000000001", "alpha-7-abc123")
+    with pytest.raises(ProviderError) as caught:
+        await mp.provider().refund(CREDS, ref, amount_cents, idempotency="dev-3")
+    assert caught.value.definitive and caught.value.code == "refund_amount_mismatch"
+    assert all(r.method == "GET" for r in mp.requests)  # nada foi pedido ao Mercado Pago
 
 
 def signed(data_id: str, request_id: str | None = "req-1", secret: str = SECRET) -> dict[str, str]:
