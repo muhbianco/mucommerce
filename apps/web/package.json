@@ -32,7 +32,9 @@
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "overrides": {
-      "postcss": "^8.5.23"
+      "postcss": "^8.5.23",
+      "sharp": "^0.35.5",
+      "source-map-js": "^1.2.2"
     }
   }
 }
