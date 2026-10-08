@@ -28,8 +28,17 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from app.agent import links as agent_links
 from app.api.deps import DbSession, require_internal, storefront_access_mode
-from app.api.v1.endpoints.internal_agent import MAX_ROWS, Store, _actor
+from app.api.v1.endpoints.internal_agent import (
+    MAX_ROWS,
+    CurrentStore,
+    NoCredentialError,
+    NoStoreError,
+    Store,
+    _actor,
+    _stores_of_account,
+)
 from app.cart.service import CartService, problem_error
 from app.core.exceptions import DomainError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -44,7 +53,7 @@ from app.orders.service import OrderService
 from app.pricing.quote import LineInput
 from app.pricing.service import PricingService
 from app.schemas.common import StrictModel
-from app.tenancy.context import TenantContext
+from app.tenancy.context import TenantContext, bind_session_tenant
 
 logger = get_logger(__name__)
 
@@ -414,4 +423,100 @@ async def redeem_link(session: DbSession, body: RedeemIn) -> RedeemedRead:
         loja_nome=resgatado.store_name,
         tipo=resgatado.kind,
         permissoes=sorted(scopes_for(resgatado.kind)),
+    )
+
+
+# ------------------------------------------------------- conectar a própria loja, sem código
+
+
+class StoreOption(BaseModel):
+    """Uma loja que esta conta administra, para a pessoa escolher pelo nome."""
+
+    loja_id: str
+    nome: str
+    slug: str
+    papel: str
+
+
+class SelfLinkIn(StrictModel):
+    loja_id: Annotated[str, Field(min_length=36, max_length=36)]
+    tipo: Annotated[str, Field(pattern="^(sales|operator)$")] = "operator"
+    nome: Annotated[str, Field(max_length=80)] | None = None
+
+
+@router.get(
+    "/stores",
+    response_model=list[StoreOption],
+    summary="As lojas que esta conta administra",
+)
+async def list_stores(session: DbSession, x_account_id: CurrentStore = None) -> Any:
+    """Para a pessoa escolher a loja pelo nome, em vez de digitar um código.
+
+    Não usa `Store`: aqui ainda não há *uma* loja — a pergunta é justamente quais são.
+    """
+    if not x_account_id:
+        raise NoCredentialError
+    return [
+        StoreOption(loja_id=context.id, nome=context.name, slug=context.slug, papel=role)
+        for context, role in await _stores_of_account(session, x_account_id)
+    ]
+
+
+@router.post(
+    "/links/self",
+    response_model=RedeemedRead,
+    status_code=201,
+    summary="Emite a credencial para uma loja da própria conta",
+)
+async def link_own_store(
+    session: DbSession, body: SelfLinkIn, x_account_id: CurrentStore = None
+) -> RedeemedRead:
+    """Sem código: a associação já prova que a loja é desta conta.
+
+    O código existe para o caso de terceiro — alguém configurando o agente de uma loja que não
+    é da conta dele. Exigi-lo de quem conecta a própria loja era cerimônia inventada: o
+    servidor já sabe quais lojas são dela, e pedir que ela copie um código que ela mesma gerou
+    não prova nada que a associação não prove melhor.
+    """
+    from app.agent.links import scopes_for
+    from app.agent.models import AgentLink
+
+    if not x_account_id:
+        raise NoCredentialError
+    escolhida = next(
+        (
+            (context, role)
+            for context, role in await _stores_of_account(session, x_account_id)
+            if context.id == body.loja_id
+        ),
+        None,
+    )
+    if escolhida is None:
+        # Mesma recusa de loja inexistente: confirmar que ela existe já é contar demais.
+        raise NoStoreError
+    context, _role = escolhida
+    bind_session_tenant(session, context.id)
+
+    token = agent_links.new_token()
+    link = AgentLink(
+        tenant_id=context.id,
+        token_hash=agent_links.hash_token(token),
+        kind=body.tipo,
+        label=(body.nome or "").strip()[:80] or None,
+        account_ref=x_account_id,
+    )
+    session.add(link)
+    await session.flush()
+    await session.commit()
+    logger.info(
+        "conta vinculou a própria loja",
+        extra={"tenant_id": context.id, "link_id": link.id, "kind": body.tipo},
+    )
+    return RedeemedRead(
+        vinculo_id=link.id,
+        token=token,
+        loja_id=context.id,
+        loja_nome=context.name,
+        tipo=link.kind,
+        permissoes=sorted(scopes_for(link.kind)),
     )

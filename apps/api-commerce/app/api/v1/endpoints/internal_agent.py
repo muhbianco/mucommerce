@@ -126,6 +126,32 @@ class AmbiguousStoreError(ValidationError):
     message = "Esta conta administra mais de uma loja. Informe qual delas em X-Store-Id."
 
 
+async def _stores_of_account(
+    session: AsyncSession, account_id: str
+) -> list[tuple[TenantContext, str]]:
+    """Todas as lojas que esta conta administra, com o papel dela em cada uma.
+
+    Existe para a pessoa **escolher** a loja pelo nome. A resolução de uma chamada continua
+    sendo a de sempre; aqui a pergunta é outra: quais são as lojas dela.
+    """
+    stmt = (
+        select(TenantMembership.tenant_id, TenantMembership.role)
+        .join(AdminUser, AdminUser.id == TenantMembership.admin_user_id)
+        .where(
+            AdminUser.external_account_id == account_id,
+            AdminUser.status == AdminUserStatus.ACTIVE,
+            TenantMembership.status == "active",
+        )
+        .order_by(TenantMembership.created_at)
+        .limit(MAX_STORES_PER_ACCOUNT)
+    )
+    resolver = TenantResolver(session)
+    lojas: list[tuple[TenantContext, str]] = []
+    for tenant_id, role in (await session.execute(stmt)).all():
+        lojas.append((await resolver.resolve_by_id(str(tenant_id)), str(role)))
+    return lojas
+
+
 async def _store_of(
     session: AsyncSession, account_id: str, store_id: str | None = None
 ) -> AgentStore:

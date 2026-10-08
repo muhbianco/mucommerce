@@ -24,7 +24,7 @@ from app.core.scopes import Scope
 from app.models.base import utcnow
 from app.tenancy.context import CROSS_TENANT_OPTION
 from tests.test_checkout_place import shop  # noqa: F401
-from tests.test_internal_agent import AGENT, TOKEN
+from tests.test_internal_agent import AGENT, TOKEN, account_of
 from tests.test_internal_agent_sales import FONE, cliente_de, retirada_de, um_produto
 
 CROSS = {CROSS_TENANT_OPTION: True}
@@ -245,3 +245,81 @@ async def test_as_permissoes_de_cada_tipo_sao_fixas_no_codigo() -> None:
     assert not (
         SCOPES["sales"] & {Scope.CATALOG_WRITE, Scope.INVENTORY_ADJUST, Scope.ORDERS_CANCEL}
     )
+
+
+# ------------------------------------------------- conectar a própria loja, sem código
+
+
+async def test_a_conta_lista_as_proprias_lojas(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Any
+) -> None:
+    """Pedir um código a quem já é dono é cerimônia: o servidor sabe quais lojas são dela."""
+    from tests.shoppers import selling_store
+
+    tenant, _, _ = shop
+    outra = await selling_store(session_factory, "beta")
+    dono = await account_of(session_factory, tenant)
+    await account_of(session_factory, outra, conta=dono["X-Account-Id"])
+
+    listadas = await client.get(f"{AGENT}/stores", headers=dono)
+    assert listadas.status_code == 200, listadas.text
+    assert {loja["slug"] for loja in listadas.json()} == {tenant.slug, "beta"}
+    assert all(loja["papel"] == "owner" for loja in listadas.json())
+
+
+async def test_a_conta_nao_ve_loja_de_outro_dono(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Any
+) -> None:
+    from tests.shoppers import selling_store
+
+    tenant, _, _ = shop
+    alheia = await selling_store(session_factory, "beta")
+    await account_of(session_factory, alheia)
+    dono = await account_of(session_factory, tenant)
+    assert {
+        loja["slug"] for loja in (await client.get(f"{AGENT}/stores", headers=dono)).json()
+    } == {tenant.slug}
+
+
+async def test_conectar_a_propria_loja_emite_credencial_sem_codigo(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Any
+) -> None:
+    tenant, owner, _ = shop
+    dono = await account_of(session_factory, tenant)
+    criado = await client.post(
+        f"{AGENT}/links/self",
+        json={"loja_id": tenant.id, "tipo": "operator", "nome": "meu assistente"},
+        headers=dono,
+    )
+    assert criado.status_code == 201, criado.text
+    assert criado.json()["loja_id"] == tenant.id
+    assert criado.json()["tipo"] == "operator"
+
+    # A credencial funciona, e o painel do lojista enxerga o vínculo.
+    agente = como_agente(criado.json()["token"])
+    assert (await client.get(f"{AGENT}/store", headers=agente)).json()["tenant_id"] == tenant.id
+    (linha,) = (await client.get(painel(tenant), headers=owner)).json()
+    assert linha["nome"] == "meu assistente"
+    assert linha["conta"] == dono["X-Account-Id"]
+
+
+async def test_nao_da_para_conectar_loja_que_nao_e_sua(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Any
+) -> None:
+    """E a recusa é a de loja inexistente: confirmar que ela existe já é contar demais."""
+    from tests.shoppers import selling_store
+
+    tenant, _, _ = shop
+    alheia = await selling_store(session_factory, "beta")
+    await account_of(session_factory, alheia)
+    dono = await account_of(session_factory, tenant)
+
+    negado = await client.post(f"{AGENT}/links/self", json={"loja_id": alheia.id}, headers=dono)
+    assert negado.status_code == 404
+    assert negado.json()["error"]["code"] == "no_store"
+
+
+async def test_sem_conta_nao_lista_nem_conecta(client: AsyncClient) -> None:
+    assert (await client.get(f"{AGENT}/stores", headers=TOKEN)).status_code == 422
+    sem = await client.post(f"{AGENT}/links/self", json={"loja_id": "0" * 36}, headers=TOKEN)
+    assert sem.status_code == 422
