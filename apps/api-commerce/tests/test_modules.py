@@ -52,6 +52,40 @@ async def test_lista_mostra_rotulo_e_por_que_o_pago_esta_travado(
     assert modulos["customer_login"]["always_on"] is True
     # Saíram do catálogo: a vitrine no ar é o status da loja; o número próprio é o assistente.
     assert "storefront" not in modulos and "whatsapp_owned" not in modulos
+    # Por convite: quem não tem não vê que existe.
+    assert "sales_agent" not in modulos
+
+
+async def test_modulo_por_convite_nao_aparece_para_quem_nao_tem(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Cartão "em breve" ainda anuncia o produto a quem está de fora.
+
+    Não é preferência de tela: há quem não deva descobrir por esta porta que o assistente de
+    vendas existe. Travado e escondido são coisas diferentes, e aqui vale a segunda.
+    """
+    tenant, owner = await loja(client, session_factory)
+    corpo = (await client.get(f"{base(tenant)}/modules", headers=owner)).text
+    assert "sales_agent" not in corpo
+    assert "Assistente de vendas" not in corpo
+
+
+async def test_modulo_por_convite_aparece_depois_de_provisionado(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Ligado pelo provisionamento, o lojista precisa vê-lo — senão não sabe o que contratou."""
+    from app.tenancy.service import Actor, TenantService
+
+    tenant, owner = await loja(client, session_factory)
+    async with session_factory() as session:
+        service = TenantService(session)
+        row = await service.get_or_404(tenant.id)
+        await service.set_features(row, {"sales_agent": True}, Actor.system("tests"))
+        await session.commit()
+
+    modulos = by_key((await client.get(f"{base(tenant)}/modules", headers=owner)).json())
+    assert modulos["sales_agent"]["enabled"] is True
+    assert modulos["sales_agent"]["self_service"] is False
 
 
 async def test_lojista_liga_modulo_que_nao_cobra(

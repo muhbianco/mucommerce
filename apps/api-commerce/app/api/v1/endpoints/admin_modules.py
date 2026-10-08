@@ -59,6 +59,11 @@ class AccessModeUpdate(BaseModel):
 
 
 def _view(enabled: dict[str, bool]) -> list[ModuleRead]:
+    """O que esta loja vê. Módulo por convite desligado não entra na lista.
+
+    Não é enfeite de tela: um cartão "em breve" conta a quem está de fora que o produto existe,
+    e há quem não deva saber disso por esta porta.
+    """
     return [
         ModuleRead(
             key=module.key,
@@ -74,6 +79,7 @@ def _view(enabled: dict[str, bool]) -> list[ModuleRead]:
             dependents=[d for d in modules.dependents(module.key) if enabled.get(d, False)],
         )
         for module in modules.MODULES
+        if not module.invite_only or enabled.get(module.key, False)
     ]
 
 

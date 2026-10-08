@@ -40,6 +40,9 @@ class Module:
     locked_reason: str | None = None
     #: Módulos que precisam estar ligados antes deste.
     requires: tuple[str, ...] = field(default_factory=tuple)
+    #: Só existe para quem já tem. Desligado, nem aparece — e isso não é o mesmo que aparecer
+    #: cinza com "em breve": um cartão travado ainda anuncia o produto a quem está de fora.
+    invite_only: bool = False
 
     @property
     def self_service(self) -> bool:
@@ -185,7 +188,9 @@ MODULES: tuple[Module, ...] = (
             "pedidos da loja."
         ),
         owner="subscription",
-        locked_reason="Em breve, como serviço à parte na sua conta MuhBianco.",
+        locked_reason="Contratado na sua conta MuhBianco.",
+        # Liberado por convite, um cliente de cada vez. Quem não tem não vê que existe.
+        invite_only=True,
     ),
     # --- da MuhBianco: liga pelo admin do site -----------------------------------------
     Module(
