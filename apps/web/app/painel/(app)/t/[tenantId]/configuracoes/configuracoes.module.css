@@ -237,3 +237,46 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* Código de conexão de agente: aparece uma vez e precisa ser lido em voz alta sem erro. */
+.linkCode {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--panel-surface-soft, rgba(0, 0, 0, 0.03));
+}
+
+.linkCodeValue {
+  display: block;
+  margin-top: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.6rem;
+  letter-spacing: 0.22em;
+}
+
+.linkList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.linkRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+}
+
+.linkRow > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}

@@ -16,6 +16,7 @@ import {
   saveSeo,
   testEmail,
 } from "../actions";
+import { AgentLinks, type AgentLink } from "./agent-links";
 import { Flash } from "../flash";
 import { ImageUploader } from "../image-uploader";
 import { PageHeader, Pill, Section } from "../ui";
@@ -70,7 +71,7 @@ export default async function Settings({
   const path = `/admin/tenants/${context.tenant_id}`;
   // As imagens da página inicial e os produtos saíram daqui: quem cuida deles é a tela da
   // página inicial, que tem prévia.
-  const [brandMedia, legal, suggestions, email] = await Promise.all([
+  const [brandMedia, legal, suggestions, email, agentLinks] = await Promise.all([
     api<Media[]>(`${path}/media?owner_type=tenant_brand`),
     api<LegalOverview>(`${path}/legal-documents`),
     // Cores tiradas do logotipo no processamento da imagem. Loja sem logotipo (ou com um
@@ -78,6 +79,8 @@ export default async function Settings({
     api<PaletteSuggestion[]>(`${path}/branding/suggestions`).catch(() => [] as PaletteSuggestion[]),
     // A equipe da MuhBianco lê para dar suporte; gravar é só da equipe da loja (members_only).
     api<EmailConfig>(`${path}/email`).catch(() => EMAIL_VAZIO),
+    // Loja de versão anterior da API responde 404; a seção aparece vazia em vez de sumir.
+    api<AgentLink[]>(`${path}/agent-links`).catch(() => [] as AgentLink[]),
   ]);
   const branding = context.settings.branding ?? {};
   // Mesmo padrão da API (storefront_context): sem configuração, só clientes aprovados.
@@ -116,6 +119,9 @@ export default async function Settings({
         </a>
         <a className={local.jumpLink} href="#google">
           Google e compartilhamento
+        </a>
+        <a className={local.jumpLink} href="#agentes">
+          Agentes
         </a>
         <a className={local.jumpLink} href="#termos">
           Termos e privacidade
@@ -375,6 +381,18 @@ export default async function Settings({
             </div>
           </form>
         ) : null}
+      </Section>
+
+      <Section
+        id="agentes"
+        title="Agentes conectados"
+        description="Quem atende pelo WhatsApp usando o catálogo e os pedidos desta loja"
+      >
+        <AgentLinks
+          tenantId={context.tenant_id}
+          links={agentLinks}
+          timezone={context.timezone}
+        />
       </Section>
 
       <Section id="termos" title="Termos e privacidade" description="O que o cliente aceita ao entrar na loja">

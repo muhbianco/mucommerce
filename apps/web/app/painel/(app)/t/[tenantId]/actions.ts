@@ -2,6 +2,8 @@
 
 import { randomUUID } from "node:crypto";
 
+import { revalidatePath } from "next/cache";
+
 import { api, ApiError } from "@/lib/panel/api";
 import { normalizeEmail, normalizeInstagram, normalizeWhatsapp } from "@/lib/panel/contact";
 import { localToUtcIso, parseModifierLines, parseQuantity } from "@/lib/panel/format";
@@ -669,4 +671,41 @@ export async function testEmail(form: FormData): Promise<void> {
     });
     if (!resultado.ok) throw new FormError("email_teste_falhou");
   });
+}
+
+/**
+ * Gera o código que conecta um agente a esta loja.
+ *
+ * Devolve o valor em vez de redirecionar porque o código aparece **uma vez**: mandá-lo no
+ * `?ok=` o deixaria no histórico do navegador e no log de quem serve a página, que é o
+ * contrário do que um código de acesso quer.
+ */
+export async function createAgentLinkCode(
+  tenantId: string,
+  kind: "sales" | "operator",
+  label: string
+): Promise<{ ok: true; codigo: string; expira_em: string } | { ok: false; erro: string }> {
+  try {
+    const criado = await api<{ codigo: string; expira_em: string }>(
+      `/admin/tenants/${tenantId}/agent-links/codes`,
+      { method: "POST", json: { tipo: kind, nome: label || null } }
+    );
+    return { ok: true, ...criado };
+  } catch (error) {
+    return { ok: false, erro: error instanceof Error ? error.message : "falhou" };
+  }
+}
+
+/** Desconecta o agente. A credencial dele para de valer na hora. */
+export async function revokeAgentLink(
+  tenantId: string,
+  linkId: string
+): Promise<{ ok: boolean; erro?: string }> {
+  try {
+    await api(`/admin/tenants/${tenantId}/agent-links/${linkId}`, { method: "DELETE" });
+    revalidatePath(`/painel/t/${tenantId}/configuracoes`);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, erro: error instanceof Error ? error.message : "falhou" };
+  }
 }
