@@ -40,8 +40,11 @@ SCOPES: dict[str, frozenset[Scope]] = {
     # Modo expor: atende e vende. Não pausa produto, não mexe em estoque, não cancela pedido —
     # o agente conversa com clientes finais, e nenhuma conversa deve chegar nessas alavancas.
     "sales": frozenset({Scope.CATALOG_READ, Scope.ORDERS_READ, Scope.ORDERS_WRITE}),
-    # Assistente do próprio lojista: lê tudo e opera o que o painel opera, menos dinheiro
-    # parado (cancelar/estornar continua pedindo a conta dele).
+    # Assistente do próprio lojista: o que ele já faz hoje falando pela conta do dono. Inclui
+    # cancelar, que devolve dinheiro — não por ser inofensivo, mas porque trocar a conta pela
+    # credencial não é hora de tirar função que funciona. Quem segura o cancelamento é o
+    # bilhete de confirmação do outro lado, que exige um turno da pessoa, e isso é mais forte
+    # do que um escopo: escopo não sabe se alguém leu o resumo.
     "operator": frozenset(
         {
             Scope.CATALOG_READ,
@@ -52,6 +55,7 @@ SCOPES: dict[str, frozenset[Scope]] = {
             Scope.ORDERS_READ,
             Scope.ORDERS_WRITE,
             Scope.ORDERS_TRANSITION,
+            Scope.ORDERS_CANCEL,
             Scope.CUSTOMERS_READ,
         }
     ),

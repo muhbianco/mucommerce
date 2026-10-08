@@ -232,6 +232,16 @@ async def test_as_permissoes_de_cada_tipo_sao_fixas_no_codigo() -> None:
     assert Scope.INVENTORY_ADJUST not in SCOPES["sales"]
     assert Scope.ORDERS_TRANSITION not in SCOPES["sales"]
     assert Scope.CATALOG_WRITE not in SCOPES["sales"]
-    # O assistente do lojista opera, mas dinheiro parado continua pedindo a conta dele.
-    assert Scope.INVENTORY_ADJUST in SCOPES["operator"]
-    assert Scope.ORDERS_CANCEL not in SCOPES["operator"]
+    # O assistente do lojista mantém o que já faz hoje falando pela conta — inclusive cancelar.
+    # Trocar a conta pela credencial não é hora de tirar função; quem segura o cancelamento é o
+    # bilhete de confirmação, que exige um turno da pessoa.
+    assert SCOPES["operator"] >= {
+        Scope.CATALOG_WRITE,
+        Scope.INVENTORY_ADJUST,
+        Scope.ORDERS_TRANSITION,
+        Scope.ORDERS_CANCEL,
+    }
+    # E o de vendas segue sem nenhuma dessas alavancas.
+    assert not (
+        SCOPES["sales"] & {Scope.CATALOG_WRITE, Scope.INVENTORY_ADJUST, Scope.ORDERS_CANCEL}
+    )
