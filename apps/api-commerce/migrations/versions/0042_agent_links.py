@@ -70,7 +70,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_agent_links_tenant_id", table_name="agent_links")
+    # Só as tabelas: índice e FK caem com elas. Derrubar `ix_*_tenant_id` antes falha no
+    # MariaDB com 1553 — aqui a FK é só `tenant_id`, então é esse índice que a sustenta.
+    # (Em `refund_lines` o mesmo drop passa porque lá a FK é composta.)
     op.drop_table("agent_links")
-    op.drop_index("ix_agent_link_codes_tenant_id", table_name="agent_link_codes")
     op.drop_table("agent_link_codes")
