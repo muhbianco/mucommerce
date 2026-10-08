@@ -164,6 +164,7 @@ Substitui o desenho anterior (`shared`/`owned`); decisão em [ADR 0010](adr/0010
 - **`api-commerce`**: `/internal/agent/v1` com leitura (produtos, estoque, relatórios), controle (pausar/retomar, ajuste de estoque, preço em 2 passos) e, depois da etapa E, venda (`customers/resolve`, `sales/quotes`, `sales/orders` pelo `OrderService.place`, `origin=agent_llm|agent_typebot`).
 - **WuzAPI**: stack isolada, sem rota pública, só para o número **do cliente** (tabela própria `owned_whatsapp_numbers`). Denylist dos números da empresa, conferida no número declarado e no JID conectado, e kill switch.
 - **Venda no "expor"**: pode ser por LLM (tools com tenant/cliente injetados pelo servidor, orçamento de tokens) ou por Typebot (`store-proxy` com token HMAC). Os dois passam pelo mesmo gate.
+- **Produto (08/10/2026)**: o "expor" é vendido como **Assistente de vendas**, R$ 19,90/mês com cota de 600 mensagens, só para quem já tem a loja contratada. É o único modo de expor o número próprio; o módulo `sales_agent` é da assinatura ([ADR 0019](adr/0019-dono-de-cada-modulo.md)) e liga pelo provisionamento, como o Chatwoot.
 
 **Aceite**:
 - Duas instâncias do mesmo agente para o mesmo usuário, com senders, KB e tools separados.
@@ -174,7 +175,7 @@ Substitui o desenho anterior (`shared`/`owned`); decisão em [ADR 0010](adr/0010
 
 **Dependências**: H.1–H.3 dependem só da F1 e da etapa D. A venda (H.5) depende da etapa E. O handoff e as notificações dependem da etapa F. O go/no-go do WuzAPI é do dono, depois da apelação na Meta.
 
-**Riscos/rollback**: flags `agents`/`agents_sales` por tenant, revogação de credencial, `WUZAPI_ENABLED=false` ou scale 0 da stack.
+**Riscos/rollback**: módulo `sales_agent` por tenant (segue a assinatura), revogação de credencial, `WUZAPI_ENABLED=false` ou scale 0 da stack.
 
 ## Fase 6 — InfinitePay avançado, logística, fiscal, analytics/LLM e melhorias
 

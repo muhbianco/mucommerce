@@ -112,13 +112,13 @@ async def catalog_tenant(
     session_factory: async_sessionmaker[AsyncSession], slug: str, *, catalog: bool = True
 ) -> Tenant:
     tenant = await create_tenant(session_factory, slug)
-    if catalog:
-        async with session_factory() as session:
-            service = TenantService(session)
-            await service.set_features(
-                await service.get_or_404(tenant.id), {"catalog": True}, Actor.system("tests")
-            )
-            await session.commit()
+    # A loja já nasce com o catálogo ligado; o explícito vale para os dois lados.
+    async with session_factory() as session:
+        service = TenantService(session)
+        await service.set_features(
+            await service.get_or_404(tenant.id), {"catalog": catalog}, Actor.system("tests")
+        )
+        await session.commit()
     return tenant
 
 

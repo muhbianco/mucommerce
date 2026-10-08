@@ -242,7 +242,7 @@ async def put_features(
 ) -> dict[str, bool]:
     service = TenantService(session)
     tenant = await service.get_or_404(tenant_id)
-    return await service.set_features(tenant, body.flags, admin_actor(request, user))
+    return await service.set_platform_features(tenant, body.flags, admin_actor(request, user))
 
 
 @router.put(

@@ -284,7 +284,7 @@ Prefixo `/ops`; auth `admin_jwt` com `is_platform_admin` (`mb_superadmin` para c
 |--------|------|-----------------|------|---------|
 | GET/POST | `/tenants` | criar `{slug, name, legal_name?, document?, timezone, owner:{email, name}, plan}` → `draft` | POST **obrigatório** | `tenant.created` |
 | GET/PATCH | `/tenants/{id}` | dados e status | — | |
-| PUT | `/tenants/{id}/features` | `{flags:{storefront:true, manufacturing:false, events:true, delivery:true, pickup:true, "payments.mercadopago":true, "payments.infinitepay":false, chatwoot:true, sales_agent:false, whatsapp_owned:false}}` | — | `tenant.features_changed` |
+| PUT | `/tenants/{id}/features` | `{flags:{landing_ai:true}}` — só módulos da MuhBianco; do lojista ou de assinatura → 403 `module_not_platform` ([ADR 0019](adr/0019-dono-de-cada-modulo.md)) | — | `tenant.features_changed` |
 | PUT | `/tenants/{id}/payments/{provider}` | `{enabled, is_default, sandbox, public_config:{public_key}|{handle}, credentials:{access_token?, webhook_secret?}}` → grava criptografado; resposta só `masked`. Resposta inclui `setup_guide` com links: MP "Suas integrações" (criar app, credenciais de produção, configurar webhook → URL exata `…/webhooks/mercadopago/{tenant_key}`, tópicos `payment`), InfinitePay (obter InfiniteTag no app, doc do checkout, aviso "sem estorno por API") | — | `tenant.payment_config_changed` |
 | POST | `/tenants/{id}/payments/{provider}/test` | cria cobrança de R$ 1,00 em sandbox/`FakeProvider` e valida webhook de teste | — | |
 | POST | `/tenants/{id}/provision` | `{mode: activate|reprovision}` → `202 {run_id}` | **obrigatório** | `tenant.provisioning.started` |

@@ -107,14 +107,8 @@ async def publish_document(
 
 
 # ------------------------------------------------------------------ storefront
-def _storefront_open(tenant: TenantContext) -> None:
-    if not tenant.feature("storefront"):
-        raise NotFoundError("Recurso não encontrado.")
-
-
 @storefront_router.get("/policies", response_model=Policies, summary="Versões vigentes")
 async def policies(session: DbSession, tenant: StorefrontTenant) -> Policies:
-    _storefront_open(tenant)
     latest = await LegalService(session, tenant).latest_versions()
     return Policies(
         terms=summary(latest["terms"]) if "terms" in latest else None,
@@ -126,7 +120,6 @@ async def policies(session: DbSession, tenant: StorefrontTenant) -> Policies:
     "/policies/{kind}", response_model=DocumentRead, summary="Texto vigente de um documento"
 )
 async def policy(session: DbSession, tenant: StorefrontTenant, kind: Kind) -> DocumentRead:
-    _storefront_open(tenant)
     doc = await LegalService(session, tenant).latest(kind)
     if doc is None:
         raise NotFoundError("Documento não publicado.")

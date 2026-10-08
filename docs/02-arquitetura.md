@@ -325,7 +325,7 @@ Beat: `relay_outbox` (5 s), `reconcile_payments` (2 min, pagamentos `pending/req
 ## 10. Configuração, segredos e feature flags
 
 - Env por ambiente (Portainer Env `${VAR}` desde o primeiro deploy — não repetir o padrão de secrets inline no Editor YAML). Chaves: DB (`DB_*`, usuário app), `MIGRATE_DB_*` só no one-shot, `REDIS_URL`, `CELERY_*`, `MINIO_*`, `INTERNAL_TOKEN`, `SESSION_SECRET`, `CREDENTIALS_MASTER_KEY` (32 bytes base64, Docker secret), `GOOGLE_CLIENT_ID/SECRET`, `CHATWOOT_BASE_URL`, `CHATWOOT_PLATFORM_TOKEN`, `EMAIL_WEBHOOK_URL/SECRET` (n8n), `EDGE_PUBLIC_IP`, `PLATFORM_BASE_DOMAIN=loja.muhbianco.com.br`.
-- Por tenant: `tenant_settings` (JSON validado por schema versionado), `tenant_feature_flags(key, enabled, config)`: `storefront`, `manufacturing`, `events`, `delivery`, `pickup`, `payments.mercadopago`, `payments.infinitepay`, `chatwoot`, `sales_agent`, `whatsapp_owned`, `coupons`.
+- Por tenant: `tenant_settings` (JSON validado por schema versionado), `tenant_feature_flags(key, enabled, config)`: uma linha por módulo do catálogo `app/tenancy/modules.py`, que diz o rótulo, o valor inicial e quem é o dono de cada um (lojista, assinatura ou MuhBianco — [ADR 0019](adr/0019-dono-de-cada-modulo.md)).
 - Credenciais de integração: `tenant_integration_credentials(tenant_id, provider, key_name, ciphertext, nonce, key_version)` com AES-256-GCM (lib `cryptography`), AAD = `tenant_id:provider:key_name`. API só devolve `masked` + `configured_at`. Rotação: nova `key_version`, job re-encripta.
 
 ## 11. Contrato com a `api-agents`

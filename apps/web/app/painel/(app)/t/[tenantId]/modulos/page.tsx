@@ -18,7 +18,11 @@ interface Module {
   label: string;
   summary: string;
   where: string | null;
+  /** Quem manda: a loja (aqui), a assinatura (conta MuhBianco) ou a MuhBianco (admin). */
+  owner: "store" | "subscription" | "platform";
   self_service: boolean;
+  /** Ligado sempre: aparece sem botão. */
+  always_on: boolean;
   locked_reason: string | null;
   requires: string[];
   enabled: boolean;
@@ -79,8 +83,10 @@ function ModuleRow({
         ) : null}
       </div>
       <div className={styles.rowActions}>
-        <Pill state={item.enabled ? "live" : "off"}>{item.enabled ? "Ligado" : "Desligado"}</Pill>
-        {readOnly ? null : (
+        <Pill state={item.enabled ? "live" : "off"}>
+          {item.always_on ? "Sempre ligado" : item.enabled ? "Ligado" : "Desligado"}
+        </Pill>
+        {readOnly || item.always_on ? null : (
         <form action={toggleModule}>
           <input type="hidden" name="tenant_id" value={tenantId} />
           <input type="hidden" name="key" value={item.key} />
@@ -115,8 +121,9 @@ export default async function Modules({
   const readOnly = !isStoreMember(me, context.tenant_id);
 
   const modules = await api<Module[]>(`/admin/tenants/${tenantId}/modules`);
-  const free = modules.filter((m) => m.self_service);
-  const paid = modules.filter((m) => !m.self_service);
+  const free = modules.filter((m) => m.owner === "store");
+  const paid = modules.filter((m) => m.owner === "subscription");
+  const platform = modules.filter((m) => m.owner === "platform");
   const accessMode = String(context.settings.storefront?.access_mode ?? "whitelist");
 
   // Rótulo por chave (para as frases de dependência) e um marcador do que está ligado.
@@ -248,6 +255,30 @@ export default async function Modules({
           . Cancelando por lá, o serviço fica no ar até o fim do período já pago.
         </p>
       </Section>
+
+      {platform.length ? (
+        <Section
+          title="Liberados pela MuhBianco"
+          description="Não têm mensalidade; a MuhBianco liga quando a sua loja precisar."
+        >
+          <div className={styles.rows}>
+            {platform.map((item) => (
+              <div key={item.key} className={styles.row}>
+                <div className={styles.rowMain}>
+                  <strong>{item.label}</strong>
+                  <p className={styles.rowSub}>{item.summary}</p>
+                  {item.locked_reason ? <p className={styles.note}>{item.locked_reason}</p> : null}
+                </div>
+                <div className={styles.rowActions}>
+                  <Pill state={item.enabled ? "live" : "off"}>
+                    {item.enabled ? "Ligado" : "Desligado"}
+                  </Pill>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
     </>
   );
 }

@@ -34,11 +34,13 @@ def coupons_url(tenant: Tenant, coupon_id: str = "") -> str:
     return f"{base}/{coupon_id}" if coupon_id else base
 
 
-async def with_coupons(session_factory: async_sessionmaker[AsyncSession], tenant: Tenant) -> None:
+async def with_coupons(
+    session_factory: async_sessionmaker[AsyncSession], tenant: Tenant, *, on: bool = True
+) -> None:
     async with session_factory() as session:
         service = TenantService(session)
         await service.set_features(
-            await service.get_or_404(tenant.id), {"coupons": True}, Actor.system("tests")
+            await service.get_or_404(tenant.id), {"coupons": on}, Actor.system("tests")
         )
         await session.commit()
 
@@ -225,6 +227,7 @@ async def test_only_a_store_with_the_module_manages_coupons(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
 ) -> None:
     tenant, owner, _ = shop
+    await with_coupons(session_factory, tenant, on=False)  # a loja nasce com cupons ligado
     off = await client.get(coupons_url(tenant), headers=owner)
     assert off.status_code == 403 and off.json()["error"]["code"] == "feature_disabled"
 

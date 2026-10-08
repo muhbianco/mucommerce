@@ -9,8 +9,11 @@ from app.tenancy.models import DEFAULT_FEATURE_FLAGS
 from app.tenancy.settings_schemas import checkout_settings, validate_setting
 
 
-def test_checkout_is_off_until_a_store_switches_it_on() -> None:
-    assert DEFAULT_FEATURE_FLAGS["checkout"] is False
+def test_a_new_store_starts_with_the_cart_on() -> None:
+    # ADR 0019: a loja comprada no catálogo já nasce vendendo; quem vê a vitrine continua
+    # sendo "só quem você aprovar" até o lojista abrir.
+    assert DEFAULT_FEATURE_FLAGS["checkout"] is True
+    assert DEFAULT_FEATURE_FLAGS["customer_login"] is True
 
 
 def test_a_row_written_before_stage_e_still_reads() -> None:

@@ -221,6 +221,7 @@ class StoreProvisioningService:
                 )
         await self.session.flush()
         await self.session.refresh(tenant, ["domains"])
+        await self._set_chatwoot_module(tenant, enabled=True)
         return tenant
 
     async def disable_chatwoot(self, subscription_ref: str) -> Tenant:
@@ -230,7 +231,17 @@ class StoreProvisioningService:
             domain.status = DomainStatus.DISABLED
         await self.session.flush()
         await self.session.refresh(tenant, ["domains"])
+        await self._set_chatwoot_module(tenant, enabled=False)
         return tenant
+
+    async def _set_chatwoot_module(self, tenant: Tenant, *, enabled: bool) -> None:
+        """O módulo `chatwoot` é da assinatura (ADR 0019): segue a compra, não o admin.
+
+        Só escreve quando muda — as rotas são idempotentes e o api-agents repete a chamada.
+        """
+        atual = await self.tenants.repo.feature_flags(tenant.id)
+        if atual.get("chatwoot", False) != enabled:
+            await self.tenants.set_features(tenant, {"chatwoot": enabled}, ACTOR)
 
     async def _chatwoot_domains(self, tenant: Tenant) -> list[TenantDomain]:
         stmt = select(TenantDomain).where(

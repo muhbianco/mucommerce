@@ -20,5 +20,6 @@
 | [0016](0016-motor-de-blocos-da-vitrine.md) | Motor de blocos da vitrine: o esquema alarga e nunca estreita; versão sobe só quando o JSON salvo deixaria de validar; gosto mora no editor, não no validador; um resolver serve a vitrine e a prévia |
 | [0017](0017-vitrine-montada-com-ia.md) | Vitrine montada com IA: o modelo escreve rascunho e nunca `tenant_settings`; publicar usa a mesma porta da edição à mão; a chave vive na api-agents atrás de gateway genérico medido; cota antes da feature; reparo determinístico antes de retentativa; nenhuma transação aberta durante a chamada |
 | [0018](0018-mercado-pago-orders-api.md) | Mercado Pago migra para `/v1/orders`: a API de Pagamentos está sendo desativada; `processed` não é aprovação (quem afirma é `accredited`); id deixa de ser número; o que não foi visto numa resposta real fica declarado como não sabido |
+| [0019](0019-dono-de-cada-modulo.md) | Cada módulo tem um dono e só ele escreve: lojista (painel), assinatura (compra no catálogo) ou MuhBianco (admin); login dos clientes sempre ligado; loja nasce pronta para vender; `storefront` e `whatsapp_owned` saem |
 
 Novo ADR: copiar o formato (Contexto → Decisão → Consequências), numerar sequencialmente, linkar aqui.

@@ -190,6 +190,20 @@ class ModuleNotSelfServiceError(PermissionDeniedError):
     message = "Este módulo não é ligado por aqui."
 
 
+class ModuleAlwaysOnError(PermissionDeniedError):
+    """Módulo que a loja não desliga (o login dos clientes)."""
+
+    error_code = "module_always_on"
+    message = "Este módulo fica sempre ligado."
+
+
+class ModuleNotPlatformError(PermissionDeniedError):
+    """O admin do site tentou mexer num módulo do lojista ou de uma assinatura."""
+
+    error_code = "module_not_platform"
+    message = "Este módulo é ligado pela loja ou pela assinatura, não pelo admin."
+
+
 class ModuleRequiresError(ValidationError):
     """Faltou ligar um módulo do qual este depende."""
 

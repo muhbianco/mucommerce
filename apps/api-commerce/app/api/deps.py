@@ -229,7 +229,7 @@ def storefront_access_mode(tenant: TenantContext) -> str:
 
 def check_storefront_catalog(tenant: TenantContext, viewer: Viewer | None) -> None:
     """Raise unless the catalog of `tenant` is visible to `viewer` (see check_catalog_access)."""
-    if not (tenant.feature("storefront") and tenant.feature("catalog")):
+    if not tenant.feature("catalog"):
         raise NotFoundError("Recurso não encontrado.")
     check_catalog_access(storefront_access_mode(tenant), viewer)
 
@@ -239,7 +239,7 @@ async def require_catalog_access(
 ) -> TenantContext:
     """Gate for every storefront catalog read.
 
-    - `storefront` or `catalog` off → 404, as if the store had no catalog;
+    - `catalog` off → 404, as if the store had no catalog;
     - `public` → open; otherwise a session of this store is needed (401 `login_required`),
       and `whitelist` also needs approval (403 `access_pending` / `access_required`);
       blocked customers get 403 `access_blocked`.
@@ -275,12 +275,12 @@ class Shopper:
 async def require_checkout(tenant: StorefrontTenant, viewer: CurrentCustomer) -> Shopper:
     """Gate for cart, checkout and the customer's addresses (ADR 0011).
 
-    - `storefront`, `catalog` or `checkout` off → 404, as if the store did not sell online;
+    - `catalog` or `checkout` off → 404, as if the store did not sell online;
     - a session of this store is required in every access mode (401 `login_required`);
     - the catalog access rules apply (whitelist needs approval), and a blocked customer never
       buys, not even in a public store (403 `access_blocked`).
     """
-    if not (tenant.feature("storefront") and tenant.feature("catalog")):
+    if not tenant.feature("catalog"):
         raise NotFoundError("Recurso não encontrado.")
     if not tenant.feature("checkout"):
         raise NotFoundError("Recurso não encontrado.")

@@ -1,4 +1,4 @@
-"""Módulos que o lojista liga sozinho (Fase 2.1) e quem vê a vitrine (2.2).
+"""Módulos que o lojista liga sozinho (Fase 2.1, ADR 0019) e quem vê a vitrine (2.2).
 
 O que estes testes protegem é a allowlist do servidor: a tela esconde o toggle dos módulos
 pagos, mas quem tem que recusar o POST forjado é a API. Ligar Chatwoot sem passar pela loja de
@@ -12,7 +12,7 @@ from typing import Any
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.tenancy.modules import SELF_SERVICE
+from app.tenancy.modules import ALWAYS_ON, MODULES, PLATFORM, SELF_SERVICE
 from tests.shoppers import selling_store
 from tests.test_catalog import member_headers
 
@@ -42,10 +42,16 @@ async def test_lista_mostra_rotulo_e_por_que_o_pago_esta_travado(
 
     assert modulos["catalog"]["label"] == "Catálogo"
     assert modulos["catalog"]["self_service"] is True
+    assert modulos["catalog"]["owner"] == "store"
     assert modulos["shipping.melhorenvio"]["self_service"] is True  # incluso nos R$ 100
     chatwoot = modulos["chatwoot"]
     assert chatwoot["self_service"] is False
+    assert chatwoot["owner"] == "subscription"
     assert "conta" in (chatwoot["locked_reason"] or "")  # diz onde contratar
+    assert modulos["landing_ai"]["owner"] == "platform"
+    assert modulos["customer_login"]["always_on"] is True
+    # Saíram do catálogo: a vitrine no ar é o status da loja; o número próprio é o assistente.
+    assert "storefront" not in modulos and "whatsapp_owned" not in modulos
 
 
 async def test_lojista_liga_modulo_que_nao_cobra(
@@ -67,7 +73,7 @@ async def test_modulo_pago_nao_passa_nem_por_post_forjado(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
     tenant, owner = await loja(client, session_factory)
-    for chave in ("chatwoot", "sales_agent", "whatsapp_owned", "storefront"):
+    for chave in ("chatwoot", "sales_agent", "landing_ai", "whatsapp_owned", "storefront"):
         resposta = await client.put(
             f"{base(tenant)}/modules", json={"flags": {chave: True}}, headers=owner
         )
@@ -76,12 +82,44 @@ async def test_modulo_pago_nao_passa_nem_por_post_forjado(
 
 
 async def test_a_allowlist_nao_deixa_passar_flag_paga_por_engano() -> None:
-    """Se alguém marcar `self_service=True` num módulo pago, este teste cai."""
+    """Se alguém marcar `owner="store"` num módulo pago, este teste cai."""
     assert "chatwoot" not in SELF_SERVICE
     assert "sales_agent" not in SELF_SERVICE
-    assert "whatsapp_owned" not in SELF_SERVICE
-    assert "storefront" not in SELF_SERVICE
+    assert "landing_ai" not in SELF_SERVICE
     assert "shipping.melhorenvio" in SELF_SERVICE
+    assert {"customer_phone_otp", "manufacturing"} <= SELF_SERVICE
+    assert {"landing_ai"} == PLATFORM
+    assert {"customer_login"} == ALWAYS_ON
+    # O que nunca desliga é do lojista: ele vê no painel, só não tem o botão.
+    assert all(m.self_service for m in MODULES if m.always_on)
+
+
+async def test_lojista_nao_desliga_o_login_dos_clientes(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Sem login não há carrinho, cliente aprovado nem histórico: o painel não desliga."""
+    tenant, owner = await loja(client, session_factory, checkout=False)
+    resposta = await client.put(
+        f"{base(tenant)}/modules", json={"flags": {"customer_login": False}}, headers=owner
+    )
+    assert resposta.status_code == 403, resposta.text
+    assert resposta.json()["error"]["code"] == "module_always_on"
+
+
+async def test_lojista_liga_confirmacao_de_whatsapp_e_producao(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Saíram do admin para o painel: não cobram e não dependem de ninguém da MuhBianco."""
+    tenant, owner = await loja(client, session_factory, manufacturing=False)
+    resposta = await client.put(
+        f"{base(tenant)}/modules",
+        json={"flags": {"customer_phone_otp": True, "manufacturing": True}},
+        headers=owner,
+    )
+    assert resposta.status_code == 200, resposta.text
+    modulos = by_key(resposta.json())
+    assert modulos["customer_phone_otp"]["enabled"] is True
+    assert modulos["manufacturing"]["enabled"] is True
 
 
 async def test_modulo_que_depende_de_outro_cobra_a_ordem(
@@ -142,7 +180,8 @@ async def test_vitrine_publica_sem_login_e_estado_que_nao_vende(
     """Regressão da loja do Silvio: catálogo aberto, checkout ligado, login desligado.
 
     O carrinho é de uma pessoa; sem login não há a quem pertencer, e a loja ficava visível e
-    inviável ao mesmo tempo. Agora o checkout cobra o login, e o login é self-service.
+    inviável ao mesmo tempo. Agora o checkout cobra o login, e o login é self-service (e,
+    desde a ADR 0019, não desliga mais; a migration 0040 ligou nas lojas antigas).
     """
     tenant, owner = await loja(client, session_factory, checkout=False, customer_login=False)
     recusa = await client.put(

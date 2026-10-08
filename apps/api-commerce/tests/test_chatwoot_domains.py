@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from httpx import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.audit.models import AuditLog
 from app.core.config import settings
+from app.provisioning.service import StoreProvisioningService
+from app.tenancy.context import CROSS_TENANT_OPTION
 from app.tenancy.edge import build_traefik_config
 from app.tenancy.models import DomainPurpose, DomainRole, DomainStatus, TenantDomain
+from app.tenancy.repository import TenantRepository
 from tests.test_store_provisioning import AGENTS, BASE, purchase
 
 
@@ -104,6 +109,44 @@ async def test_desligar_tira_os_hosts_do_ar(
     )
     assert on.json()["hosts"] == ["chatwoot.lunares.com.br", "lunares.chatwoot.muhbianco.com.br"]
     assert on.json()["custom_domain"]["status"] == DomainStatus.PENDING_DNS
+
+
+async def _modulo_chatwoot(
+    session_factory: async_sessionmaker[AsyncSession], ref: str
+) -> tuple[bool, int]:
+    """Estado do módulo e quantas vezes ele foi escrito (auditoria)."""
+    async with session_factory() as session:
+        tenant = await StoreProvisioningService(session).by_subscription(ref)
+        assert tenant is not None
+        flags = await TenantRepository(session).feature_flags(tenant.id)
+        escritas = await session.scalar(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(AuditLog.entity_id == tenant.id, AuditLog.action == "tenant.features_changed")
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+    return flags.get("chatwoot", False), int(escritas or 0)
+
+
+async def test_o_modulo_segue_a_assinatura(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """ADR 0019: o módulo `chatwoot` é da assinatura — liga na compra e desliga no cancelamento.
+
+    Antes, a compra só ligava os endereços; o módulo ficava como o admin tivesse deixado.
+    """
+    ref = await _active_store(client, slug="lunares")
+    assert (await _modulo_chatwoot(session_factory, ref))[0] is False
+
+    await client.post(f"{BASE}/{ref}/chatwoot", json={}, headers=AGENTS)
+    ligado, escritas = await _modulo_chatwoot(session_factory, ref)
+    assert ligado is True
+    # A rota é idempotente e o api-agents repete: a segunda chamada não escreve de novo.
+    await client.post(f"{BASE}/{ref}/chatwoot", json={}, headers=AGENTS)
+    assert await _modulo_chatwoot(session_factory, ref) == (True, escritas)
+
+    await client.delete(f"{BASE}/{ref}/chatwoot", headers=AGENTS)
+    assert (await _modulo_chatwoot(session_factory, ref))[0] is False
 
 
 async def test_chatwoot_precisa_do_token_dos_agentes(client: AsyncClient) -> None:

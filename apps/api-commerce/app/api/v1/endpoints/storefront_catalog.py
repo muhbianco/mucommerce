@@ -491,8 +491,6 @@ def _catalog_accessible(tenant: TenantContext, viewer: Viewer | None) -> bool:
 async def storefront_landing(
     session: DbSession, tenant: StorefrontTenant, viewer: OptionalCustomer
 ) -> list[dict[str, Any]]:
-    if not tenant.feature("storefront"):
-        raise NotFoundError("Recurso não encontrado.")
     return await resolve_landing(
         session,
         tenant,

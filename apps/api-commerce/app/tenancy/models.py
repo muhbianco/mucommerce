@@ -25,6 +25,7 @@ from app.models.base import (
     UtcDateTime,
     UUIDPrimaryKeyMixin,
 )
+from app.tenancy import modules
 from app.tenancy.settings_schemas import default_settings
 
 NONCE_TYPE = LargeBinary(12).with_variant(mysql.VARBINARY(12), "mysql", "mariadb")
@@ -184,34 +185,9 @@ class TenantIntegrationCredential(UUIDPrimaryKeyMixin, TimestampMixin, TenantSco
     rotated_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
-DEFAULT_FEATURE_FLAGS: dict[str, bool] = {
-    "storefront": True,
-    # Phase 1 slice 1: off until the tenant is ready; turned on first in the loja modelo.
-    "catalog": False,
-    "inventory": False,
-    # Off until their phase ships (catálogo completo, checkout, Chatwoot): a module switched on
-    # in the site admin must do something.
-    "events": False,
-    # Stage E: master switch for cart, checkout and payments (needs `customer_login` too).
-    "checkout": False,
-    "pickup": False,
-    "delivery": False,
-    "manufacturing": False,
-    # Etapa K: abre o teto de propostas de vitrine. A cota grátis existe sem ele.
-    "landing_ai": False,
-    "coupons": False,
-    "chatwoot": False,
-    "payments.mercadopago": False,
-    "payments.infinitepay": False,
-    "payments.pagbank": False,
-    # Etapa J: envio por transportadora. Convive com `delivery` (frota própria).
-    "shipping.melhorenvio": False,
-    # Phase A: store customers sign in with Google; phone check by WhatsApp code.
-    "customer_login": False,
-    "customer_phone_otp": False,
-    "sales_agent": False,
-    "whatsapp_owned": False,
-}
+# Uma linha por módulo na loja recém-criada; o valor e o dono de cada um vivem no catálogo de
+# módulos (app/tenancy/modules.py), que é quem a tela e o servidor consultam.
+DEFAULT_FEATURE_FLAGS: dict[str, bool] = dict(modules.DEFAULTS)
 
 # One source of truth: the versioned schemas (app/tenancy/settings_schemas.py).
 DEFAULT_SETTINGS: dict[str, dict[str, Any]] = default_settings()

@@ -1,8 +1,9 @@
 """Painel: os módulos que o próprio lojista liga e quem vê a vitrine.
 
-Os módulos pagos aparecem aqui, mas travados e com o motivo: ligar um deles é compra, e compra
-acontece na loja de serviços do site, onde existe carteira, termos e renovação. Esconder o
-módulo só faria o lojista achar que a loja não tem aquilo.
+Os módulos que não são dele aparecem aqui, mas travados e com o motivo: ligar um pago é compra,
+e compra acontece na loja de serviços do site, onde existe carteira, termos e renovação; os da
+MuhBianco ela liga pelo admin. Esconder o módulo só faria o lojista achar que a loja não tem
+aquilo. O admin do site lê esta mesma lista e usa `owner` para saber o que é dele.
 """
 
 from __future__ import annotations
@@ -36,7 +37,12 @@ class ModuleRead(BaseModel):
     label: str
     summary: str
     where: str | None
+    #: Quem manda no módulo: `store` (painel), `subscription` (compra) ou `platform` (admin).
+    owner: modules.Owner
+    #: `owner == "store"`; fica para quem ainda lê o campo antigo.
     self_service: bool
+    #: Ligado sempre; o painel mostra sem botão.
+    always_on: bool
     locked_reason: str | None
     requires: list[str]
     enabled: bool
@@ -59,7 +65,9 @@ def _view(enabled: dict[str, bool]) -> list[ModuleRead]:
             label=module.label,
             summary=module.summary,
             where=module.where,
+            owner=module.owner,
             self_service=module.self_service,
+            always_on=module.always_on,
             locked_reason=module.locked_reason,
             requires=list(module.requires),
             enabled=enabled.get(module.key, False),

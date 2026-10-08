@@ -22,7 +22,6 @@ from tests.conftest import create_tenant
 
 WEB_TOKEN = "web-token-test"
 SELLING = {
-    "storefront": True,
     "catalog": True,
     "inventory": True,
     "checkout": True,

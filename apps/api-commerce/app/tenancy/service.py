@@ -16,7 +16,9 @@ from app.audit.writer import audit
 from app.core.config import settings
 from app.core.exceptions import (
     ConflictError,
+    ModuleAlwaysOnError,
     ModuleInUseError,
+    ModuleNotPlatformError,
     ModuleNotSelfServiceError,
     ModuleRequiresError,
     NotFoundError,
@@ -261,7 +263,7 @@ class TenantService:
     async def set_self_service_features(
         self, tenant: Tenant, flags: dict[str, bool], actor: Actor
     ) -> dict[str, bool]:
-        """O que o lojista liga sozinho. Cobrança e chave geral continuam com a plataforma.
+        """O que o lojista liga sozinho. O que cobra ou é da MuhBianco não passa por aqui.
 
         A allowlist vive no servidor de propósito: a tela esconde o toggle, mas quem impede o
         POST forjado é isto aqui.
@@ -269,6 +271,11 @@ class TenantService:
         bloqueados = sorted(set(flags) - modules.SELF_SERVICE)
         if bloqueados:
             raise ModuleNotSelfServiceError(modules_=bloqueados)
+        fixos = sorted(
+            key for key, ligado in flags.items() if not ligado and key in modules.ALWAYS_ON
+        )
+        if fixos:
+            raise ModuleAlwaysOnError(modules_=fixos)
         atual = await self.repo.feature_flags(tenant.id)
         efetivo = {key: atual.get(key, False) for key in DEFAULT_FEATURE_FLAGS} | flags
         for key, ligado in flags.items():
@@ -280,6 +287,23 @@ class TenantService:
                 presos = [d for d in modules.dependents(key) if efetivo.get(d)]
                 if presos:
                     raise ModuleInUseError(dependents=presos)
+        return await self.set_features(tenant, flags, actor)
+
+    async def set_platform_features(
+        self, tenant: Tenant, flags: dict[str, bool], actor: Actor
+    ) -> dict[str, bool]:
+        """O que a MuhBianco liga pelo admin do site.
+
+        Os módulos do lojista são dele (painel) e os pagos seguem a assinatura (provisionamento);
+        sem esta trava, o admin desligaria por engano o carrinho de uma loja ou daria de graça
+        o que é cobrado.
+        """
+        unknown = sorted(set(flags) - set(DEFAULT_FEATURE_FLAGS))
+        if unknown:
+            raise ValidationError("Feature flag desconhecida.", unknown=unknown)
+        alheios = sorted(set(flags) - modules.PLATFORM)
+        if alheios:
+            raise ModuleNotPlatformError(modules_=alheios)
         return await self.set_features(tenant, flags, actor)
 
     async def set_features(

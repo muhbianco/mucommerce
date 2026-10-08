@@ -243,3 +243,104 @@ def test_whatsapp_obrigatorio_so_na_sgpipas(sqlite_url: str) -> None:
 
     command.downgrade(config, "0038_address_recipient_document")
     assert ler("sgpipas") == checkout
+
+
+def test_login_dos_clientes_liga_em_toda_loja(sqlite_url: str) -> None:
+    """0040: login desligado liga, loja sem a linha ganha uma, e o resto fica como estava."""
+    from sqlalchemy import text
+
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "0039_require_whatsapp_sgpipas")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    lojas = {
+        "desligada": "01a00000-0000-7000-8000-0000000000c1",
+        "ligada": "01a00000-0000-7000-8000-0000000000c2",
+        "sem-linha": "01a00000-0000-7000-8000-0000000000c3",
+    }
+    with engine.begin() as conn:
+        for n, (slug, tenant_id) in enumerate(lojas.items()):
+            _insert(conn, "tenants", id=tenant_id, slug=slug)
+            _insert(
+                conn,
+                "tenant_feature_flags",
+                id=f"01a00000-0000-7000-8000-0000000000d{n}",
+                tenant_id=tenant_id,
+                key="checkout",
+                enabled=False,
+            )
+        for slug, ligado in (("desligada", False), ("ligada", True)):
+            _insert(
+                conn,
+                "tenant_feature_flags",
+                id=f"01a00000-0000-7000-8000-0000000000e{int(ligado)}",
+                tenant_id=lojas[slug],
+                key="customer_login",
+                enabled=ligado,
+            )
+    engine.dispose()
+
+    command.upgrade(config, "0040_customer_login_always_on")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("SELECT tenant_id, key, enabled FROM tenant_feature_flags")
+        ).all()
+    engine.dispose()
+    por_loja = {(tenant_id, key): bool(enabled) for tenant_id, key, enabled in linhas}
+    for tenant_id in lojas.values():
+        assert por_loja[(tenant_id, "customer_login")] is True
+        assert por_loja[(tenant_id, "checkout")] is False  # só o login muda
+    assert len(linhas) == 2 * len(lojas)  # uma linha nova, nenhuma duplicada
+
+    command.downgrade(config, "0039_require_whatsapp_sgpipas")  # no-op, mas tem de rodar
+
+
+def test_bolsocoberto_perde_a_cortesia_e_so_ela(sqlite_url: str) -> None:
+    """0041: desliga `chatwoot` e `sales_agent` só na Bolso Coberto; o downgrade devolve."""
+    from sqlalchemy import text
+
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "0040_customer_login_always_on")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    lojas = {
+        "bolsocoberto": "01a00000-0000-7000-8000-0000000000f1",
+        "outra": "01a00000-0000-7000-8000-0000000000f2",
+    }
+    n = 0
+    with engine.begin() as conn:
+        for slug, tenant_id in lojas.items():
+            _insert(conn, "tenants", id=tenant_id, slug=slug)
+            for key in ("chatwoot", "sales_agent", "catalog"):
+                n += 1
+                _insert(
+                    conn,
+                    "tenant_feature_flags",
+                    id=f"01a00000-0000-7000-8000-000000000{n:03d}",
+                    tenant_id=tenant_id,
+                    key=key,
+                    enabled=True,
+                )
+    engine.dispose()
+
+    def ligados() -> set[tuple[str, str]]:
+        engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+        with engine.connect() as conn:
+            linhas = conn.execute(
+                text(
+                    "SELECT t.slug, f.key FROM tenant_feature_flags f "
+                    "JOIN tenants t ON t.id = f.tenant_id WHERE f.enabled"
+                )
+            ).all()
+        engine.dispose()
+        return {(slug, key) for slug, key in linhas}
+
+    command.upgrade(config, "0041_bolsocoberto_sem_cortesia")
+    assert ligados() == {
+        ("bolsocoberto", "catalog"),
+        ("outra", "chatwoot"),
+        ("outra", "sales_agent"),
+        ("outra", "catalog"),
+    }
+
+    command.downgrade(config, "0040_customer_login_always_on")
+    assert len(ligados()) == 6

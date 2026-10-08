@@ -35,7 +35,6 @@ const ACCESS: Record<string, { label: string; hint: string }> = {
 };
 
 const MODULES: { key: string; label: string }[] = [
-  { key: "storefront", label: "Vitrine" },
   { key: "catalog", label: "Catálogo" },
   { key: "inventory", label: "Estoque" },
   { key: "events", label: "Eventos" },

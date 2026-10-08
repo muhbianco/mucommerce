@@ -84,15 +84,26 @@ async def test_features_settings_status_and_domains(
     tenant_id = created.json()["id"]
 
     flags = await client.get(f"/api/v1/ops/tenants/{tenant_id}/features", headers=operator_headers)
-    assert flags.json()["storefront"] is True and flags.json()["manufacturing"] is False
+    assert "storefront" not in flags.json()
+    assert flags.json()["manufacturing"] is True and flags.json()["landing_ai"] is False
 
     updated = await client.put(
         f"/api/v1/ops/tenants/{tenant_id}/features",
-        json={"flags": {"manufacturing": True, "payments.mercadopago": True}},
+        json={"flags": {"landing_ai": True}},
         headers=operator_headers,
     )
     assert updated.status_code == 200, updated.text
-    assert updated.json()["manufacturing"] is True
+    assert updated.json()["landing_ai"] is True
+
+    # O que é do lojista (painel) ou da assinatura (compra) o admin não liga nem desliga.
+    for key in ("checkout", "payments.mercadopago", "chatwoot", "sales_agent"):
+        alheio = await client.put(
+            f"/api/v1/ops/tenants/{tenant_id}/features",
+            json={"flags": {key: False}},
+            headers=operator_headers,
+        )
+        assert alheio.status_code == 403, key
+        assert alheio.json()["error"]["code"] == "module_not_platform"
 
     bad_flag = await client.put(
         f"/api/v1/ops/tenants/{tenant_id}/features",

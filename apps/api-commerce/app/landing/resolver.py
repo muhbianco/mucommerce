@@ -99,7 +99,7 @@ async def resolve_landing(
     }
     categories = {c.id: c for c in (await catalog.categories() if show_catalog else [])}
 
-    catalog_on = tenant.feature("storefront") and tenant.feature("catalog")
+    catalog_on = tenant.feature("catalog")
     resolved: list[dict[str, Any]] = []
     for block in blocks:
         kind = block.get("type")

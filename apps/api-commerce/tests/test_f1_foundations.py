@@ -49,15 +49,27 @@ def test_media_write_scope_goes_to_catalog_roles_only() -> None:
     assert Scope.MEDIA_WRITE not in scopes_for_tenant_role(TenantRole.SUPPORT)
 
 
-def test_catalog_and_inventory_flags_start_off() -> None:
-    assert DEFAULT_FEATURE_FLAGS["catalog"] is False
-    assert DEFAULT_FEATURE_FLAGS["inventory"] is False
-
-
-def test_flags_without_code_start_off() -> None:
-    # A module switched on in the site admin must do something; these ship in later phases.
-    for key in ("events", "pickup", "chatwoot", "delivery", "coupons", "sales_agent"):
-        assert DEFAULT_FEATURE_FLAGS[key] is False, key
+def test_a_new_store_starts_with_the_owner_defaults() -> None:
+    # ADR 0019: a loja comprada no catálogo nasce pronta para vender; o resto o lojista liga.
+    assert DEFAULT_FEATURE_FLAGS == {
+        "catalog": True,
+        "inventory": True,
+        "events": False,
+        "checkout": True,
+        "pickup": False,
+        "delivery": False,
+        "shipping.melhorenvio": True,
+        "coupons": True,
+        "payments.mercadopago": False,
+        "payments.pagbank": False,
+        "payments.infinitepay": False,
+        "customer_login": True,
+        "customer_phone_otp": False,
+        "manufacturing": True,
+        "chatwoot": False,
+        "sales_agent": False,
+        "landing_ai": False,
+    }
 
 
 # ----------------------------------------------------------------------------- settings
@@ -131,7 +143,7 @@ def _context(**overrides: Any) -> TenantContext:
         "timezone": "America/Sao_Paulo",
         "locale": "pt-BR",
         "currency": "BRL",
-        "features": {"storefront": True, "catalog": True},
+        "features": {"catalog": True},
         "settings": {"storefront": {"access_mode": "public"}},
     }
     base.update(overrides)
@@ -148,9 +160,9 @@ async def test_catalog_access_gate() -> None:
     with pytest.raises(LoginRequiredError):
         await require_catalog_access(_context(settings={}), None)  # missing = whitelist
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={"storefront": True}), None)
+        await require_catalog_access(_context(features={}), None)
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={"catalog": True}), None)
+        await require_catalog_access(_context(features={"catalog": False}), None)
 
 
 @pytest.mark.parametrize(
@@ -186,6 +198,12 @@ async def test_panel_route_feature_gate(session_factory: async_sessionmaker[Asyn
         session_factory, "ops@muhbianco.test", platform_role=PlatformRole.OPERATOR
     )
     gate = require_tenant_scopes(Scope.CATALOG_READ, features=("catalog",))
+    async with session_factory() as session:
+        tenant_row = await TenantService(session).get_or_404(tenant.id)
+        await TenantService(session).set_features(
+            tenant_row, {"catalog": False}, Actor.system("tests")
+        )
+        await session.commit()
     async with session_factory() as session:
         user = await session.get(AdminUser, operator.id)
         assert user is not None
