@@ -65,6 +65,8 @@ router = APIRouter(
 
 #: Teto de qualquer lista deste módulo. O assistente lê para resumir, não para paginar.
 MAX_ROWS = 50
+#: Quantas lojas de uma conta a resolução olha. Teto de sanidade: ninguém administra 50.
+MAX_STORES_PER_ACCOUNT = 50
 
 
 class NoStoreError(NotFoundError):
@@ -106,12 +108,29 @@ class AgentStore:
             raise PermissionDeniedError(f"Seu acesso a esta loja não {what}.", missing=[str(scope)])
 
 
-async def _store_of(session: AsyncSession, account_id: str) -> AgentStore:
-    """A loja desta conta MuhBianco, com o papel dela.
+class AmbiguousStoreError(ValidationError):
+    """A conta administra mais de uma loja e o chamador não disse qual.
+
+    Escolher a mais antiga calado seria o pior dos mundos: o assistente de uma loja operaria a
+    outra, e ninguém veria. Melhor recusar e pedir a loja.
+    """
+
+    error_code = "store_required"
+    message = "Esta conta administra mais de uma loja. Informe qual delas em X-Store-Id."
+
+
+async def _store_of(
+    session: AsyncSession, account_id: str, store_id: str | None = None
+) -> AgentStore:
+    """A loja que esta chamada alcança, com o papel desta conta nela.
 
     Passa pela associação (`tenant_memberships`), não pela assinatura: quem manda é quem tem
     acesso à loja hoje. Conta sem loja recebe uma recusa que diz isso — o assistente precisa
     saber a diferença entre "não achei" e "você não tem loja" para falar a verdade ao cliente.
+
+    `X-Store-Id` diz **qual** loja, e a associação diz se esta conta pode entrar nela. Sem o
+    cabeçalho só funciona para quem tem uma loja só: com duas, escolher sozinho significaria o
+    assistente ligado à loja A operando a loja B do mesmo dono.
 
     O papel vem junto porque é ele que decide o que pode ser **oferecido**: um acesso que não
     cancela pedido não deve ouvir "posso cancelar para você" e falhar depois.
@@ -125,12 +144,21 @@ async def _store_of(session: AsyncSession, account_id: str) -> AgentStore:
             TenantMembership.status == "active",
         )
         .order_by(TenantMembership.created_at)
-        .limit(1)
+        .limit(MAX_STORES_PER_ACCOUNT)
     )
-    row = (await session.execute(stmt)).first()
-    if row is None:
+    rows = (await session.execute(stmt)).all()
+    if not rows:
         raise NoStoreError
-    tenant_id, role = str(row[0]), str(row[1])
+    if store_id is not None:
+        escolhida = next((row for row in rows if str(row[0]) == store_id), None)
+        if escolhida is None:
+            # A conta não administra esta loja. A recusa é a mesma de loja inexistente: dizer
+            # "existe, mas não é sua" confirma a existência de uma loja de outro dono.
+            raise NoStoreError
+        rows = [escolhida]
+    elif len(rows) > 1:
+        raise AmbiguousStoreError
+    tenant_id, role = str(rows[0][0]), str(rows[0][1])
     context = await TenantResolver(session).resolve_by_id(tenant_id)
     bind_session_tenant(session, context.id)
     return AgentStore(
@@ -142,10 +170,14 @@ async def _store_of(session: AsyncSession, account_id: str) -> AgentStore:
 
 
 CurrentStore = Annotated[str, Header(alias="X-Account-Id", min_length=1, max_length=64)]
+#: Qual loja, quando a conta tem mais de uma. Opcional para não quebrar quem tem só uma.
+ChosenStore = Annotated[str | None, Header(alias="X-Store-Id", max_length=36)]
 
 
-async def store_context(session: DbSession, x_account_id: CurrentStore) -> AgentStore:
-    return await _store_of(session, x_account_id)
+async def store_context(
+    session: DbSession, x_account_id: CurrentStore, x_store_id: ChosenStore = None
+) -> AgentStore:
+    return await _store_of(session, x_account_id, x_store_id)
 
 
 Store = Annotated[AgentStore, Depends(store_context)]

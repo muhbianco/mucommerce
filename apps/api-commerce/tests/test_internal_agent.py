@@ -18,11 +18,12 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.scopes import TenantRole
 from app.identity.models import AdminUser
+from app.identity.service import AdminAuthService
 from app.production.models import Supply, SupplyUnit
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.models import Tenant
@@ -40,15 +41,35 @@ async def account_of(
     tenant: Tenant,
     *,
     role: TenantRole = TenantRole.OWNER,
+    conta: str | None = None,
 ) -> dict[str, str]:
     """Uma conta MuhBianco que administra `tenant`; devolve os cabeçalhos do assistente.
 
     É o mesmo vínculo que a compra da loja cria (`external_account_id` + membership), só escrito
     à mão para o teste não precisar passar pela carteira.
     """
+    if conta is not None:
+        # Uma conta MuhBianco é um `admin_user` só (external_account_id é único): a segunda
+        # loja entra como associação nova do mesmo usuário, não como outro usuário.
+        async with session_factory() as session:
+            existente = (
+                (
+                    await session.execute(
+                        select(AdminUser).where(AdminUser.external_account_id == conta)
+                    )
+                )
+                .scalars()
+                .one()
+            )
+            await AdminAuthService(session).add_membership(
+                user=existente, tenant_id=tenant.id, role=str(role), actor="system:tests"
+            )
+            await session.commit()
+        return TOKEN | {"X-Account-Id": conta}
+
     account_id = str(uuid.uuid4())
     user = await create_admin(
-        session_factory, f"{account_id[:8]}@dono.test", memberships={tenant.id: role}
+        session_factory, f"{uuid.uuid4().hex[:8]}@dono.test", memberships={tenant.id: role}
     )
     async with session_factory() as session:
         await session.execute(
@@ -227,3 +248,53 @@ async def test_membro_da_equipe_da_loja_tambem_abre_a_porta(
     tenant, _, _ = shop
     ops = await account_of(session_factory, tenant, role=TenantRole.OPS)
     assert (await client.get(f"{AGENT}/store", headers=ops)).json()["tenant_id"] == tenant.id
+
+
+# ------------------------------------------------------------------ qual loja, quando há duas
+
+
+async def test_com_duas_lojas_a_porta_exige_dizer_qual(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: Any,
+) -> None:
+    """Escolher a mais antiga calado seria o assistente de uma loja operando a outra."""
+    tenant, _, _ = shop
+    outra = await selling_store(session_factory, "beta")
+    dono = await account_of(session_factory, tenant)
+    await account_of(session_factory, outra, conta=dono["X-Account-Id"])
+
+    ambiguo = await client.get(f"{AGENT}/store", headers=dono)
+    assert ambiguo.status_code == 422
+    assert ambiguo.json()["error"]["code"] == "store_required"
+
+    primeira = await client.get(f"{AGENT}/store", headers=dono | {"X-Store-Id": tenant.id})
+    assert primeira.json()["slug"] == tenant.slug
+    segunda = await client.get(f"{AGENT}/store", headers=dono | {"X-Store-Id": outra.id})
+    assert segunda.json()["slug"] == "beta"
+
+
+async def test_loja_de_outro_dono_nao_e_alcancavel_pelo_cabecalho(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: Any,
+) -> None:
+    """E a recusa é a de sempre: confirmar que a loja existe já é contar demais."""
+    tenant, _, _ = shop
+    alheia = await selling_store(session_factory, "beta")
+    dono = await account_of(session_factory, tenant)
+    await account_of(session_factory, alheia)  # outra conta, outro dono
+
+    negado = await client.get(f"{AGENT}/store", headers=dono | {"X-Store-Id": alheia.id})
+    assert negado.status_code == 404
+    assert negado.json()["error"]["code"] == "no_store"
+
+
+async def test_uma_loja_so_continua_sem_precisar_do_cabecalho(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: Any,
+) -> None:
+    tenant, _, _ = shop
+    dono = await account_of(session_factory, tenant)
+    assert (await client.get(f"{AGENT}/store", headers=dono)).json()["slug"] == tenant.slug
