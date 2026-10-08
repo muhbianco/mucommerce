@@ -363,3 +363,55 @@ async def place(request: Request, session: DbSession, store: Store, body: OrderI
 
 
 __all__ = ["MAX_ROWS", "router"]
+
+
+# ------------------------------------------------------------------------------- vínculo
+
+
+class RedeemIn(StrictModel):
+    codigo: Annotated[str, Field(min_length=6, max_length=24)]
+    #: A conta MuhBianco que está conectando. Opaca para a loja; serve para o lojista
+    #: reconhecer o agente na lista e para o histórico dizer quem agiu.
+    conta_ref: Annotated[str, Field(max_length=64)] | None = None
+
+
+class RedeemedRead(BaseModel):
+    vinculo_id: str
+    #: Aparece **uma vez**. Depois daqui nem nós sabemos qual é.
+    token: str
+    loja_id: str
+    loja_nome: str
+    tipo: str
+    permissoes: list[str]
+
+
+@router.post(
+    "/links/redeem",
+    response_model=RedeemedRead,
+    status_code=201,
+    summary="Troca o código do lojista pela credencial do agente",
+)
+async def redeem_link(session: DbSession, body: RedeemIn) -> RedeemedRead:
+    """O código é ditado pelo lojista; quem o troca por credencial é a plataforma.
+
+    Note que esta rota **não** usa `Store`: quem resgata ainda não tem loja nenhuma — é o
+    código que diz qual é. O que a protege é o token interno do router, sem o qual nem o código
+    certo abre nada.
+    """
+    from app.agent.links import scopes_for
+    from app.agent.service import AgentLinkService
+
+    resgatado = await AgentLinkService(session).redeem(code=body.codigo, account_ref=body.conta_ref)
+    await session.commit()
+    logger.info(
+        "agente vinculado à loja",
+        extra={"tenant_id": resgatado.tenant_id, "link_id": resgatado.link_id},
+    )
+    return RedeemedRead(
+        vinculo_id=resgatado.link_id,
+        token=resgatado.token,
+        loja_id=resgatado.tenant_id,
+        loja_nome=resgatado.store_name,
+        tipo=resgatado.kind,
+        permissoes=sorted(scopes_for(resgatado.kind)),
+    )

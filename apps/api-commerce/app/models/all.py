@@ -1,5 +1,6 @@
 """Import every model so `Base.metadata` is complete (Alembic, tests, create_all)."""
 
+from app.agent.models import AgentLink, AgentLinkCode
 from app.audit.models import (
     AuditLog,
     IdempotencyKey,
@@ -59,6 +60,8 @@ from app.tenancy.models import (
 __all__ = [
     "AdminRefreshToken",
     "AdminUser",
+    "AgentLink",
+    "AgentLinkCode",
     "AuditLog",
     "Base",
     "Cart",

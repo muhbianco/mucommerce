@@ -69,6 +69,13 @@ MAX_ROWS = 50
 MAX_STORES_PER_ACCOUNT = 50
 
 
+class NoCredentialError(ValidationError):
+    """Nem credencial de agente, nem conta. Sem isso não há de quem falar."""
+
+    error_code = "credential_required"
+    message = "Informe a credencial do agente (X-Agent-Token) ou a conta (X-Account-Id)."
+
+
 class NoStoreError(NotFoundError):
     """Conta sem loja.
 
@@ -169,14 +176,49 @@ async def _store_of(
     )
 
 
-CurrentStore = Annotated[str, Header(alias="X-Account-Id", min_length=1, max_length=64)]
+CurrentStore = Annotated[str | None, Header(alias="X-Account-Id", max_length=64)]
 #: Qual loja, quando a conta tem mais de uma. Opcional para não quebrar quem tem só uma.
 ChosenStore = Annotated[str | None, Header(alias="X-Store-Id", max_length=36)]
+#: A credencial do próprio agente. Quando vem, é ela que diz a loja e o que pode ser feito.
+AgentToken = Annotated[str | None, Header(alias="X-Agent-Token", max_length=128)]
+
+
+async def _store_of_link(session: AsyncSession, token: str) -> AgentStore:
+    """A loja e as permissões de um agente que fala pela credencial dele.
+
+    Diferente do caminho da conta em dois pontos que importam: a loja vem do vínculo (não há o
+    que escolher nem o que adivinhar) e as permissões são as do **tipo** do vínculo, fixas no
+    código. Um agente de vendas não herda o papel do dono por estar na loja dele.
+    """
+    from app.agent.links import scopes_for
+    from app.agent.service import AgentLinkService
+
+    link = await AgentLinkService(session).resolve(token)
+    context = await TenantResolver(session).resolve_by_id(link.tenant_id)
+    bind_session_tenant(session, context.id)
+    return AgentStore(
+        context=context,
+        role=f"agent:{link.kind}",
+        scopes=scopes_for(link.kind),
+        account_id=link.account_ref or f"link:{link.id}",
+    )
 
 
 async def store_context(
-    session: DbSession, x_account_id: CurrentStore, x_store_id: ChosenStore = None
+    session: DbSession,
+    x_account_id: CurrentStore = None,
+    x_store_id: ChosenStore = None,
+    x_agent_token: AgentToken = None,
 ) -> AgentStore:
+    """Quem está falando: um agente com credencial própria, ou a conta do dono.
+
+    A credencial tem precedência. Mandar as duas não é erro — é o período em que a api-agents
+    ainda não migrou tudo —, e prevalece a mais específica.
+    """
+    if x_agent_token:
+        return await _store_of_link(session, x_agent_token)
+    if not x_account_id:
+        raise NoCredentialError
     return await _store_of(session, x_account_id, x_store_id)
 
 

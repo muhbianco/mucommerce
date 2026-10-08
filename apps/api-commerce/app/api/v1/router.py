@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    admin_agent_links,
     admin_catalog,
     admin_coupons,
     admin_customers,
@@ -49,6 +50,10 @@ TAGS_METADATA: list[dict[str, object]] = [
     },
     {"name": "Ops — Outbox / DLQ", "description": "Eventos de domínio e reprocessamento."},
     {"name": "Painel do tenant", "description": "Tenant vem do path e é validado por membership."},
+    {
+        "name": "Painel — Agentes",
+        "description": "Agentes conectados à loja: código de conexão, lista e revogação.",
+    },
     {
         "name": "Painel — Vitrine",
         "description": "Página inicial da loja: a prévia usa o mesmo resolver da vitrine.",
@@ -158,6 +163,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_events.router,
     admin_media.router,
     admin_orders.router,
+    admin_agent_links.router,
     admin_modules.router,
     admin_payments.router,
     admin_email.router,

@@ -32,6 +32,8 @@ from app.tenancy.models import TenantFeatureFlag, TenantSetting
 from tests.conftest import create_admin, create_tenant, login
 
 COVERED_TENANT_SCOPED_TABLES = {
+    "agent_link_codes",
+    "agent_links",
     "categories",
     "inventory_balances",
     "inventory_movements",
