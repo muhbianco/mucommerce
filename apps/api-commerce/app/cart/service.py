@@ -181,6 +181,23 @@ class CartService:
     async def remove(self, item_id: str) -> CartView:
         return await self.set_quantity(item_id, 0)
 
+    async def clear(self) -> CartView:
+        """Esvazia o carrinho ativo. Sem carrinho, não faz nada.
+
+        Existe para quem monta um pedido inteiro de uma vez — o assistente de vendas fechando
+        o que combinou na conversa. Apaga o que estivesse ali: o carrinho é um só por cliente,
+        e começar um pedido novo é exatamente isso.
+        """
+        cart = await self.active(lock=True)
+        if cart is None:
+            return await self._view(None, [])
+        itens = await self.items(cart)
+        for item in itens:
+            await self.session.delete(item)
+        if itens:
+            await self._touch(cart)
+        return await self._view(cart, [])
+
     async def set_fulfillment(self, choice: dict[str, Any]) -> CartView:
         cart = await self.active(create=True, lock=True)
         assert cart is not None
