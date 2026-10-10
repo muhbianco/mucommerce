@@ -173,8 +173,33 @@ async def _context(
         refund=refund,
         online_url=await _online_url(session, items) if order.paid_at else None,
         tickets=await _tickets(session, order),
+        own_ticket_note=await _own_ticket_note(session, items),
         store_origin=settings.storefront_origin(host) if host else None,
     )
+
+
+async def _own_ticket_note(session: AsyncSession, items: list[OrderItem]) -> str | None:
+    """A nota de entrega do primeiro evento `own` do pedido, se houver.
+
+    Só para `own`: com MuTickets quem fala do ingresso é o e-mail próprio, com o link, e repetir
+    aqui seria dizer duas vezes a mesma coisa com palavras diferentes.
+    """
+    from app.catalog.models import Event, ProductKind, Ticketing
+
+    ids = [
+        str((item.event or {}).get("event_id") or "")
+        for item in items
+        if item.product_kind == ProductKind.TICKET.value and isinstance(item.event, dict)
+    ]
+    for event_id in [i for i in ids if i]:
+        evento = (
+            await session.execute(select(Event).where(Event.id == event_id))
+        ).scalar_one_or_none()
+        if evento is not None and evento.ticketing == Ticketing.OWN:
+            nota = (evento.own_delivery_note or "").strip()
+            if nota:
+                return nota
+    return None
 
 
 async def _tickets(session: AsyncSession, order: Order) -> list[tuple[str, str]]:

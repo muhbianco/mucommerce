@@ -43,6 +43,9 @@ class MailContext:
     tickets: list[tuple[str, str]] = field(default_factory=list)
     #: Origem da loja (`https://host`), para montar o link de cada ingresso.
     store_origin: str | None = None
+    #: Como o ingresso chega, quando quem emite é o lojista (`ticketing=own`). Com MuTickets
+    #: esta fica vazia: quem fala do ingresso é o e-mail próprio dele, com o link.
+    own_ticket_note: str | None = None
 
 
 def money(cents: int, currency: str = "BRL") -> str:
@@ -132,6 +135,10 @@ def order_paid(ctx: MailContext) -> Message:
         paragraphs.append(where)
     if ctx.online_url:
         paragraphs.append("O acesso online está no botão abaixo.")
+    if ctx.own_ticket_note:
+        # Ingresso que a loja entrega por fora: sem esta linha o comprador lê "pagamento
+        # confirmado" e não faz ideia de como o ingresso chega até ele.
+        paragraphs.append(ctx.own_ticket_note)
     return Message(
         template_key="order_paid",
         subject=f"Pagamento confirmado — pedido #{ctx.order.number}",

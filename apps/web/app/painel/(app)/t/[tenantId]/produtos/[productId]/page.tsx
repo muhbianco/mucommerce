@@ -1141,6 +1141,21 @@ export default async function ProductPage({
                       </span>
                     </label>
                   </div>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Como o ingresso chega (só para ingresso seu)
+                    <input
+                      name="own_delivery_note"
+                      maxLength={300}
+                      defaultValue={event?.own_delivery_note ?? ""}
+                      placeholder="Ex.: Enviamos o ingresso por e-mail em até 1 dia útil."
+                    />
+                    <span className={styles.fieldHint}>
+                      Aparece na página do evento, antes da compra, e no e-mail
+                      de pagamento confirmado. Em branco, não dizemos nada — e
+                      quem compra fica sem saber como recebe. Com o MuTickets
+                      este campo é ignorado: a promessa é nossa.
+                    </span>
+                  </label>
                 </fieldset>
                 {canWrite ? (
                   <div className={styles.formActions}>

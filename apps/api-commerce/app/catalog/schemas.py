@@ -407,6 +407,7 @@ class EventUpsert(StrictModel):
     # existe para quem chama a API na mão não ligar emissão sem querer.
     ticketing: TicketingIn = "own"
     delivery: TicketDeliveryIn = "digital"
+    own_delivery_note: Annotated[str, Field(min_length=1, max_length=300)] | None = None
 
 
 class LotCreate(StrictModel):
@@ -455,4 +456,5 @@ class EventRead(BaseModel):
     status_note: str | None
     ticketing: str
     delivery: str
+    own_delivery_note: str | None
     lots: list[LotRead]

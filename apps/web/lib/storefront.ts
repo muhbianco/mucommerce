@@ -293,6 +293,8 @@ export interface EventDetail extends EventCard {
   description_md: string | null;
   venue_address: string | null;
   status_note: string | null;
+  /** Como o ingresso chega. Da plataforma com MuTickets; do lojista com ingresso próprio. */
+  delivery_note: string | null;
   images: StoreImage[];
   lots: EventLotOffer[];
   seo: { title: string | null; description: string | null };

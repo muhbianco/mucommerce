@@ -333,6 +333,7 @@ export interface ProductEvent {
   status_note: string | null;
   ticketing: "mutickets" | "own";
   delivery: "digital" | "physical" | "both";
+  own_delivery_note: string | null;
   lots: EventLot[];
 }
 

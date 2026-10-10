@@ -338,6 +338,12 @@ class Event(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, 
     delivery: Mapped[str] = mapped_column(
         String(16), nullable=False, default=TicketDelivery.DIGITAL
     )
+    #: Como o ingresso chega, escrito pelo lojista, quando quem emite é ele (`ticketing=own`).
+    #: Sem isto o comprador do ingresso próprio fica no escuro: o MuTickets manda um link, e o
+    #: próprio não manda nada — ele pagava e não sabia se o ingresso vem por e-mail, pelo
+    #: correio ou se retira na bilheteria. Aparece antes da compra, na página do evento, porque
+    #: é pergunta que se faz **antes** de pagar.
+    own_delivery_note: Mapped[str | None] = mapped_column(String(300))
 
 
 class EventLot(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):

@@ -183,6 +183,11 @@ export default async function EventPage({
             {event.status_note ? ` ${event.status_note}` : ""}
           </p>
           {event.short_description ? <p>{event.short_description}</p> : null}
+          {/* Como o ingresso chega, antes de pagar: é a pergunta que decide a compra de quem
+              nunca comprou nesta loja. */}
+          {event.delivery_note ? (
+            <p className={styles.deliveryNote}>{event.delivery_note}</p>
+          ) : null}
           {erro ? (
             <p role="alert">
               {CART_ERRORS[erro] ??

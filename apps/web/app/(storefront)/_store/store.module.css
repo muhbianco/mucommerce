@@ -729,6 +729,15 @@
   border-bottom: 0;
 }
 
+/* Como o ingresso chega, dito antes de pagar. Destacado sem gritar: é informação que tira
+   dúvida, não promoção. */
+.deliveryNote {
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--store-brand-ink);
+  background: var(--store-mist);
+  border-radius: 0 var(--store-radius) var(--store-radius) 0;
+}
+
 /* ------------------------------------------------------------------ o ingresso
 
    O cartão que o cliente mostra na porta. Estreito e centrado: quem usa está de pé, com uma

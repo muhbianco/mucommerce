@@ -381,3 +381,76 @@ async def test_o_codigo_pode_vir_em_minuscula_e_com_espaco(
         resultado = await TicketValidator(session).validate(f"  {code.lower()} ", actor_id="a")
         await session.commit()
     assert resultado.admitted is True
+
+
+# ------------------------------------------------------------------ ingresso próprio
+
+
+def test_a_nota_de_entrega_do_mutickets_e_nossa() -> None:
+    """Promessa da plataforma: o lojista não escreve por cima dela."""
+    from app.catalog.models import Event, Ticketing
+    from app.catalog.storefront_events import MUTICKETS_NOTE, delivery_note
+
+    evento = Event(
+        product_id="p",
+        starts_at=None,
+        ticketing=Ticketing.MUTICKETS,
+        own_delivery_note="eu entrego na mão",
+    )
+    assert delivery_note(evento) == MUTICKETS_NOTE
+
+
+def test_sem_nota_o_ingresso_proprio_fica_em_silencio() -> None:
+    """Inventar "o ingresso será enviado" seria prometer entrega que ninguém garantiu."""
+    from app.catalog.models import Event, Ticketing
+    from app.catalog.storefront_events import delivery_note
+
+    for texto in (None, "", "   "):
+        evento = Event(
+            product_id="p", starts_at=None, ticketing=Ticketing.OWN, own_delivery_note=texto
+        )
+        assert delivery_note(evento) is None
+
+
+def test_a_nota_do_lojista_aparece_como_ele_escreveu() -> None:
+    from app.catalog.models import Event, Ticketing
+    from app.catalog.storefront_events import delivery_note
+
+    evento = Event(
+        product_id="p",
+        starts_at=None,
+        ticketing=Ticketing.OWN,
+        own_delivery_note="  Retire na bilheteria com documento, a partir das 18h.  ",
+    )
+    assert delivery_note(evento) == "Retire na bilheteria com documento, a partir das 18h."
+
+
+def test_o_email_de_pago_conta_como_o_ingresso_proprio_chega() -> None:
+    """Sem esta linha o comprador lê "pagamento confirmado" e não sabe como recebe."""
+    from app.notifications.messages import MailContext, order_paid
+    from app.orders.models import Order
+
+    order = Order(
+        number=9,
+        currency="BRL",
+        subtotal_cents=1000,
+        total_cents=1000,
+        discount_cents=0,
+        delivery_fee_cents=0,
+        status="payment_confirmed",
+        fulfillment_type="none",
+        fulfillment={},
+        customer_snapshot={"name": "Ana"},
+        refunded_cents=0,
+    )
+    nota = "Enviamos o ingresso por e-mail em até 1 dia útil."
+    message = order_paid(
+        MailContext(
+            store_name="Lunares",
+            timezone="America/Sao_Paulo",
+            order=order,
+            items=[],
+            own_ticket_note=nota,
+        )
+    )
+    assert nota in message.paragraphs

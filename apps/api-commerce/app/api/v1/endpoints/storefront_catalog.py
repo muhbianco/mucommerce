@@ -34,6 +34,7 @@ from app.catalog.storefront_events import (
     EventAvailability,
     EventData,
     StorefrontEvents,
+    delivery_note,
 )
 from app.core.exceptions import (
     AuthenticationError,
@@ -196,6 +197,10 @@ class EventDetail(EventCard):
     description_md: str | None
     venue_address: str | None
     status_note: str | None
+    #: Como o ingresso chega. Com o MuTickets a frase é da plataforma (link com QR por e-mail);
+    #: com ingresso próprio é o texto que o lojista escreveu. "Como eu recebo?" é pergunta que
+    #: se faz **antes** de pagar, por isso mora aqui e não só no e-mail de confirmação.
+    delivery_note: str | None
     images: list[Image]
     lots: list[LotOfferRef]
     seo: ProductSeo
@@ -456,6 +461,7 @@ async def storefront_event(session: DbSession, tenant: EventsReader, slug: str) 
         description_md=product.description_md,
         venue_address=event.venue_address,
         status_note=event.status_note,
+        delivery_note=delivery_note(event),
         images=[Image(**image_payload(m)) for m in data.images],
         lots=[
             LotOfferRef(

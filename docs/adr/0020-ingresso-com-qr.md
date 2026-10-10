@@ -121,9 +121,18 @@ do ingresso com o QR.
 **B — validar na porta.** `/validar/<codigo>` autenticada, que queima o ingresso uma vez e mostra
 "já usado às 20:14" na segunda leitura. Registro de quem validou.
 
-**C — ingresso próprio.** `ticketing = own`: a plataforma para de emitir e o lojista ganha o botão
-de marcar entregue. É a fase mais barata das três e a que libera o lojista que já tem gráfica —
-provavelmente vale antecipar se houver cliente esperando.
+**C — ingresso próprio.** `ticketing = own`: a plataforma para de emitir, e o lojista diz como o
+ingresso chega. **Marcar entregue já existia**: pedido de ingresso é `fulfillment_type = "none"`
+e a máquina de estados já tinha a transição `{aceito, em produção} → entregue` com guarda para
+esse caso, com o botão aparecendo sozinho no painel. O que faltava era o outro lado — o comprador
+pagava e ficava no escuro, sem saber se o ingresso vem por e-mail, pelo correio ou se retira na
+bilheteria.
+
+`events.own_delivery_note` é o texto do lojista, mostrado **antes da compra** (é pergunta que se
+faz antes de pagar) e repetido no e-mail de pagamento confirmado. Em branco, a tela fica em
+silêncio: inventar "o ingresso será enviado" no lugar dele seria prometer entrega que ninguém
+garantiu. Com MuTickets o campo é ignorado — a promessa ali é da plataforma, e o lojista não
+escreve por cima dela.
 
 **D — ingresso físico.** `delivery = physical`, a regra de envio por produto (decisão 5), e o papel
 usando envelope e etiqueta que já existem. Vale para os dois emissores.

@@ -24,6 +24,7 @@ from app.catalog.models import (
     Product,
     ProductKind,
     ProductVariant,
+    Ticketing,
 )
 from app.catalog.schemas import LotState
 from app.inventory.models import InventoryBalance
@@ -184,3 +185,23 @@ class StorefrontEvents:
         for lot, variant, left in (await self.session.execute(stmt)).all():
             grouped.setdefault(lot.event_id, []).append((lot, variant, int(left) // 1000))
         return grouped
+
+
+#: O que a plataforma promete quando o MuTickets emite. Fixo de propósito: é promessa nossa, e
+#: o lojista não pode prometer outra coisa por cima dela.
+MUTICKETS_NOTE = (
+    "O ingresso chega por e-mail logo após a confirmação do pagamento, "
+    "com um QR code para apresentar na entrada."
+)
+
+
+def delivery_note(event: Event) -> str | None:
+    """Como o ingresso deste evento chega às mãos de quem comprou.
+
+    Com o MuTickets, a frase é da plataforma — quem cumpre somos nós. Com ingresso próprio, é o
+    texto que o lojista escreveu; sem texto, **nada**, porque inventar "o ingresso será enviado"
+    no lugar dele é prometer entrega que ninguém garantiu. A tela trata o silêncio como silêncio.
+    """
+    if event.ticketing == Ticketing.MUTICKETS:
+        return MUTICKETS_NOTE
+    return (event.own_delivery_note or "").strip() or None

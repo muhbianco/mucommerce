@@ -287,6 +287,7 @@ export async function saveEvent(form: FormData): Promise<void> {
         // a emissão de ingressos sem ninguém pedir.
         ticketing: text(form, "ticketing") || "own",
         delivery: text(form, "delivery") || "digital",
+        own_delivery_note: optional(form, "own_delivery_note"),
       },
     });
   });
