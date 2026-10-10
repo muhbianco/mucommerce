@@ -56,6 +56,7 @@ from app.tenancy.models import (
     TenantSequence,
     TenantSetting,
 )
+from app.tickets.models import Ticket
 
 __all__ = [
     "AdminRefreshToken",
@@ -114,4 +115,5 @@ __all__ = [
     "TenantPaymentConfig",
     "TenantSequence",
     "TenantSetting",
+    "Ticket",
 ]

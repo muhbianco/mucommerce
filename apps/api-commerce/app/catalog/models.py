@@ -69,6 +69,32 @@ class ProductKind(StrEnum):
 PHYSICAL_KINDS = frozenset({ProductKind.PHYSICAL.value, ProductKind.MADE_TO_ORDER.value})
 
 
+class Ticketing(StrEnum):
+    """Quem emite o ingresso deste evento — a divisória de verdade (ADR 0020).
+
+    Com `MUTICKETS` existe código, QR, e-mail com link e validação na porta. Com `OWN` a
+    plataforma **não emite nada**: o lojista entrega do jeito dele (gráfica, outra bilheteria,
+    PDF próprio) e marca aqui que entregou. Nada de QR meia-boca para quem escolheu fazer do
+    seu jeito.
+    """
+
+    MUTICKETS = "mutickets"
+    OWN = "own"
+
+
+class TicketDelivery(StrEnum):
+    """Como o ingresso chega. Independente de quem emite.
+
+    `PHYSICAL` e `BOTH` fazem o pedido precisar de envio — e é aí que mora a mudança de regra
+    da decisão 5 do ADR: "precisa de envio?" deixa de ser pergunta sobre o **tipo** do produto
+    e passa a ser sobre o produto.
+    """
+
+    DIGITAL = "digital"
+    PHYSICAL = "physical"
+    BOTH = "both"
+
+
 class EventStatus(StrEnum):
     SCHEDULED = "scheduled"
     POSTPONED = "postponed"  # date to be announced: sales stop, the page stays
@@ -305,6 +331,13 @@ class Event(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, 
     capacity: Mapped[int | None] = mapped_column(Integer)  # NULL: no overall limit
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=EventStatus.SCHEDULED)
     status_note: Mapped[str | None] = mapped_column(String(300))
+    #: Quem emite e como entrega. O padrão é o que a loja já fazia antes de existir MuTickets:
+    #: vender o ingresso e deixar a entrega com o lojista. Evento antigo não acorda emitindo
+    #: QR que ninguém pediu.
+    ticketing: Mapped[str] = mapped_column(String(16), nullable=False, default=Ticketing.OWN)
+    delivery: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=TicketDelivery.DIGITAL
+    )
 
 
 class EventLot(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):

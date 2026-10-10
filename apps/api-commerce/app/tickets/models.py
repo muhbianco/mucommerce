@@ -14,7 +14,7 @@ from enum import StrEnum
 from sqlalchemy import ForeignKeyConstraint, Index, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TenantScoped, TimestampMixin, UUIDPrimaryKeyMixin, UtcDateTime
+from app.models.base import Base, TenantScoped, TimestampMixin, UtcDateTime, UUIDPrimaryKeyMixin
 
 
 class TicketStatus(StrEnum):

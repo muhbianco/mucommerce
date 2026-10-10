@@ -85,6 +85,9 @@ COVERED_TENANT_SCOPED_TABLES = {
     # `test_shipping_packages.py::test_embalagem_de_outra_loja_nao_existe_aqui`.
     "shipping_packages",
     "product_package_rules",
+    # MuTickets: o ingresso de outra loja não existe aqui, nem pelo código — exercitado em
+    # `test_o_ingresso_de_outra_loja_nao_existe_aqui`.
+    "tickets",
 }
 
 
@@ -412,3 +415,52 @@ async def test_catalog_routes_never_reach_another_tenants_rows(
         )
     ).json()
     assert mine_product["sku"] == beta_product["sku"] == "P00001"
+
+
+async def test_o_ingresso_de_outra_loja_nao_existe_aqui(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """O código do ingresso é global e a porta valida por ele — então o filtro de tenant é a
+    única coisa entre o ingresso do show da loja A e o painel da loja B.
+
+    Busca por código, que é como a validação vai perguntar: achar por aí seria pior que achar
+    por id, porque o código viaja em QR e em e-mail.
+    """
+    from app.core.ids import new_id
+    from app.tickets.models import Ticket
+
+    dona = await create_tenant(session_factory, "ingresso-dona")
+    outra = await create_tenant(session_factory, "ingresso-outra")
+    code = "ING-ABCDEFGHJK"
+    order_id = new_id()
+    async with session_factory() as session:
+        bind_session_tenant(session, dona.id)
+        session.add(
+            Ticket(
+                tenant_id=dona.id,
+                order_id=order_id,
+                order_item_id=new_id(),
+                seq=1,
+                code=code,
+                event_id=new_id(),
+                lot_id=new_id(),
+                event_name="Show da Dona",
+                lot_name="1º lote",
+                status="issued",
+            )
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        bind_session_tenant(session, dona.id)
+        achado = (
+            await session.execute(select(Ticket).where(Ticket.code == code))
+        ).scalar_one_or_none()
+        assert achado is not None
+
+    async with session_factory() as session:
+        bind_session_tenant(session, outra.id)
+        vazou = (
+            await session.execute(select(Ticket).where(Ticket.code == code))
+        ).scalar_one_or_none()
+        assert vazou is None

@@ -290,6 +290,11 @@ class OrderService:
         await self._transition(
             order, OrderStatus.PAYMENT_CONFIRMED, ActorKind.SYSTEM, source=source, reason=reason
         )
+        # Antes do evento de e-mail, na mesma transação: o e-mail de "pedido pago" só pode
+        # falar dos ingressos se eles já existirem quando o notificador for montá-lo.
+        from app.tickets.service import TicketService
+
+        await TicketService(self.session).issue_for_order(order)
         await self._emit(order, "order.paid", late=reason == "late_payment_recovered")
         if checkout_settings(self.tenant.settings).auto_accept:
             await self._transition(
