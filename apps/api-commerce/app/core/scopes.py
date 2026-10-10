@@ -41,6 +41,9 @@ class Scope(StrEnum):
     CUSTOMERS_EXPORT = "customers:export"
     CUSTOMERS_ERASE = "customers:erase"
     EVENTS_WRITE = "events:write"
+    #: Queimar ingresso na porta. Escopo próprio, e não `events:write`, porque quem fica na
+    #: entrada de um show precisa exatamente disto e de mais nada — não de mexer no evento.
+    TICKETS_VALIDATE = "tickets:validate"
     SETTINGS_WRITE = "settings:write"
     DOMAINS_WRITE = "domains:write"
     MEMBERS_WRITE = "members:write"
@@ -71,6 +74,7 @@ _TENANT_ROLE_SCOPES: dict[TenantRole, frozenset[Scope]] = {
             Scope.ORDERS_TRANSITION,
             Scope.CUSTOMERS_READ,
             Scope.NOTIFICATIONS_READ,
+            Scope.TICKETS_VALIDATE,
         }
     ),
     TenantRole.SUPPORT: frozenset(
@@ -82,6 +86,8 @@ _TENANT_ROLE_SCOPES: dict[TenantRole, frozenset[Scope]] = {
             Scope.CUSTOMERS_APPROVE,
             Scope.NOTIFICATIONS_READ,
             Scope.NOTIFICATIONS_WRITE,
+            # O papel mais baixo valida ingresso: é o que a loja dá para quem só fica na porta.
+            Scope.TICKETS_VALIDATE,
         }
     ),
 }

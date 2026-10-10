@@ -1,0 +1,49 @@
+/* A tela de quem está na porta.
+
+   Tudo aqui vem da situação de uso: celular numa mão, fila na frente, pouca luz, e o veredito
+   precisa ser lido de relance a um braço de distância. Daí o bloco inteiro colorido em vez de
+   um selo pequeno, e o símbolo gigante antes da frase. */
+
+.verdict,
+.verdictDenied {
+  margin: 1rem 0 1.5rem;
+  padding: 2rem 1.25rem;
+  border-radius: 12px;
+  text-align: center;
+  color: #fff;
+}
+
+.verdict {
+  background: #157347;
+}
+
+.verdictDenied {
+  background: #b02a37;
+}
+
+/* ✓ e ✕ carregam a decisão sozinhos: dá para ler de longe e por cima do ombro de alguém. Mas
+   nunca sozinhos de verdade — a frase abaixo existe porque cor e símbolo não bastam para quem
+   não distingue verde de vermelho. */
+.mark {
+  font-size: 4.5rem;
+  line-height: 1;
+  margin: 0;
+}
+
+.word {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.5rem 0 0;
+}
+
+.detail {
+  text-align: center;
+  margin: 0.5rem 0;
+}
+
+.code {
+  text-align: center;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  letter-spacing: 0.08em;
+  margin: 0.5rem 0;
+}

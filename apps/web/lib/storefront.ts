@@ -26,7 +26,8 @@ export interface StorePrice {
 }
 
 /** `unavailable`: paused by the store (published, not for sale for now). */
-export type Availability = "available" | "sold_out" | "made_to_order" | "unavailable";
+export type Availability =
+  "available" | "sold_out" | "made_to_order" | "unavailable";
 
 export interface ProductCard {
   id: string;
@@ -115,10 +116,20 @@ export function storeOrigin(context: StorefrontContext): string {
   return `https://${context.primary_host ?? context.host ?? ""}`;
 }
 
+/**
+ * Painel desta loja. Usado pelo endereço que o QR do ingresso carrega: o link fica na marca da
+ * loja e o salto para a ferramenta de quem valida acontece do outro lado (ADR 0020, decisão 6).
+ */
+export function panelOrigin(context: StorefrontContext): string {
+  const host = process.env.PANEL_HOST ?? "painel.muhbianco.com.br";
+  return `https://${context.tenant.slug}.${host}`;
+}
+
 export function formatPrice(price: StorePrice): string {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: price.currency }).format(
-    price.amount_cents / 100,
-  );
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: price.currency,
+  }).format(price.amount_cents / 100);
 }
 
 /** `srcset` from renditions (smallest first). */
@@ -149,11 +160,17 @@ export const SCHEMA_AVAILABILITY: Record<Availability, string> = {
 };
 
 /** The variant with exactly this combination of option values (none: not offered). */
-export function findVariant(variants: StoreVariant[], selection: Record<string, string>): StoreVariant | undefined {
+export function findVariant(
+  variants: StoreVariant[],
+  selection: Record<string, string>,
+): StoreVariant | undefined {
   return variants.find((variant) => {
     const values = variant.option_values ?? {};
     const names = Object.keys(values);
-    return names.length === Object.keys(selection).length && names.every((name) => selection[name] === values[name]);
+    return (
+      names.length === Object.keys(selection).length &&
+      names.every((name) => selection[name] === values[name])
+    );
   });
 }
 
@@ -168,28 +185,44 @@ export function withDefaults(product: ProductDetail): ProductDetail {
     modifier_groups: product.modifier_groups ?? [],
     tags: product.tags ?? [],
     kind: product.kind ?? "physical",
-    variants: product.variants.map((variant) => ({ ...variant, option_values: variant.option_values ?? null })),
+    variants: product.variants.map((variant) => ({
+      ...variant,
+      option_values: variant.option_values ?? null,
+    })),
   };
 }
 
 /** "(escolha 1)", "(até 2)", "(de 1 a 3)": the rule of a modifier group, for its legend. */
 export function modifierRule(group: StoreModifierGroup): string {
-  if (group.min_select === group.max_select) return `(escolha ${group.max_select})`;
+  if (group.min_select === group.max_select)
+    return `(escolha ${group.max_select})`;
   if (group.min_select === 0) return `(opcional, até ${group.max_select})`;
   return `(de ${group.min_select} a ${group.max_select})`;
 }
 
 /** Sum of the chosen modifiers' prices (display only: the API prices and validates orders). */
-export function modifiersTotal(groups: StoreModifierGroup[], chosen: readonly string[]): number {
+export function modifiersTotal(
+  groups: StoreModifierGroup[],
+  chosen: readonly string[],
+): number {
   const wanted = new Set(chosen);
-  return groups.flatMap((group) => group.modifiers).reduce((sum, m) => sum + (wanted.has(m.id) ? m.price_cents : 0), 0);
+  return groups
+    .flatMap((group) => group.modifiers)
+    .reduce((sum, m) => sum + (wanted.has(m.id) ? m.price_cents : 0), 0);
 }
 
 /** schema.org offers: one Offer, or an AggregateOffer when the variants' prices differ. */
-export function productOffers(product: ProductDetail, url: string): Record<string, unknown> {
+export function productOffers(
+  product: ProductDetail,
+  url: string,
+): Record<string, unknown> {
   const amounts = product.variants.map((variant) => variant.price.amount_cents);
-  const low = amounts.length ? Math.min(...amounts) : product.price.amount_cents;
-  const high = amounts.length ? Math.max(...amounts) : product.price.amount_cents;
+  const low = amounts.length
+    ? Math.min(...amounts)
+    : product.price.amount_cents;
+  const high = amounts.length
+    ? Math.max(...amounts)
+    : product.price.amount_cents;
   const availability = SCHEMA_AVAILABILITY[product.availability];
   if (low === high) {
     return {
@@ -198,7 +231,9 @@ export function productOffers(product: ProductDetail, url: string): Record<strin
       price: (product.price.amount_cents / 100).toFixed(2),
       priceCurrency: product.price.currency,
       availability,
-      ...(product.price.promo_ends_at ? { priceValidUntil: product.price.promo_ends_at.slice(0, 10) } : {}),
+      ...(product.price.promo_ends_at
+        ? { priceValidUntil: product.price.promo_ends_at.slice(0, 10) }
+        : {}),
     };
   }
   return {
@@ -226,7 +261,8 @@ export type EventAvailability =
   | "unavailable"
   | "postponed"
   | "cancelled";
-export type LotState = "upcoming" | "on_sale" | "sold_out" | "ended" | "unavailable";
+export type LotState =
+  "upcoming" | "on_sale" | "sold_out" | "ended" | "unavailable";
 
 export interface EventCard {
   slug: string;
@@ -295,10 +331,24 @@ const LOT_SCHEMA_AVAILABILITY: Record<LotState, string> = {
 };
 
 /** "sábado, 5 de dezembro de 2026 às 20:00", plus "até 23:00" (same day) or the end date. */
-export function formatEventDate(startsAt: string, endsAt: string | null, timeZone: string): string {
-  const full = new Intl.DateTimeFormat("pt-BR", { dateStyle: "full", timeStyle: "short", timeZone });
-  const day = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeZone });
-  const time = new Intl.DateTimeFormat("pt-BR", { timeStyle: "short", timeZone });
+export function formatEventDate(
+  startsAt: string,
+  endsAt: string | null,
+  timeZone: string,
+): string {
+  const full = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "full",
+    timeStyle: "short",
+    timeZone,
+  });
+  const day = new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeZone,
+  });
+  const time = new Intl.DateTimeFormat("pt-BR", {
+    timeStyle: "short",
+    timeZone,
+  });
   const start = new Date(startsAt);
   if (!endsAt) return full.format(start);
   const end = new Date(endsAt);
@@ -308,7 +358,11 @@ export function formatEventDate(startsAt: string, endsAt: string | null, timeZon
 }
 
 /** schema.org Event: status, attendance mode, place, one Offer per lot, the store as organizer. */
-export function eventJsonLd(event: EventDetail, url: string, organizer: { name: string; url: string }): Record<string, unknown> {
+export function eventJsonLd(
+  event: EventDetail,
+  url: string,
+  organizer: { name: string; url: string },
+): Record<string, unknown> {
   const status =
     event.availability === "postponed"
       ? "https://schema.org/EventPostponed"
@@ -321,7 +375,9 @@ export function eventJsonLd(event: EventDetail, url: string, organizer: { name: 
         name: event.venue_name,
         address: {
           "@type": "PostalAddress",
-          ...(event.venue_address ? { streetAddress: event.venue_address } : {}),
+          ...(event.venue_address
+            ? { streetAddress: event.venue_address }
+            : {}),
           ...(event.city ? { addressLocality: event.city } : {}),
           addressCountry: "BR",
         },
@@ -330,7 +386,11 @@ export function eventJsonLd(event: EventDetail, url: string, organizer: { name: 
   // The real link goes to buyers only: the event page stands for it.
   const virtual = event.online ? { "@type": "VirtualLocation", url } : null;
   const mode =
-    place && virtual ? "MixedEventAttendanceMode" : virtual ? "OnlineEventAttendanceMode" : "OfflineEventAttendanceMode";
+    place && virtual
+      ? "MixedEventAttendanceMode"
+      : virtual
+        ? "OnlineEventAttendanceMode"
+        : "OfflineEventAttendanceMode";
   return {
     "@context": "https://schema.org",
     "@type": "Event",
@@ -341,7 +401,9 @@ export function eventJsonLd(event: EventDetail, url: string, organizer: { name: 
     eventStatus: status,
     eventAttendanceMode: `https://schema.org/${mode}`,
     location: [place, virtual].filter(Boolean),
-    image: event.images.map((image) => image.renditions[image.renditions.length - 1]?.url).filter(Boolean),
+    image: event.images
+      .map((image) => image.renditions[image.renditions.length - 1]?.url)
+      .filter(Boolean),
     organizer: { "@type": "Organization", ...organizer },
     offers: event.lots.map((lot) => ({
       "@type": "Offer",

@@ -21,6 +21,7 @@ from app.api.v1.endpoints import (
     admin_shipping_packages,
     admin_supplies,
     admin_tenants,
+    admin_tickets,
     auth,
     customer_addresses,
     customer_auth,
@@ -66,6 +67,13 @@ TAGS_METADATA: list[dict[str, object]] = [
     {
         "name": "Painel — Eventos",
         "description": "Evento de um ingresso: data, local, capacidade e lotes (flag `events`).",
+    },
+    {
+        "name": "Painel — Ingressos",
+        "description": (
+            "Queimar ingresso na porta. Ver o ingresso é público pelo código; registrar a "
+            "entrada exige quem está na entrada, autenticado (ADR 0020)."
+        ),
     },
     {
         "name": "Painel — Cupons",
@@ -182,6 +190,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     internal_agent_sales.router,
     internal_provisioning.router,
     storefront.router,
+    admin_tickets.router,
     storefront_catalog.router,
     storefront_tickets.router,
     storefront_cart.router,

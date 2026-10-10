@@ -8,13 +8,15 @@ celular de alguém.
 from __future__ import annotations
 
 import secrets
+from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import Event, ProductKind, Ticketing
 from app.core.logging import get_logger
+from app.models.base import utcnow
 from app.orders.models import Order, OrderItem
 from app.tickets.models import Ticket, TicketStatus
 
@@ -142,3 +144,63 @@ def ticket_view(ticket: Ticket) -> dict[str, Any]:
         "holder_name": ticket.holder_name,
         "used_at": ticket.used_at.isoformat() if ticket.used_at else None,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class Validation:
+    """O que a porta vê depois de encostar o leitor.
+
+    `admitted` é a única coisa que decide se a pessoa entra. O resto existe para a tela dizer
+    *por que* não, que é o que evita discussão na entrada: "já usado às 20:14" encerra o
+    assunto; "inválido" começa um.
+    """
+
+    admitted: bool
+    reason: str
+    ticket: Ticket | None = None
+
+
+class TicketValidator:
+    """Queima o ingresso uma vez, e conta quem queimou.
+
+    Quem valida é a porta autenticada, não o cliente (ADR 0020, decisão 2): deixar o próprio
+    comprador marcar entrada significa que ele marca em casa, e que uma captura de tela verde
+    serve para qualquer um.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def validate(self, code: str, *, actor_id: str) -> Validation:
+        limpo = (code or "").strip().upper()
+        if not limpo:
+            return Validation(admitted=False, reason="not_found")
+        agora = utcnow()
+        # Um `UPDATE ... WHERE status='issued'` decide tudo: duas leituras simultâneas do mesmo
+        # QR (dois leitores, ou o dedo escorregando) não podem **ambas** admitir. Quem não
+        # alterou linha nenhuma perdeu a corrida e vai ler o motivo abaixo.
+        resultado = await self.session.execute(
+            update(Ticket)
+            .where(Ticket.code == limpo, Ticket.status == TicketStatus.ISSUED)
+            .values(status=TicketStatus.USED, used_at=agora, used_by=actor_id)
+            .execution_options(synchronize_session=False)
+        )
+        ticket = (
+            await self.session.execute(select(Ticket).where(Ticket.code == limpo))
+        ).scalar_one_or_none()
+        if ticket is None:
+            # Código inexistente **nesta loja**: o filtro de tenant é automático, então
+            # ingresso do show do vizinho é indistinguível de código inventado. É o certo.
+            logger.info("Ingresso não encontrado na validação", extra={"code": limpo})
+            return Validation(admitted=False, reason="not_found")
+        if resultado.rowcount == 1:  # type: ignore[attr-defined]
+            logger.info(
+                "Entrada registrada",
+                extra={"code": limpo, "event_id": ticket.event_id, "actor": actor_id},
+            )
+            return Validation(admitted=True, reason="ok", ticket=ticket)
+        logger.info(
+            "Ingresso recusado na porta",
+            extra={"code": limpo, "status": ticket.status, "actor": actor_id},
+        )
+        return Validation(admitted=False, reason=str(ticket.status), ticket=ticket)

@@ -110,7 +110,11 @@ async def _pedido_pago(
     from app.identity.models import Customer
     from app.models.base import utcnow
 
-    tenant = await create_tenant(session_factory, f"tickets-{ticketing}-{unidades}")
+    # Sufixo único: há teste que monta duas lojas com os mesmos parâmetros, e slug repetido
+    # estoura em `create_tenant` antes de o teste chegar ao que interessa. O **fim** do id, não
+    # o começo: `new_id` é UUIDv7, e o começo é o relógio — duas chamadas no mesmo milissegundo
+    # dariam o mesmo prefixo.
+    tenant = await create_tenant(session_factory, f"tickets-{ticketing}-{unidades}-{new_id()[-8:]}")
     event_id, product_id, lot_id, order_id = new_id(), new_id(), new_id(), new_id()
     customer_id = new_id()
     async with session_factory() as session:
@@ -243,3 +247,137 @@ def test_o_email_do_ingresso_no_singular() -> None:
     )
     assert message.subject == "Seu ingresso — pedido #7"
     assert "Guarde este e-mail" in " ".join(message.paragraphs)
+
+
+# ------------------------------------------------------------------------ a porta
+
+
+async def test_a_primeira_leitura_admite_e_a_segunda_diz_que_ja_entrou(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """ "Já usado às 20:14" encerra a discussão na entrada; "inválido" começa uma."""
+    from app.tickets.service import TicketValidator
+
+    tenant, order_id = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        order = await session.get(Order, order_id)
+        assert order is not None
+        [ticket] = await TicketService(session).issue_for_order(order)
+        code = ticket.code
+        await session.commit()
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        primeira = await TicketValidator(session).validate(code, actor_id="admin:porteiro")
+        await session.commit()
+    assert primeira.admitted is True
+    assert primeira.reason == "ok"
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        segunda = await TicketValidator(session).validate(code, actor_id="admin:porteiro")
+        await session.commit()
+    assert segunda.admitted is False
+    assert segunda.reason == "used"
+    assert segunda.ticket is not None and segunda.ticket.used_at is not None
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        row = (await session.execute(select(Ticket).where(Ticket.code == code))).scalar_one()
+        # Quem deixou entrar fica registrado: a porta responde por quem validou.
+        assert row.used_by == "admin:porteiro"
+        assert row.status == "used"
+
+
+async def test_codigo_inexistente_nao_admite(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.tickets.service import TicketValidator
+
+    tenant, _ = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        resultado = await TicketValidator(session).validate("ING-ZZZZZZZZZZ", actor_id="a")
+        await session.commit()
+    assert resultado.admitted is False
+    assert resultado.reason == "not_found"
+
+
+async def test_o_ingresso_da_outra_loja_nao_entra_aqui(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """O código é único no mundo, então o filtro de tenant é a única porta entre as lojas.
+
+    E o ingresso do vizinho tem de ser indistinguível de código inventado: dizer "existe, mas
+    não é seu" contaria para a loja A que a loja B vendeu aquele ingresso.
+    """
+    from app.tickets.service import TicketValidator
+
+    dona, order_id = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    outra, _ = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    async with session_factory() as session:
+        bind_session_tenant(session, dona.id)
+        order = await session.get(Order, order_id)
+        assert order is not None
+        [ticket] = await TicketService(session).issue_for_order(order)
+        code = ticket.code
+        await session.commit()
+
+    async with session_factory() as session:
+        bind_session_tenant(session, outra.id)
+        resultado = await TicketValidator(session).validate(code, actor_id="admin:intruso")
+        await session.commit()
+    assert resultado.admitted is False
+    assert resultado.reason == "not_found"
+
+    async with session_factory() as session:
+        bind_session_tenant(session, dona.id)
+        intacto = (await session.execute(select(Ticket).where(Ticket.code == code))).scalar_one()
+        assert intacto.status == "issued"
+        assert intacto.used_by is None
+
+
+async def test_ingresso_estornado_nao_entra(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.tickets.service import TicketValidator
+
+    tenant, order_id = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        order = await session.get(Order, order_id)
+        assert order is not None
+        [ticket] = await TicketService(session).issue_for_order(order)
+        ticket.status = "refunded"
+        code = ticket.code
+        await session.commit()
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        resultado = await TicketValidator(session).validate(code, actor_id="admin:porteiro")
+        await session.commit()
+    assert resultado.admitted is False
+    assert resultado.reason == "refunded"
+
+
+async def test_o_codigo_pode_vir_em_minuscula_e_com_espaco(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Digitado à mão quando o leitor falha: espaço sobrando e caixa baixa não podem recusar."""
+    from app.tickets.service import TicketValidator
+
+    tenant, order_id = await _pedido_pago(session_factory, ticketing="mutickets", unidades=1)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        order = await session.get(Order, order_id)
+        assert order is not None
+        [ticket] = await TicketService(session).issue_for_order(order)
+        code = ticket.code
+        await session.commit()
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        resultado = await TicketValidator(session).validate(f"  {code.lower()} ", actor_id="a")
+        await session.commit()
+    assert resultado.admitted is True

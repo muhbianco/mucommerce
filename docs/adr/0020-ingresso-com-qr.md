@@ -105,6 +105,13 @@ errado no e-mail. O mesmo vale para o papel: o layout de impressão usa o tema d
 Consequência operacional: loja sem domínio próprio usa o subdomínio dela na plataforma, que já
 é o endereço da vitrine. Nenhum endereço novo para o lojista configurar.
 
+**A regra é sobre o que o cliente vê, e a validação não é para ele.** O QR carrega o endereço da
+loja (`lojadele.com.br/validar/<codigo>`), porque está impresso no ingresso de alguém que comprou
+da loja — quem escanear o próprio ingresso por curiosidade tem de ver o domínio que conhece. Essa
+rota só repassa para a tela de quem trabalha na porta, no painel, onde a sessão com permissão da
+loja já existe. Montar sessão de painel no host da vitrine seria inventar um segundo jeito de
+autenticar — e um segundo jeito de errar — para economizar um salto que ninguém vê.
+
 ## Fases
 
 **A — o ingresso existe (MuTickets digital).** Tabela `tickets`, emissão idempotente quando o
