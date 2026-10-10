@@ -381,6 +381,10 @@ class CategoryRead(BaseModel):
 
 # ----------------------------------------------------------------------------- events
 EventStatusIn = Literal["scheduled", "postponed", "cancelled"]
+#: Quem emite o ingresso e como ele chega (ADR 0020). O padrão de ambos é o que a loja já fazia
+#: antes do MuTickets existir: vender e deixar a entrega com o lojista.
+TicketingIn = Literal["mutickets", "own"]
+TicketDeliveryIn = Literal["digital", "physical", "both"]
 LotState = Literal["upcoming", "on_sale", "sold_out", "ended", "unavailable"]
 Tickets = Annotated[int, Field(ge=0, le=1_000_000)]
 LotName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]
@@ -399,6 +403,10 @@ class EventUpsert(StrictModel):
     capacity: Annotated[int, Field(ge=1, le=1_000_000)] | None = None
     status: EventStatusIn = "scheduled"
     status_note: Annotated[str, Field(max_length=300)] | None = None
+    # PUT é o evento inteiro: o formulário do painel manda estes dois sempre. O padrão `own`
+    # existe para quem chama a API na mão não ligar emissão sem querer.
+    ticketing: TicketingIn = "own"
+    delivery: TicketDeliveryIn = "digital"
 
 
 class LotCreate(StrictModel):
@@ -445,4 +453,6 @@ class EventRead(BaseModel):
     allocated: int  # sum of the lots' quantities
     status: str
     status_note: str | None
+    ticketing: str
+    delivery: str
     lots: list[LotRead]

@@ -58,7 +58,13 @@ export interface Domain {
 
 export interface TenantListItem extends Tenant {
   primary_host: string | null;
-  owners: { admin_user_id: string; account_id: string | null; email: string; full_name: string; role: string }[];
+  owners: {
+    admin_user_id: string;
+    account_id: string | null;
+    email: string;
+    full_name: string;
+    role: string;
+  }[];
 }
 
 // ------------------------------------------------------------------ catalog (phase 1)
@@ -90,7 +96,11 @@ export interface Media {
    *  virar destaque — e o logotipo nunca vira. Nulo no que veio antes disto existir. */
   role: string | null;
   /** Cores tiradas do arquivo quando ele é um logotipo. Propriedade da imagem, não da loja. */
-  palette: { primary: string; on_primary: string; secondary: string | null } | null;
+  palette: {
+    primary: string;
+    on_primary: string;
+    secondary: string | null;
+  } | null;
   renditions: Rendition[];
   created_at: string;
 }
@@ -175,7 +185,12 @@ export interface ModifierGroup {
   name: string;
   min_select: number;
   max_select: number;
-  modifiers: { id: string; name: string; price_cents: number; active: boolean }[];
+  modifiers: {
+    id: string;
+    name: string;
+    price_cents: number;
+    active: boolean;
+  }[];
 }
 
 /** Groups shown in the panel's modifiers form (the API allows up to 10). */
@@ -217,7 +232,12 @@ export interface FulfillmentSettings {
   pickup: { enabled: boolean; locations: PickupLocation[] };
   delivery: { enabled: boolean; zones: DeliveryZone[] };
   min_order_cents: number;
-  scheduling: { enabled: boolean; windows: DeliveryWindow[]; min_lead_minutes: number; days_ahead: number };
+  scheduling: {
+    enabled: boolean;
+    windows: DeliveryWindow[];
+    min_lead_minutes: number;
+    days_ahead: number;
+  };
 }
 
 export interface CheckoutSettings {
@@ -311,6 +331,8 @@ export interface ProductEvent {
   allocated: number;
   status: "scheduled" | "postponed" | "cancelled";
   status_note: string | null;
+  ticketing: "mutickets" | "own";
+  delivery: "digital" | "physical" | "both";
   lots: EventLot[];
 }
 
@@ -320,12 +342,25 @@ export const EVENT_STATUS_LABEL: Record<ProductEvent["status"], string> = {
   cancelled: "Cancelado",
 };
 
+/** Quem emite o ingresso. O rótulo fala do que a loja ganha, não do nome interno da opção. */
+export const TICKETING_LABEL: Record<ProductEvent["ticketing"], string> = {
+  own: "Eu mesmo (meu ingresso)",
+  mutickets: "MuTickets (código com QR)",
+};
+
+export const TICKET_DELIVERY_LABEL: Record<ProductEvent["delivery"], string> = {
+  digital: "Digital",
+  physical: "Impresso, pelos Correios",
+  both: "Digital e impresso",
+};
+
 export const LOT_STATE_LABEL: Record<EventLot["state"], string> = {
   on_sale: "à venda",
   upcoming: "vendas em breve",
   sold_out: "esgotado",
   ended: "encerrado",
-  unavailable: "fora de venda (produto não publicado, pausado ou evento não confirmado)",
+  unavailable:
+    "fora de venda (produto não publicado, pausado ou evento não confirmado)",
 };
 
 export const STOCK_POLICIES: Record<string, string> = {
@@ -398,7 +433,12 @@ export const PAYMENT_PROVIDERS: Record<string, PaymentProviderSpec> = {
     public: [],
     secrets: [{ key: "access_token", label: "Token da API" }],
   },
-  fake: { label: "Teste (fake)", methods: ["pix", "card"], public: [], secrets: [] },
+  fake: {
+    label: "Teste (fake)",
+    methods: ["pix", "card"],
+    public: [],
+    secrets: [],
+  },
 };
 
 export const PAYMENT_METHOD_LABEL: Record<string, string> = {
@@ -610,7 +650,8 @@ export interface ShipmentPreview {
 }
 
 export const SHIPMENT_PREVIEW_PROBLEM: Record<string, string> = {
-  service_unavailable: "O serviço que o cliente escolheu não aparece mais na cotação de hoje.",
+  service_unavailable:
+    "O serviço que o cliente escolheu não aparece mais na cotação de hoje.",
   unavailable: "A transportadora não respondeu agora.",
   not_configured: "Conecte a conta da transportadora para ver o custo.",
   shipping_disabled: "O envio por transportadora está desligado.",

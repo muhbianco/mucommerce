@@ -39,6 +39,8 @@ def event_read(view: EventView) -> EventRead:
         allocated=view.allocated,
         status=event.status,
         status_note=event.status_note,
+        ticketing=event.ticketing,
+        delivery=event.delivery,
         lots=[
             LotRead(
                 id=lot.lot.id,

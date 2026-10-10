@@ -5,8 +5,16 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 
 import { api, ApiError } from "@/lib/panel/api";
-import { normalizeEmail, normalizeInstagram, normalizeWhatsapp } from "@/lib/panel/contact";
-import { localToUtcIso, parseModifierLines, parseQuantity } from "@/lib/panel/format";
+import {
+  normalizeEmail,
+  normalizeInstagram,
+  normalizeWhatsapp,
+} from "@/lib/panel/contact";
+import {
+  localToUtcIso,
+  parseModifierLines,
+  parseQuantity,
+} from "@/lib/panel/format";
 import { parseCm, parseWeight, type WeightUnit } from "@/lib/panel/measure";
 import {
   type Media,
@@ -17,7 +25,15 @@ import {
   type UploadCreated,
 } from "@/lib/panel/types";
 
-import { FormError, id, money, optional, run, tenantBase, text } from "./form-kit";
+import {
+  FormError,
+  id,
+  money,
+  optional,
+  run,
+  tenantBase,
+  text,
+} from "./form-kit";
 
 // ------------------------------------------------------------------ products
 export async function createProduct(form: FormData): Promise<void> {
@@ -50,7 +66,8 @@ export async function updateProduct(form: FormData): Promise<void> {
   await run(`${page}/produtos/${productId}`, "salvo", async () => {
     const promoStarts = localToUtcIso(text(form, "promo_starts_at"), timeZone);
     const promoEnds = localToUtcIso(text(form, "promo_ends_at"), timeZone);
-    if (promoStarts === "invalid" || promoEnds === "invalid") throw new FormError("data_invalida");
+    if (promoStarts === "invalid" || promoEnds === "invalid")
+      throw new FormError("data_invalida");
     await api(`${path}/products/${productId}`, {
       method: "PATCH",
       json: {
@@ -74,7 +91,10 @@ export async function updateProduct(form: FormData): Promise<void> {
         position: Number(text(form, "position") || 0),
         category_ids: form.getAll("category_ids").map(String).map(id),
         tags: tagNames(form),
-        seo: { title: optional(form, "seo_title"), description: optional(form, "seo_description") },
+        seo: {
+          title: optional(form, "seo_title"),
+          description: optional(form, "seo_description"),
+        },
       },
     });
   });
@@ -83,17 +103,23 @@ export async function updateProduct(form: FormData): Promise<void> {
 const PACKING_MODES = new Set(["auto", "restricted", "own_container"]);
 
 /** Peso na unidade escolhida (g ou kg) → gramas; vazio → null (sem medida, a cotação recusa). */
-function weightField(form: FormData, valueName: string, unitName: string): number | null {
+function weightField(
+  form: FormData,
+  valueName: string,
+  unitName: string,
+): number | null {
   const unit: WeightUnit = text(form, unitName) === "kg" ? "kg" : "g";
   const grams = parseWeight(text(form, valueName), unit);
-  if (grams !== null && (Number.isNaN(grams) || grams > 1_000_000)) throw new FormError("peso_invalido");
+  if (grams !== null && (Number.isNaN(grams) || grams > 1_000_000))
+    throw new FormError("peso_invalido");
   return grams;
 }
 
 /** Centímetros digitados → milímetros; vazio → null. */
 function cmField(form: FormData, name: string): number | null {
   const mm = parseCm(text(form, name));
-  if (mm !== null && (Number.isNaN(mm) || mm > 1_000_000)) throw new FormError("medida_invalida");
+  if (mm !== null && (Number.isNaN(mm) || mm > 1_000_000))
+    throw new FormError("medida_invalida");
   return mm;
 }
 
@@ -124,7 +150,10 @@ function packingFields(form: FormData): Record<string, unknown> {
       .map((packageId) => {
         const raw = text(form, `rule_max_${packageId}`);
         const max = raw ? Number(raw) : null;
-        if (max !== null && (!Number.isInteger(max) || max < 1 || max > 100_000)) {
+        if (
+          max !== null &&
+          (!Number.isInteger(max) || max < 1 || max > 100_000)
+        ) {
           throw new FormError("numero_invalido");
         }
         return { package_id: packageId, max_units: max };
@@ -137,13 +166,16 @@ function packingFields(form: FormData): Record<string, unknown> {
  * Desconto progressivo: tres degraus na tela ("a partir de N unidades, R$ X cada").
  * Linha sem os dois campos e ignorada, entao a pessoa preenche so o que usa.
  */
-function priceTiers(form: FormData): { min_qty_milli: number; unit_price_cents: number }[] {
+function priceTiers(
+  form: FormData,
+): { min_qty_milli: number; unit_price_cents: number }[] {
   const tiers: { min_qty_milli: number; unit_price_cents: number }[] = [];
   for (let i = 0; i < 3; i++) {
     const qty = Number(text(form, `tier_qty_${i}`) || 0);
     const price = money(form, `tier_price_${i}`);
     if (!qty && price === null) continue;
-    if (!Number.isInteger(qty) || qty <= 0) throw new FormError("quantidade_invalida");
+    if (!Number.isInteger(qty) || qty <= 0)
+      throw new FormError("quantidade_invalida");
     if (price === null || price <= 0) throw new FormError("preco_obrigatorio");
     tiers.push({ min_qty_milli: qty * 1000, unit_price_cents: price });
   }
@@ -160,7 +192,10 @@ export async function setProductStatus(form: FormData): Promise<void> {
       return `${page}/produtos?ok=arquivado`;
     }
     if (action === "pause") {
-      await api(`${path}/products/${productId}/pause`, { method: "POST", json: pauseBody(form) });
+      await api(`${path}/products/${productId}/pause`, {
+        method: "POST",
+        json: pauseBody(form),
+      });
       return;
     }
     if (action !== "publish" && action !== "unpublish" && action !== "resume") {
@@ -182,7 +217,10 @@ export async function setProductOptions(form: FormData): Promise<void> {
         .map((value) => value.trim())
         .filter(Boolean),
     })).filter((option) => option.name || option.values.length);
-    await api(`${path}/products/${productId}/options`, { method: "PUT", json: { options } });
+    await api(`${path}/products/${productId}/options`, {
+      method: "PUT",
+      json: { options },
+    });
   });
 }
 
@@ -197,7 +235,8 @@ export async function setProductModifiers(form: FormData): Promise<void> {
       const lines = text(form, `group_items_${i}`);
       if (!name && !lines.trim()) continue;
       const modifiers = parseModifierLines(lines);
-      if (!modifiers || !modifiers.length || !name) throw new FormError("adicionais_invalidos");
+      if (!modifiers || !modifiers.length || !name)
+        throw new FormError("adicionais_invalidos");
       groups.push({
         name,
         min_select: Number(text(form, `group_min_${i}`) || 0),
@@ -205,12 +244,19 @@ export async function setProductModifiers(form: FormData): Promise<void> {
         modifiers,
       });
     }
-    await api(`${path}/products/${productId}/modifiers`, { method: "PUT", json: { groups } });
+    await api(`${path}/products/${productId}/modifiers`, {
+      method: "PUT",
+      json: { groups },
+    });
   });
 }
 
 // ------------------------------------------------------------------ events
-function eventDate(form: FormData, name: string, timeZone: string): string | null {
+function eventDate(
+  form: FormData,
+  name: string,
+  timeZone: string,
+): string | null {
   const iso = localToUtcIso(text(form, name), timeZone);
   if (iso === "invalid") throw new FormError("data_invalida");
   return iso;
@@ -237,6 +283,10 @@ export async function saveEvent(form: FormData): Promise<void> {
         capacity: capacity ? Number(capacity) : null,
         status: text(form, "status") || "scheduled",
         status_note: optional(form, "status_note"),
+        // PUT manda o evento inteiro: sem estes dois aqui, salvar a data do evento desligaria
+        // a emissão de ingressos sem ninguém pedir.
+        ticketing: text(form, "ticketing") || "own",
+        delivery: text(form, "delivery") || "digital",
       },
     });
   });
@@ -248,20 +298,26 @@ export async function saveLot(form: FormData): Promise<void> {
   const productId = id(text(form, "product_id"));
   const lotId = optional(form, "lot_id");
   const timeZone = text(form, "time_zone") || "America/Sao_Paulo";
-  await run(`${page}/produtos/${productId}`, lotId ? "lote_salvo" : "lote_criado", async () => {
-    const quantity = Number(text(form, "quantity"));
-    if (!Number.isInteger(quantity) || quantity < 0) throw new FormError("quantidade_invalida");
-    const body = {
-      name: text(form, "name"),
-      price_cents: money(form, "price", { required: true }),
-      quantity,
-      sales_starts_at: eventDate(form, "sales_starts_at", timeZone),
-      sales_ends_at: eventDate(form, "sales_ends_at", timeZone),
-    };
-    const lots = `${path}/products/${productId}/event/lots`;
-    if (lotId) await api(`${lots}/${id(lotId)}`, { method: "PATCH", json: body });
-    else await api(lots, { json: body });
-  });
+  await run(
+    `${page}/produtos/${productId}`,
+    lotId ? "lote_salvo" : "lote_criado",
+    async () => {
+      const quantity = Number(text(form, "quantity"));
+      if (!Number.isInteger(quantity) || quantity < 0)
+        throw new FormError("quantidade_invalida");
+      const body = {
+        name: text(form, "name"),
+        price_cents: money(form, "price", { required: true }),
+        quantity,
+        sales_starts_at: eventDate(form, "sales_starts_at", timeZone),
+        sales_ends_at: eventDate(form, "sales_ends_at", timeZone),
+      };
+      const lots = `${path}/products/${productId}/event/lots`;
+      if (lotId)
+        await api(`${lots}/${id(lotId)}`, { method: "PATCH", json: body });
+      else await api(lots, { json: body });
+    },
+  );
 }
 
 export async function removeLot(form: FormData): Promise<void> {
@@ -269,7 +325,9 @@ export async function removeLot(form: FormData): Promise<void> {
   const productId = id(text(form, "product_id"));
   const lotId = id(text(form, "lot_id"));
   await run(`${page}/produtos/${productId}`, "lote_removido", async () => {
-    await api(`${path}/products/${productId}/event/lots/${lotId}`, { method: "DELETE" });
+    await api(`${path}/products/${productId}/event/lots/${lotId}`, {
+      method: "DELETE",
+    });
   });
 }
 
@@ -280,7 +338,8 @@ export async function setVariantPause(form: FormData): Promise<void> {
   const variantId = id(text(form, "variant_id"));
   const action = text(form, "action");
   await run(`${page}/produtos/${productId}`, `variante_${action}`, async () => {
-    if (action !== "pause" && action !== "resume") throw new FormError("acao_invalida");
+    if (action !== "pause" && action !== "resume")
+      throw new FormError("acao_invalida");
     await api(`${path}/products/${productId}/variants/${variantId}/${action}`, {
       method: "POST",
       ...(action === "pause" ? { json: pauseBody(form) } : {}),
@@ -298,7 +357,10 @@ export async function updateVariant(form: FormData): Promise<void> {
   const productId = id(text(form, "product_id"));
   const variantId = id(text(form, "variant_id"));
   await run(`${page}/produtos/${productId}`, "variante", async () => {
-    const json: Record<string, unknown> = { price_cents: money(form, "price"), cost_cents: money(form, "cost") };
+    const json: Record<string, unknown> = {
+      price_cents: money(form, "price"),
+      cost_cents: money(form, "cost"),
+    };
     if (text(form, "measures") === "1") {
       // Frete v2: peso e medidas da variação; vazio herda do produto (as três medidas juntas).
       json.weight_grams = weightField(form, "weight_value", "weight_unit");
@@ -306,7 +368,10 @@ export async function updateVariant(form: FormData): Promise<void> {
       json.height_mm = cmField(form, "height_cm");
       json.depth_mm = cmField(form, "depth_cm");
     }
-    await api(`${path}/products/${productId}/variants/${variantId}`, { method: "PATCH", json });
+    await api(`${path}/products/${productId}/variants/${variantId}`, {
+      method: "PATCH",
+      json,
+    });
   });
 }
 
@@ -323,30 +388,48 @@ export async function requestUpload(input: {
    *  destaque — e o logotipo nunca vira. Vai numa coluna própria, e não no `alt`, que é texto de
    *  acessibilidade e aparece na página publicada. */
   role?: string | null;
-}): Promise<{ ok: true; mediaId: string; url: string; fields: Record<string, string> } | { ok: false; code: string }> {
+}): Promise<
+  | { ok: true; mediaId: string; url: string; fields: Record<string, string> }
+  | { ok: false; code: string }
+> {
   try {
-    const created = await api<UploadCreated>(`/admin/tenants/${id(input.tenantId)}/media/uploads`, {
-      json: {
-        owner_type: input.ownerType,
-        owner_id: input.ownerId ? id(input.ownerId) : null,
-        mime: input.mime,
-        bytes: input.bytes,
-        filename: input.filename.slice(0, 200),
-        role: input.role || null,
+    const created = await api<UploadCreated>(
+      `/admin/tenants/${id(input.tenantId)}/media/uploads`,
+      {
+        json: {
+          owner_type: input.ownerType,
+          owner_id: input.ownerId ? id(input.ownerId) : null,
+          mime: input.mime,
+          bytes: input.bytes,
+          filename: input.filename.slice(0, 200),
+          role: input.role || null,
+        },
       },
-    });
-    return { ok: true, mediaId: created.media.id, url: created.upload.url, fields: created.upload.fields };
+    );
+    return {
+      ok: true,
+      mediaId: created.media.id,
+      url: created.upload.url,
+      fields: created.upload.fields,
+    };
   } catch (error) {
-    if (error instanceof ApiError || error instanceof FormError) return { ok: false, code: error.code };
+    if (error instanceof ApiError || error instanceof FormError)
+      return { ok: false, code: error.code };
     throw error;
   }
 }
 
-export async function completeUpload(tenantId: string, mediaId: string): Promise<Media["status"] | "error"> {
+export async function completeUpload(
+  tenantId: string,
+  mediaId: string,
+): Promise<Media["status"] | "error"> {
   try {
-    const media = await api<Media>(`/admin/tenants/${id(tenantId)}/media/${id(mediaId)}/complete`, {
-      method: "POST",
-    });
+    const media = await api<Media>(
+      `/admin/tenants/${id(tenantId)}/media/${id(mediaId)}/complete`,
+      {
+        method: "POST",
+      },
+    );
     return media.status;
   } catch (error) {
     if (error instanceof ApiError || error instanceof FormError) return "error";
@@ -359,19 +442,27 @@ export async function mediaStatus(
   mediaId: string,
 ): Promise<{ status: Media["status"] | "error"; reason: string | null }> {
   try {
-    const media = await api<Media>(`/admin/tenants/${id(tenantId)}/media/${id(mediaId)}`);
+    const media = await api<Media>(
+      `/admin/tenants/${id(tenantId)}/media/${id(mediaId)}`,
+    );
     return { status: media.status, reason: media.failure_reason };
   } catch (error) {
-    if (error instanceof ApiError || error instanceof FormError) return { status: "error", reason: null };
+    if (error instanceof ApiError || error instanceof FormError)
+      return { status: "error", reason: null };
     throw error;
   }
 }
 
 export async function deleteMedia(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
-  const back = text(form, "back") === "config" ? `${page}/configuracoes` : `${page}/produtos/${id(text(form, "product_id"))}`;
+  const back =
+    text(form, "back") === "config"
+      ? `${page}/configuracoes`
+      : `${page}/produtos/${id(text(form, "product_id"))}`;
   await run(back, "imagem_removida", async () => {
-    await api(`${path}/media/${id(text(form, "media_id"))}`, { method: "DELETE" });
+    await api(`${path}/media/${id(text(form, "media_id"))}`, {
+      method: "DELETE",
+    });
   });
 }
 
@@ -381,7 +472,10 @@ export async function updateMediaAlt(form: FormData): Promise<void> {
   await run(`${page}/produtos/${productId}`, "imagem", async () => {
     await api(`${path}/media/${id(text(form, "media_id"))}`, {
       method: "PATCH",
-      json: { alt: optional(form, "alt"), position: Number(text(form, "position") || 0) },
+      json: {
+        alt: optional(form, "alt"),
+        position: Number(text(form, "position") || 0),
+      },
     });
   });
 }
@@ -399,7 +493,10 @@ export async function saveCategory(form: FormData): Promise<void> {
   };
   await run(`${page}/categorias`, categoryId ? "salva" : "criada", async () => {
     if (categoryId) {
-      await api(`${path}/categories/${id(categoryId)}`, { method: "PATCH", json: body });
+      await api(`${path}/categories/${id(categoryId)}`, {
+        method: "PATCH",
+        json: body,
+      });
     } else {
       await api(`${path}/categories`, {
         json: body,
@@ -412,7 +509,9 @@ export async function saveCategory(form: FormData): Promise<void> {
 export async function archiveCategory(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   await run(`${page}/categorias`, "arquivada", async () => {
-    await api(`${path}/categories/${id(text(form, "category_id"))}`, { method: "DELETE" });
+    await api(`${path}/categories/${id(text(form, "category_id"))}`, {
+      method: "DELETE",
+    });
   });
 }
 
@@ -420,7 +519,10 @@ export async function archiveCategory(form: FormData): Promise<void> {
 export async function adjustStock(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   const variantId = id(text(form, "variant_id"));
-  const back = text(form, "back") === "extrato" ? `${page}/estoque/${variantId}` : `${page}/estoque`;
+  const back =
+    text(form, "back") === "extrato"
+      ? `${page}/estoque/${variantId}`
+      : `${page}/estoque`;
   await run(back, "estoque", async () => {
     const quantity = parseQuantity(text(form, "quantity"));
     if (quantity === null) throw new FormError("quantidade_invalida");
@@ -460,7 +562,10 @@ export async function setMinLevel(form: FormData): Promise<void> {
 }
 
 // ------------------------------------------------------------------ settings
-async function currentSetting(path: string, key: string): Promise<Record<string, unknown>> {
+async function currentSetting(
+  path: string,
+  key: string,
+): Promise<Record<string, unknown>> {
   const context = await api<TenantPanelContext>(`${path}/context`);
   return context.settings[key] ?? {};
 }
@@ -477,7 +582,9 @@ export async function saveBranding(form: FormData): Promise<void> {
           ...current,
           primary_color: text(form, "primary_color") || "#111111",
           secondary_color: text(form, "secondary_color") || null,
-          font: ["system", "serif", "rounded"].includes(text(form, "font")) ? text(form, "font") : "system",
+          font: ["system", "serif", "rounded"].includes(text(form, "font"))
+            ? text(form, "font")
+            : "system",
           logo_media_id: logo ? id(logo) : null,
         },
       },
@@ -562,7 +669,14 @@ function blocksFromForm(form: FormData): Block[] {
     const type = get("type");
     if (!type || form.get(`b${i}.remove`) === "on") continue;
     const block: Block = { type };
-    for (const name of ["title", "subtitle", "cta_label", "body", "address", "hours"]) {
+    for (const name of [
+      "title",
+      "subtitle",
+      "cta_label",
+      "body",
+      "address",
+      "hours",
+    ]) {
       const value = get(name);
       if (value !== null) block[name] = value;
     }
@@ -596,13 +710,21 @@ export async function saveLanding(form: FormData): Promise<void> {
     const add = optional(form, "add_block");
     if (add === "contact") blocks.push({ type: "contact" });
     if (add === "hero") blocks.push({ type: "hero", title: "Bem-vindo" });
-    if (add === "text") blocks.push({ type: "text", title: "Sobre nós", body: "" });
+    if (add === "text")
+      blocks.push({ type: "text", title: "Sobre nós", body: "" });
     if (add === "featured_products") {
       const productIds = form.getAll("add_product_ids").map(String).map(id);
       if (productIds.length === 0) throw new FormError("escolha_produtos");
-      blocks.push({ type: "featured_products", title: "Destaques", product_ids: productIds });
+      blocks.push({
+        type: "featured_products",
+        title: "Destaques",
+        product_ids: productIds,
+      });
     }
-    await api(`${path}/settings/landing`, { method: "PUT", json: { value: { blocks } } });
+    await api(`${path}/settings/landing`, {
+      method: "PUT",
+      json: { value: { blocks } },
+    });
   });
 }
 
@@ -624,7 +746,9 @@ export async function setCustomerAccess(form: FormData): Promise<void> {
 
 /** The list the decision came from (tab/search kept); never another tenant or host. */
 function safeListPath(value: string, fallback: string): string {
-  return value.startsWith(`${fallback}`) && !value.includes("//") ? value : fallback;
+  return value.startsWith(`${fallback}`) && !value.includes("//")
+    ? value
+    : fallback;
 }
 
 // ------------------------------------------------------------------ legal documents
@@ -632,8 +756,11 @@ export async function publishLegalDocument(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   const kind = text(form, "kind");
   await run(`${page}/configuracoes`, "legal", async () => {
-    if (kind !== "terms" && kind !== "privacy") throw new FormError("acao_invalida");
-    await api(`${path}/legal-documents`, { json: { kind, content: text(form, "content") } });
+    if (kind !== "terms" && kind !== "privacy")
+      throw new FormError("acao_invalida");
+    await api(`${path}/legal-documents`, {
+      json: { kind, content: text(form, "content") },
+    });
   });
 }
 
@@ -665,10 +792,13 @@ export async function saveEmail(form: FormData): Promise<void> {
 export async function testEmail(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   await run(`${page}/configuracoes`, "email_teste", async () => {
-    const resultado = await api<{ ok: boolean; detail: string }>(`${path}/email/test`, {
-      method: "POST",
-      json: {},
-    });
+    const resultado = await api<{ ok: boolean; detail: string }>(
+      `${path}/email/test`,
+      {
+        method: "POST",
+        json: {},
+      },
+    );
     if (!resultado.ok) throw new FormError("email_teste_falhou");
   });
 }
@@ -683,29 +813,39 @@ export async function testEmail(form: FormData): Promise<void> {
 export async function createAgentLinkCode(
   tenantId: string,
   kind: "sales" | "operator",
-  label: string
-): Promise<{ ok: true; codigo: string; expira_em: string } | { ok: false; erro: string }> {
+  label: string,
+): Promise<
+  { ok: true; codigo: string; expira_em: string } | { ok: false; erro: string }
+> {
   try {
     const criado = await api<{ codigo: string; expira_em: string }>(
       `/admin/tenants/${tenantId}/agent-links/codes`,
-      { method: "POST", json: { tipo: kind, nome: label || null } }
+      { method: "POST", json: { tipo: kind, nome: label || null } },
     );
     return { ok: true, ...criado };
   } catch (error) {
-    return { ok: false, erro: error instanceof Error ? error.message : "falhou" };
+    return {
+      ok: false,
+      erro: error instanceof Error ? error.message : "falhou",
+    };
   }
 }
 
 /** Desconecta o agente. A credencial dele para de valer na hora. */
 export async function revokeAgentLink(
   tenantId: string,
-  linkId: string
+  linkId: string,
 ): Promise<{ ok: boolean; erro?: string }> {
   try {
-    await api(`/admin/tenants/${tenantId}/agent-links/${linkId}`, { method: "DELETE" });
+    await api(`/admin/tenants/${tenantId}/agent-links/${linkId}`, {
+      method: "DELETE",
+    });
     revalidatePath(`/painel/t/${tenantId}/configuracoes`);
     return { ok: true };
   } catch (error) {
-    return { ok: false, erro: error instanceof Error ? error.message : "falhou" };
+    return {
+      ok: false,
+      erro: error instanceof Error ? error.message : "falhou",
+    };
   }
 }

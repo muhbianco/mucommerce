@@ -14,6 +14,8 @@ import {
   type Category,
   type EventLot,
   EVENT_STATUS_LABEL,
+  TICKETING_LABEL,
+  TICKET_DELIVERY_LABEL,
   LOT_STATE_LABEL,
   type Media,
   MODIFIER_GROUP_ROWS,
@@ -58,7 +60,10 @@ const STATUS_NOTE: Record<string, string> = {
 };
 
 /** Foto ainda sem versão pronta: a situação em palavras de lojista. */
-const MEDIA_STATE: Record<Media["status"], { label: string; state: PillState }> = {
+const MEDIA_STATE: Record<
+  Media["status"],
+  { label: string; state: PillState }
+> = {
   pending: { label: "Aguardando envio", state: "pending" },
   processing: { label: "Processando", state: "pending" },
   ready: { label: "Pronta", state: "live" },
@@ -74,19 +79,28 @@ const LOT_STATE: Record<EventLot["state"], PillState> = {
 };
 
 /** "fora de venda (produto não publicado…)" → selo curto e a explicação embaixo dele. */
-function lotState(state: EventLot["state"]): { label: string; detail: string | null } {
+function lotState(state: EventLot["state"]): {
+  label: string;
+  detail: string | null;
+} {
   const text = LOT_STATE_LABEL[state] ?? state;
   const match = /^(.*?)\s*\((.*)\)$/.exec(text);
-  return match ? { label: match[1] || text, detail: match[2] || null } : { label: text, detail: null };
+  return match
+    ? { label: match[1] || text, detail: match[2] || null }
+    : { label: text, detail: null };
 }
 
 /** Categorias na ordem da árvore: a principal e, logo depois, as de dentro dela. Nenhuma fica de fora. */
-function categoryTree(categories: Category[]): { category: Category; parent: Category | null }[] {
+function categoryTree(
+  categories: Category[],
+): { category: Category; parent: Category | null }[] {
   const byId = new Map(categories.map((category) => [category.id, category]));
   const rows: { category: Category; parent: Category | null }[] = [];
   for (const root of categories.filter((category) => !category.parent_id)) {
     rows.push({ category: root, parent: null });
-    for (const child of categories.filter((category) => category.parent_id === root.id)) {
+    for (const child of categories.filter(
+      (category) => category.parent_id === root.id,
+    )) {
       rows.push({ category: child, parent: root });
     }
   }
@@ -94,7 +108,12 @@ function categoryTree(categories: Category[]): { category: Category; parent: Cat
   const placed = new Set(rows.map((row) => row.category.id));
   for (const category of categories) {
     if (!placed.has(category.id)) {
-      rows.push({ category, parent: category.parent_id ? (byId.get(category.parent_id) ?? null) : null });
+      rows.push({
+        category,
+        parent: category.parent_id
+          ? (byId.get(category.parent_id) ?? null)
+          : null,
+      });
     }
   }
   return rows;
@@ -125,12 +144,24 @@ function ModifierGroupFields({
         </label>
         <label className={styles.field}>
           Mínimo
-          <input name={`group_min_${index}`} type="number" min={0} max={30} defaultValue={group?.min_select ?? 0} />
+          <input
+            name={`group_min_${index}`}
+            type="number"
+            min={0}
+            max={30}
+            defaultValue={group?.min_select ?? 0}
+          />
           <span className={styles.fieldHint}>0 = opcional</span>
         </label>
         <label className={styles.field}>
           Máximo
-          <input name={`group_max_${index}`} type="number" min={1} max={30} defaultValue={group?.max_select ?? 1} />
+          <input
+            name={`group_max_${index}`}
+            type="number"
+            min={1}
+            max={30}
+            defaultValue={group?.max_select ?? 1}
+          />
           <span className={styles.fieldHint}>Quantos dá para escolher</span>
         </label>
         <label className={styles.field}>
@@ -139,10 +170,16 @@ function ModifierGroupFields({
             name={`group_items_${index}`}
             rows={3}
             maxLength={3000}
-            placeholder={index === 0 ? "Chocolate = 3,50\nGranulado" : undefined}
+            placeholder={
+              index === 0 ? "Chocolate = 3,50\nGranulado" : undefined
+            }
             defaultValue={(group?.modifiers ?? [])
               .filter((m) => m.active)
-              .map((m) => (m.price_cents ? `${m.name} = ${moneyInput(m.price_cents)}` : m.name))
+              .map((m) =>
+                m.price_cents
+                  ? `${m.name} = ${moneyInput(m.price_cents)}`
+                  : m.name,
+              )
               .join("\n")}
           />
           <span className={styles.fieldHint}>Um por linha: Nome = 3,50</span>
@@ -161,7 +198,10 @@ export default async function ProductPage({
 }) {
   const { tenantId, productId } = await params;
   const { ok, erro } = await searchParams;
-  const [context, me] = await Promise.all([loadTenantContext(tenantId), requireMe()]);
+  const [context, me] = await Promise.all([
+    loadTenantContext(tenantId),
+    requireMe(),
+  ]);
   if (!context.features.catalog) notFound();
   const scopes = tenantScopes(me, context.tenant_id);
   const path = `/admin/tenants/${context.tenant_id}`;
@@ -169,9 +209,15 @@ export default async function ProductPage({
 
   let product: Product;
   try {
-    product = await api<Product>(`${path}/products/${encodeURIComponent(productId)}`);
+    product = await api<Product>(
+      `${path}/products/${encodeURIComponent(productId)}`,
+    );
   } catch (error) {
-    if (error instanceof ApiError && (error.status === 404 || error.status === 422)) notFound();
+    if (
+      error instanceof ApiError &&
+      (error.status === 404 || error.status === 422)
+    )
+      notFound();
     throw error;
   }
   const [categories, tags] = await Promise.all([
@@ -179,12 +225,16 @@ export default async function ProductPage({
     api<TagRef[]>(`${path}/tags`),
   ]);
 
-  const otherTags = tags.filter((tag) => !product.tags.some((mine) => mine.slug === tag.slug));
+  const otherTags = tags.filter(
+    (tag) => !product.tags.some((mine) => mine.slug === tag.slug),
+  );
   const isTicket = product.kind === "ticket";
   let event: ProductEvent | null = null;
   if (isTicket && context.features.events) {
     try {
-      event = await api<ProductEvent>(`${path}/products/${encodeURIComponent(product.id)}/event`);
+      event = await api<ProductEvent>(
+        `${path}/products/${encodeURIComponent(product.id)}/event`,
+      );
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 404)) throw error;
     }
@@ -200,25 +250,31 @@ export default async function ProductPage({
     const { weight_grams, width_mm, height_mm, depth_mm } = product;
     if (weight_grams && width_mm && height_mm && depth_mm) {
       try {
-        capacidades = await api<PackageCapacity[]>(`${path}/shipping/packing-preview/product`, {
-          json: {
-            weight_grams,
-            width_mm,
-            height_mm,
-            depth_mm,
-            rotation: product.packing_rotation ?? "any",
-            flexible: product.packing_flexible ?? false,
-            mode: product.packing_mode ?? "auto",
-            rules: product.package_rules ?? [],
+        capacidades = await api<PackageCapacity[]>(
+          `${path}/shipping/packing-preview/product`,
+          {
+            json: {
+              weight_grams,
+              width_mm,
+              height_mm,
+              depth_mm,
+              rotation: product.packing_rotation ?? "any",
+              flexible: product.packing_flexible ?? false,
+              mode: product.packing_mode ?? "auto",
+              rules: product.package_rules ?? [],
+            },
           },
-        });
+        );
       } catch (error) {
         // A prévia é ajuda, não bloqueio: se ela falhar, a página abre sem "onde cabe".
         if (!(error instanceof ApiError)) throw error;
       }
     }
   }
-  const tiers = (product.price_tiers ?? []) as { min_qty_milli: number; unit_price_cents: number }[];
+  const tiers = (product.price_tiers ?? []) as {
+    min_qty_milli: number;
+    unit_price_cents: number;
+  }[];
   const zone = context.timezone;
   const hidden = (
     <>
@@ -228,20 +284,28 @@ export default async function ProductPage({
   );
   const ready = product.media.filter((m) => m.status === "ready").length;
   const published = product.status === "active" || product.status === "paused";
-  const canPublish = scopes.can("catalog:publish") && product.status !== "archived";
+  const canPublish =
+    scopes.can("catalog:publish") && product.status !== "archived";
   const canArchive = canPublish && scopes.can("catalog:write");
   const hasEvent = isTicket && context.features.events;
   const lotPrices = (event?.lots ?? []).map((lot) => lot.price_cents);
   const tree = categoryTree(categories);
   const storeUrl =
-    published && context.primary_host ? `https://${context.primary_host}/loja/produto/${product.slug}` : null;
+    published && context.primary_host
+      ? `https://${context.primary_host}/loja/produto/${product.slug}`
+      : null;
   const statusNote =
     product.status === "paused"
       ? `Venda pausada${product.paused_reason ? `: ${product.paused_reason}` : ""}. Na vitrine, o produto aparece como indisponível.`
       : (STATUS_NOTE[product.status] ?? null);
   // Grupos de adicionais: os preenchidos e um vazio à vista; os outros vazios ficam em "Mais grupos".
-  const usedGroups = Math.min(MODIFIER_GROUP_ROWS, product.modifier_groups.length);
-  const shownGroups = canWrite ? Math.min(MODIFIER_GROUP_ROWS, usedGroups + 1) : usedGroups;
+  const usedGroups = Math.min(
+    MODIFIER_GROUP_ROWS,
+    product.modifier_groups.length,
+  );
+  const shownGroups = canWrite
+    ? Math.min(MODIFIER_GROUP_ROWS, usedGroups + 1)
+    : usedGroups;
   const smallButton = `${styles.buttonGhost} ${styles.buttonSmall}`;
   const dangerButton = `${styles.buttonDanger} ${styles.buttonSmall}`;
   const toc: [string, string][] = [
@@ -254,7 +318,10 @@ export default async function ProductPage({
     ["link", "Link e Google"],
     ...(isTicket ? [] : ([["opcoes", "Opções"]] as [string, string][])),
     ...(hasEvent ? ([["evento", "Evento e lotes"]] as [string, string][]) : []),
-    ["variantes", product.has_variants ? "Variantes e estoque" : "Variante e estoque"],
+    [
+      "variantes",
+      product.has_variants ? "Variantes e estoque" : "Variante e estoque",
+    ],
     ["adicionais", "Adicionais"],
   ];
 
@@ -282,7 +349,9 @@ export default async function ProductPage({
               </Pill>
             }
           >
-            {statusNote ? <p className={local.statusNote}>{statusNote}</p> : null}
+            {statusNote ? (
+              <p className={local.statusNote}>{statusNote}</p>
+            ) : null}
             <KeyValues
               items={[
                 isTicket
@@ -303,13 +372,19 @@ export default async function ProductPage({
                           {product.price.compare_at_cents ? (
                             <span className={local.was}>
                               {" "}
-                              de <s>{formatMoney(product.price.compare_at_cents)}</s>
+                              de{" "}
+                              <s>
+                                {formatMoney(product.price.compare_at_cents)}
+                              </s>
                             </span>
                           ) : null}
                         </>
                       ),
                     },
-                { label: "Fotos prontas", value: ready ? String(ready) : <a href="#fotos">Nenhuma</a> },
+                {
+                  label: "Fotos prontas",
+                  value: ready ? String(ready) : <a href="#fotos">Nenhuma</a>,
+                },
               ]}
             />
             {storeUrl ? (
@@ -352,12 +427,18 @@ export default async function ProductPage({
                     <input type="hidden" name="action" value="pause" />
                     <label className={styles.field}>
                       Motivo (só você vê)
-                      <input name="reason" maxLength={200} placeholder="ex.: forno em manutenção" />
+                      <input
+                        name="reason"
+                        maxLength={200}
+                        placeholder="ex.: forno em manutenção"
+                      />
                     </label>
                     <button type="submit" className={styles.buttonGhost}>
                       Pausar venda
                     </button>
-                    <span className={styles.fieldHint}>O produto continua na vitrine, mas indisponível.</span>
+                    <span className={styles.fieldHint}>
+                      O produto continua na vitrine, mas indisponível.
+                    </span>
                   </form>
                 ) : null}
                 {published ? (
@@ -367,14 +448,19 @@ export default async function ProductPage({
                     <button type="submit" className={styles.buttonGhost}>
                       Tirar da vitrine
                     </button>
-                    <span className={styles.fieldHint}>Some da loja até você publicar de novo.</span>
+                    <span className={styles.fieldHint}>
+                      Some da loja até você publicar de novo.
+                    </span>
                   </form>
                 ) : null}
               </div>
             ) : null}
           </Section>
 
-          <nav className={`${styles.card} ${local.toc}`} aria-label="Partes desta página">
+          <nav
+            className={`${styles.card} ${local.toc}`}
+            aria-label="Partes desta página"
+          >
             <p className={local.tocTitle}>Nesta página</p>
             <ol>
               {toc.map(([id, label]) => (
@@ -390,21 +476,32 @@ export default async function ProductPage({
           <Section
             id="fotos"
             title="Fotos"
-            description={product.media.length ? (ready === 1 ? "1 foto pronta" : `${ready} fotos prontas`) : undefined}
+            description={
+              product.media.length
+                ? ready === 1
+                  ? "1 foto pronta"
+                  : `${ready} fotos prontas`
+                : undefined
+            }
           >
             {product.media.length ? (
               <ul className={local.photos}>
                 {product.media.map((media) => {
                   const view = media.renditions[media.renditions.length - 1];
-                  const state: { label: string; state: PillState } = MEDIA_STATE[media.status] ?? {
-                    label: media.status,
-                    state: "off",
-                  };
+                  const state: { label: string; state: PillState } =
+                    MEDIA_STATE[media.status] ?? {
+                      label: media.status,
+                      state: "off",
+                    };
                   return (
                     <li key={media.id} className={local.photo}>
                       {view ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img className={local.photoImg} src={view.url} alt={media.alt ?? ""} />
+                        <img
+                          className={local.photoImg}
+                          src={view.url}
+                          alt={media.alt ?? ""}
+                        />
                       ) : (
                         <div className={local.photoPending}>
                           <Pill state={state.state}>{state.label}</Pill>
@@ -418,25 +515,49 @@ export default async function ProductPage({
                         {canWrite ? (
                           <details>
                             <summary>Editar</summary>
-                            <form action={updateMediaAlt} className={local.photoForm}>
+                            <form
+                              action={updateMediaAlt}
+                              className={local.photoForm}
+                            >
                               {hidden}
-                              <input type="hidden" name="media_id" value={media.id} />
+                              <input
+                                type="hidden"
+                                name="media_id"
+                                value={media.id}
+                              />
                               <label className={styles.field}>
                                 Descrição
-                                <input name="alt" defaultValue={media.alt ?? ""} maxLength={300} />
-                                <span className={styles.fieldHint}>Para leitor de tela e Google.</span>
+                                <input
+                                  name="alt"
+                                  defaultValue={media.alt ?? ""}
+                                  maxLength={300}
+                                />
+                                <span className={styles.fieldHint}>
+                                  Para leitor de tela e Google.
+                                </span>
                               </label>
                               <label className={styles.field}>
                                 Ordem
-                                <input name="position" type="number" defaultValue={media.position} />
+                                <input
+                                  name="position"
+                                  type="number"
+                                  defaultValue={media.position}
+                                />
                               </label>
                               <button type="submit" className={smallButton}>
                                 Salvar foto
                               </button>
                             </form>
-                            <form action={deleteMedia} className={local.photoRemove}>
+                            <form
+                              action={deleteMedia}
+                              className={local.photoRemove}
+                            >
                               {hidden}
-                              <input type="hidden" name="media_id" value={media.id} />
+                              <input
+                                type="hidden"
+                                name="media_id"
+                                value={media.id}
+                              />
                               <button type="submit" className={dangerButton}>
                                 Remover foto
                               </button>
@@ -461,7 +582,10 @@ export default async function ProductPage({
                   ownerId={product.id}
                   label="Adicionar fotos"
                 />
-                <p className={local.uploadHint}>JPEG, PNG ou WebP, até 10 MB cada. Dá para escolher várias de uma vez.</p>
+                <p className={local.uploadHint}>
+                  JPEG, PNG ou WebP, até 10 MB cada. Dá para escolher várias de
+                  uma vez.
+                </p>
               </div>
             ) : null}
           </Section>
@@ -475,12 +599,23 @@ export default async function ProductPage({
                 <div className={styles.fields}>
                   <label className={`${styles.field} ${styles.fieldWide}`}>
                     Nome
-                    <input name="name" required maxLength={200} defaultValue={product.name} />
+                    <input
+                      name="name"
+                      required
+                      maxLength={200}
+                      defaultValue={product.name}
+                    />
                   </label>
                   <label className={`${styles.field} ${styles.fieldWide}`}>
                     Resumo
-                    <input name="short_description" maxLength={500} defaultValue={product.short_description ?? ""} />
-                    <span className={styles.fieldHint}>Uma frase que aparece logo abaixo do preço.</span>
+                    <input
+                      name="short_description"
+                      maxLength={500}
+                      defaultValue={product.short_description ?? ""}
+                    />
+                    <span className={styles.fieldHint}>
+                      Uma frase que aparece logo abaixo do preço.
+                    </span>
                   </label>
                   <label className={`${styles.field} ${styles.fieldWide}`}>
                     Descrição
@@ -490,7 +625,9 @@ export default async function ProductPage({
                       maxLength={20000}
                       defaultValue={product.description_md ?? ""}
                     />
-                    <span className={styles.fieldHint}>O texto completo da página do produto.</span>
+                    <span className={styles.fieldHint}>
+                      O texto completo da página do produto.
+                    </span>
                   </label>
                 </div>
               </Section>
@@ -506,38 +643,55 @@ export default async function ProductPage({
                       defaultValue={moneyInput(product.base_price_cents)}
                     />
                     {isTicket ? (
-                      <span className={styles.fieldHint}>No ingresso, o cliente paga o preço de cada lote.</span>
+                      <span className={styles.fieldHint}>
+                        No ingresso, o cliente paga o preço de cada lote.
+                      </span>
                     ) : null}
                   </label>
                   <label className={styles.field}>
                     Custo estimado (R$)
-                    <input name="cost" inputMode="decimal" defaultValue={moneyInput(product.cost_cents_estimate)} />
-                    <span className={styles.fieldHint}>Quanto custa para você. Não aparece na loja.</span>
+                    <input
+                      name="cost"
+                      inputMode="decimal"
+                      defaultValue={moneyInput(product.cost_cents_estimate)}
+                    />
+                    <span className={styles.fieldHint}>
+                      Quanto custa para você. Não aparece na loja.
+                    </span>
                   </label>
                 </div>
                 <h4 className={local.subhead}>Desconto por quantidade</h4>
                 <p className={styles.fieldHint}>
-                  Quem leva mais paga menos por unidade. O desconto olha o total do produto no
-                  carrinho, some ou não em linhas separadas, e cada faixa precisa custar menos que
-                  a anterior. Deixe vazio para preço único.
+                  Quem leva mais paga menos por unidade. O desconto olha o total
+                  do produto no carrinho, some ou não em linhas separadas, e
+                  cada faixa precisa custar menos que a anterior. Deixe vazio
+                  para preço único.
                 </p>
                 <div className={styles.fields}>
                   {[0, 1, 2].map((i) => {
                     const tier = tiers[i];
                     return (
                       <label key={i} className={styles.field}>
-                        {i === 0 ? "A partir de (unidades)" : `Faixa ${i + 1} — a partir de`}
+                        {i === 0
+                          ? "A partir de (unidades)"
+                          : `Faixa ${i + 1} — a partir de`}
                         <input
                           name={`tier_qty_${i}`}
                           type="number"
                           min={1}
-                          defaultValue={tier ? Math.round(tier.min_qty_milli / 1000) : ""}
+                          defaultValue={
+                            tier ? Math.round(tier.min_qty_milli / 1000) : ""
+                          }
                         />
-                        <span className={styles.fieldHint}>Preço por unidade nesta faixa (R$)</span>
+                        <span className={styles.fieldHint}>
+                          Preço por unidade nesta faixa (R$)
+                        </span>
                         <input
                           name={`tier_price_${i}`}
                           inputMode="decimal"
-                          defaultValue={tier ? moneyInput(tier.unit_price_cents) : ""}
+                          defaultValue={
+                            tier ? moneyInput(tier.unit_price_cents) : ""
+                          }
                         />
                       </label>
                     );
@@ -552,14 +706,19 @@ export default async function ProductPage({
                       inputMode="decimal"
                       defaultValue={moneyInput(product.promo_price_cents)}
                     />
-                    <span className={styles.fieldHint}>Menor que o preço. Vazio = sem promoção.</span>
+                    <span className={styles.fieldHint}>
+                      Menor que o preço. Vazio = sem promoção.
+                    </span>
                   </label>
                   <label className={styles.field}>
                     Começa em
                     <input
                       name="promo_starts_at"
                       type="datetime-local"
-                      defaultValue={utcToLocalInput(product.promo_starts_at, zone)}
+                      defaultValue={utcToLocalInput(
+                        product.promo_starts_at,
+                        zone,
+                      )}
                     />
                     <span className={styles.fieldHint}>Vazio = já vale.</span>
                   </label>
@@ -568,12 +727,19 @@ export default async function ProductPage({
                     <input
                       name="promo_ends_at"
                       type="datetime-local"
-                      defaultValue={utcToLocalInput(product.promo_ends_at, zone)}
+                      defaultValue={utcToLocalInput(
+                        product.promo_ends_at,
+                        zone,
+                      )}
                     />
-                    <span className={styles.fieldHint}>Vazio = sem data para acabar.</span>
+                    <span className={styles.fieldHint}>
+                      Vazio = sem data para acabar.
+                    </span>
                   </label>
                 </div>
-                <p className={styles.hint}>Datas no horário da loja ({zone}).</p>
+                <p className={styles.hint}>
+                  Datas no horário da loja ({zone}).
+                </p>
               </Section>
 
               <Section id="venda" title="Como você vende">
@@ -589,13 +755,17 @@ export default async function ProductPage({
                     </select>
                     {context.features.events && !isTicket ? (
                       <span className={styles.fieldHint}>
-                        Ingresso de evento libera data, local e lotes depois de salvar.
+                        Ingresso de evento libera data, local e lotes depois de
+                        salvar.
                       </span>
                     ) : null}
                   </label>
                   <label className={styles.field}>
                     Estoque
-                    <select name="stock_policy" defaultValue={product.stock_policy}>
+                    <select
+                      name="stock_policy"
+                      defaultValue={product.stock_policy}
+                    >
                       {Object.entries(STOCK_POLICIES).map(([value, label]) => (
                         <option key={value} value={value}>
                           {label}
@@ -612,18 +782,24 @@ export default async function ProductPage({
                   </label>
                   <label className={styles.field}>
                     Unidade
-                    <input name="unit_label" maxLength={16} defaultValue={product.unit_label} />
-                    <span className={styles.fieldHint}>Ex.: un, kg, dúzia.</span>
+                    <input
+                      name="unit_label"
+                      maxLength={16}
+                      defaultValue={product.unit_label}
+                    />
+                    <span className={styles.fieldHint}>
+                      Ex.: un, kg, dúzia.
+                    </span>
                   </label>
                 </div>
 
                 <PackingSection
-                    product={product}
-                    packages={pacotes}
-                    capacities={capacidades}
-                    base={base}
-                    disabled={!canWrite}
-                  />
+                  product={product}
+                  packages={pacotes}
+                  capacities={capacidades}
+                  base={base}
+                  disabled={!canWrite}
+                />
               </Section>
 
               <Section id="organizacao" title="Organização na loja">
@@ -637,10 +813,14 @@ export default async function ProductPage({
                             type="checkbox"
                             name="category_ids"
                             value={category.id}
-                            defaultChecked={product.category_ids.includes(category.id)}
+                            defaultChecked={product.category_ids.includes(
+                              category.id,
+                            )}
                           />
                           <span>
-                            {parent ? <span className="muted">{parent.name} › </span> : null}
+                            {parent ? (
+                              <span className="muted">{parent.name} › </span>
+                            ) : null}
                             {category.name}
                           </span>
                         </label>
@@ -648,7 +828,8 @@ export default async function ProductPage({
                     </div>
                   ) : (
                     <p className={styles.hint}>
-                      A loja ainda não tem categorias. <Link href={`${base}/categorias`}>Criar categorias</Link>
+                      A loja ainda não tem categorias.{" "}
+                      <Link href={`${base}/categorias`}>Criar categorias</Link>
                     </p>
                   )}
                 </fieldset>
@@ -658,7 +839,9 @@ export default async function ProductPage({
                     <input
                       name="tags"
                       maxLength={1300}
-                      defaultValue={product.tags.map((tag) => tag.name).join(", ")}
+                      defaultValue={product.tags
+                        .map((tag) => tag.name)
+                        .join(", ")}
                       placeholder="ex.: vegano, sem glúten"
                     />
                     <span className={styles.fieldHint}>
@@ -673,8 +856,14 @@ export default async function ProductPage({
                   </label>
                   <label className={styles.field}>
                     Ordem na vitrine
-                    <input name="position" type="number" defaultValue={product.position} />
-                    <span className={styles.fieldHint}>Menor aparece primeiro.</span>
+                    <input
+                      name="position"
+                      type="number"
+                      defaultValue={product.position}
+                    />
+                    <span className={styles.fieldHint}>
+                      Menor aparece primeiro.
+                    </span>
                   </label>
                 </div>
               </Section>
@@ -698,18 +887,33 @@ export default async function ProductPage({
                     </span>
                   </label>
                 </div>
-                <details className={local.seo} open={Boolean(product.seo?.title || product.seo?.description)}>
+                <details
+                  className={local.seo}
+                  open={Boolean(product.seo?.title || product.seo?.description)}
+                >
                   <summary>Título e descrição no Google (opcional)</summary>
                   <div className={`${styles.fields} ${local.seoFields}`}>
                     <label className={`${styles.field} ${styles.fieldWide}`}>
                       Título para buscadores
-                      <input name="seo_title" maxLength={70} defaultValue={product.seo?.title ?? ""} />
-                      <span className={styles.fieldHint}>Até 70 caracteres. Vazio = nome do produto e da loja.</span>
+                      <input
+                        name="seo_title"
+                        maxLength={70}
+                        defaultValue={product.seo?.title ?? ""}
+                      />
+                      <span className={styles.fieldHint}>
+                        Até 70 caracteres. Vazio = nome do produto e da loja.
+                      </span>
                     </label>
                     <label className={`${styles.field} ${styles.fieldWide}`}>
                       Descrição para buscadores
-                      <input name="seo_description" maxLength={160} defaultValue={product.seo?.description ?? ""} />
-                      <span className={styles.fieldHint}>Até 160 caracteres. Vazio = usa o resumo.</span>
+                      <input
+                        name="seo_description"
+                        maxLength={160}
+                        defaultValue={product.seo?.description ?? ""}
+                      />
+                      <span className={styles.fieldHint}>
+                        Até 160 caracteres. Vazio = usa o resumo.
+                      </span>
                     </label>
                   </div>
                 </details>
@@ -717,7 +921,10 @@ export default async function ProductPage({
             </fieldset>
             {canWrite ? (
               <div className={local.saveBar}>
-                <span className={local.saveHint}>Salva de uma vez: informações, preço, venda, organização e link.</span>
+                <span className={local.saveHint}>
+                  Salva de uma vez: informações, preço, venda, organização e
+                  link.
+                </span>
                 <button type="submit" className={styles.button}>
                   Salvar produto
                 </button>
@@ -726,10 +933,16 @@ export default async function ProductPage({
           </form>
 
           {isTicket ? null : (
-            <Section id="opcoes" title="Opções" description="Tamanho, sabor, cor… até 3">
+            <Section
+              id="opcoes"
+              title="Opções"
+              description="Tamanho, sabor, cor… até 3"
+            >
               <p className={local.sectionIntro}>
-                Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com código (SKU), preço e estoque próprios,
-                até 100 combinações. Tirar um valor arquiva as variantes dele; o histórico de estoque fica guardado.
+                Ex.: Tamanho = P, M, G. Cada combinação vira uma variante com
+                código (SKU), preço e estoque próprios, até 100 combinações.
+                Tirar um valor arquiva as variantes dele; o histórico de estoque
+                fica guardado.
               </p>
               <form action={setProductOptions}>
                 {hidden}
@@ -751,7 +964,9 @@ export default async function ProductPage({
                           <input
                             name={`option_values_${i}`}
                             maxLength={900}
-                            defaultValue={product.options[i]?.values.join(", ") ?? ""}
+                            defaultValue={
+                              product.options[i]?.values.join(", ") ?? ""
+                            }
                             placeholder={i === 0 ? "ex.: P, M, G" : undefined}
                           />
                         </label>
@@ -771,9 +986,14 @@ export default async function ProductPage({
           )}
 
           {hasEvent ? (
-            <Section id="evento" title="Evento e lotes" description="Data, local e ingressos">
+            <Section
+              id="evento"
+              title="Evento e lotes"
+              description="Data, local e ingressos"
+            >
               <p className={local.sectionIntro}>
-                Cada lote tem preço, quantidade de ingressos e período de vendas próprios.
+                Cada lote tem preço, quantidade de ingressos e período de vendas
+                próprios.
               </p>
               <form action={saveEvent}>
                 {hidden}
@@ -788,24 +1008,42 @@ export default async function ProductPage({
                         required
                         defaultValue={utcToLocalInput(event?.starts_at, zone)}
                       />
-                      <span className={styles.fieldHint}>Horário da loja ({zone}).</span>
+                      <span className={styles.fieldHint}>
+                        Horário da loja ({zone}).
+                      </span>
                     </label>
                     <label className={styles.field}>
                       Termina em
-                      <input name="ends_at" type="datetime-local" defaultValue={utcToLocalInput(event?.ends_at, zone)} />
+                      <input
+                        name="ends_at"
+                        type="datetime-local"
+                        defaultValue={utcToLocalInput(event?.ends_at, zone)}
+                      />
                     </label>
                     <label className={styles.field}>
                       Local
-                      <input name="venue_name" maxLength={160} defaultValue={event?.venue_name ?? ""} />
+                      <input
+                        name="venue_name"
+                        maxLength={160}
+                        defaultValue={event?.venue_name ?? ""}
+                      />
                       <span className={styles.fieldHint}>Nome do lugar.</span>
                     </label>
                     <label className={styles.field}>
                       Endereço
-                      <input name="venue_address" maxLength={300} defaultValue={event?.venue_address ?? ""} />
+                      <input
+                        name="venue_address"
+                        maxLength={300}
+                        defaultValue={event?.venue_address ?? ""}
+                      />
                     </label>
                     <label className={styles.field}>
                       Cidade
-                      <input name="city" maxLength={120} defaultValue={event?.city ?? ""} />
+                      <input
+                        name="city"
+                        maxLength={120}
+                        defaultValue={event?.city ?? ""}
+                      />
                     </label>
                     <label className={styles.field}>
                       Link do evento online
@@ -816,34 +1054,101 @@ export default async function ProductPage({
                         placeholder="https://"
                         defaultValue={event?.online_url ?? ""}
                       />
-                      <span className={styles.fieldHint}>Só quem comprar recebe.</span>
+                      <span className={styles.fieldHint}>
+                        Só quem comprar recebe.
+                      </span>
                     </label>
                     <label className={styles.field}>
                       Capacidade
-                      <input name="capacity" type="number" min={1} defaultValue={event?.capacity ?? ""} />
-                      <span className={styles.fieldHint}>Vazio = sem limite.</span>
+                      <input
+                        name="capacity"
+                        type="number"
+                        min={1}
+                        defaultValue={event?.capacity ?? ""}
+                      />
+                      <span className={styles.fieldHint}>
+                        Vazio = sem limite.
+                      </span>
                     </label>
                     <label className={styles.field}>
                       Situação
-                      <select name="status" defaultValue={event?.status ?? "scheduled"}>
-                        {Object.entries(EVENT_STATUS_LABEL).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
+                      <select
+                        name="status"
+                        defaultValue={event?.status ?? "scheduled"}
+                      >
+                        {Object.entries(EVENT_STATUS_LABEL).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
                       </select>
                     </label>
                     <label className={`${styles.field} ${styles.fieldWide}`}>
                       Aviso aos clientes
-                      <input name="status_note" maxLength={300} defaultValue={event?.status_note ?? ""} />
-                      <span className={styles.fieldHint}>Para quando o evento for adiado ou cancelado.</span>
+                      <input
+                        name="status_note"
+                        maxLength={300}
+                        defaultValue={event?.status_note ?? ""}
+                      />
+                      <span className={styles.fieldHint}>
+                        Para quando o evento for adiado ou cancelado.
+                      </span>
+                    </label>
+                  </div>
+                </fieldset>
+                <fieldset className={styles.fieldset}>
+                  <legend>Ingresso</legend>
+                  <div className={styles.fieldRow}>
+                    <label className={styles.field}>
+                      Quem emite
+                      <select
+                        name="ticketing"
+                        defaultValue={event?.ticketing ?? "own"}
+                      >
+                        {Object.entries(TICKETING_LABEL).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      <span className={styles.fieldHint}>
+                        Com o MuTickets, cada ingresso pago vira um código com
+                        QR, enviado por e-mail e validado na porta. Com o seu, a
+                        plataforma vende e você entrega do seu jeito.
+                      </span>
+                    </label>
+                    <label className={styles.field}>
+                      Como chega
+                      <select
+                        name="delivery"
+                        defaultValue={event?.delivery ?? "digital"}
+                      >
+                        {Object.entries(TICKET_DELIVERY_LABEL).map(
+                          ([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                      <span className={styles.fieldHint}>
+                        Impresso usa o envio e a embalagem que você já
+                        cadastrou.
+                      </span>
                     </label>
                   </div>
                 </fieldset>
                 {canWrite ? (
                   <div className={styles.formActions}>
                     {/* Com o evento salvo, a ação principal do bloco passa a ser criar lote. */}
-                    <button type="submit" className={event ? styles.buttonGhost : styles.button}>
+                    <button
+                      type="submit"
+                      className={event ? styles.buttonGhost : styles.button}
+                    >
                       Salvar evento
                     </button>
                   </div>
@@ -858,7 +1163,8 @@ export default async function ProductPage({
                     {event.capacity ? ` de ${event.capacity}` : ""}
                   </p>
                   <p className={styles.hint}>
-                    A quantidade vira o estoque do lote; diminuir nunca apaga ingressos já vendidos.
+                    A quantidade vira o estoque do lote; diminuir nunca apaga
+                    ingressos já vendidos.
                   </p>
                   {event.lots.length ? (
                     <ul className={local.lots}>
@@ -869,27 +1175,61 @@ export default async function ProductPage({
                             <div className={local.lotHead}>
                               <strong>{lot.name}</strong>
                               <span className={local.lotSku}>{lot.sku}</span>
-                              <Pill state={LOT_STATE[lot.state] ?? "off"}>{lotView.label}</Pill>
+                              <Pill state={LOT_STATE[lot.state] ?? "off"}>
+                                {lotView.label}
+                              </Pill>
                               {canWrite ? (
-                                <form action={removeLot} className={local.lotRemove}>
+                                <form
+                                  action={removeLot}
+                                  className={local.lotRemove}
+                                >
                                   {hidden}
-                                  <input type="hidden" name="lot_id" value={lot.id} />
-                                  <button type="submit" className={dangerButton}>
+                                  <input
+                                    type="hidden"
+                                    name="lot_id"
+                                    value={lot.id}
+                                  />
+                                  <button
+                                    type="submit"
+                                    className={dangerButton}
+                                  >
                                     Remover lote
                                   </button>
                                 </form>
                               ) : null}
                             </div>
-                            {lotView.detail ? <p className={local.lotDetail}>{lotView.detail}</p> : null}
+                            {lotView.detail ? (
+                              <p className={local.lotDetail}>
+                                {lotView.detail}
+                              </p>
+                            ) : null}
                             <form action={saveLot}>
                               {hidden}
-                              <input type="hidden" name="time_zone" value={zone} />
-                              <input type="hidden" name="lot_id" value={lot.id} />
-                              <fieldset disabled={!canWrite} className={local.plain}>
+                              <input
+                                type="hidden"
+                                name="time_zone"
+                                value={zone}
+                              />
+                              <input
+                                type="hidden"
+                                name="lot_id"
+                                value={lot.id}
+                              />
+                              <fieldset
+                                disabled={!canWrite}
+                                className={local.plain}
+                              >
                                 <div className={local.grid}>
-                                  <label className={`${styles.field} ${local.span2}`}>
+                                  <label
+                                    className={`${styles.field} ${local.span2}`}
+                                  >
                                     Nome do lote
-                                    <input name="name" required maxLength={80} defaultValue={lot.name} />
+                                    <input
+                                      name="name"
+                                      required
+                                      maxLength={80}
+                                      defaultValue={lot.name}
+                                    />
                                   </label>
                                   <label className={styles.field}>
                                     Preço (R$)
@@ -902,23 +1242,41 @@ export default async function ProductPage({
                                   </label>
                                   <label className={styles.field}>
                                     Ingressos
-                                    <input name="quantity" type="number" min={0} required defaultValue={lot.quantity} />
-                                    <span className={styles.fieldHint}>{lot.available} restantes</span>
+                                    <input
+                                      name="quantity"
+                                      type="number"
+                                      min={0}
+                                      required
+                                      defaultValue={lot.quantity}
+                                    />
+                                    <span className={styles.fieldHint}>
+                                      {lot.available} restantes
+                                    </span>
                                   </label>
-                                  <label className={`${styles.field} ${local.span2}`}>
+                                  <label
+                                    className={`${styles.field} ${local.span2}`}
+                                  >
                                     Vendas começam
                                     <input
                                       name="sales_starts_at"
                                       type="datetime-local"
-                                      defaultValue={utcToLocalInput(lot.sales_starts_at, zone)}
+                                      defaultValue={utcToLocalInput(
+                                        lot.sales_starts_at,
+                                        zone,
+                                      )}
                                     />
                                   </label>
-                                  <label className={`${styles.field} ${local.span2}`}>
+                                  <label
+                                    className={`${styles.field} ${local.span2}`}
+                                  >
                                     Vendas terminam
                                     <input
                                       name="sales_ends_at"
                                       type="datetime-local"
-                                      defaultValue={utcToLocalInput(lot.sales_ends_at, zone)}
+                                      defaultValue={utcToLocalInput(
+                                        lot.sales_ends_at,
+                                        zone,
+                                      )}
                                     />
                                   </label>
                                 </div>
@@ -943,7 +1301,12 @@ export default async function ProductPage({
                       <div className={local.grid}>
                         <label className={`${styles.field} ${local.span2}`}>
                           Novo lote
-                          <input name="name" required maxLength={80} placeholder="ex.: 1º lote" />
+                          <input
+                            name="name"
+                            required
+                            maxLength={80}
+                            placeholder="ex.: 1º lote"
+                          />
                         </label>
                         <label className={styles.field}>
                           Preço (R$)
@@ -951,7 +1314,12 @@ export default async function ProductPage({
                         </label>
                         <label className={styles.field}>
                           Ingressos
-                          <input name="quantity" type="number" min={0} required />
+                          <input
+                            name="quantity"
+                            type="number"
+                            min={0}
+                            required
+                          />
                         </label>
                         <label className={`${styles.field} ${local.span2}`}>
                           Vendas começam
@@ -978,7 +1346,11 @@ export default async function ProductPage({
 
           <Section
             id="variantes"
-            title={product.has_variants ? "Variantes e estoque" : "Variante e estoque"}
+            title={
+              product.has_variants
+                ? "Variantes e estoque"
+                : "Variante e estoque"
+            }
             description="Preço próprio vazio = usa o do produto"
           >
             <ul className={`${styles.rows} ${local.list}`}>
@@ -988,16 +1360,26 @@ export default async function ProductPage({
                     <span className={local.variantName}>
                       {variant.name} · {variant.sku}
                     </span>
-                    {variant.status === "paused" ? <Pill state="warn">Pausada</Pill> : null}
-                    {variant.status === "inactive" ? <Pill state="off">Inativa</Pill> : null}
-                    {context.features.inventory && product.stock_policy === "tracked" ? (
-                      <Link href={`${base}/estoque/${variant.id}`} className={local.stockLink}>
+                    {variant.status === "paused" ? (
+                      <Pill state="warn">Pausada</Pill>
+                    ) : null}
+                    {variant.status === "inactive" ? (
+                      <Pill state="off">Inativa</Pill>
+                    ) : null}
+                    {context.features.inventory &&
+                    product.stock_policy === "tracked" ? (
+                      <Link
+                        href={`${base}/estoque/${variant.id}`}
+                        className={local.stockLink}
+                      >
                         Estoque e extrato →
                       </Link>
                     ) : null}
                   </div>
                   {variant.status === "paused" && variant.paused_reason ? (
-                    <p className={local.variantReason}>Motivo: {variant.paused_reason}</p>
+                    <p className={local.variantReason}>
+                      Motivo: {variant.paused_reason}
+                    </p>
                   ) : null}
                   <form action={updateVariant} className={local.inlineForm}>
                     {hidden}
@@ -1025,7 +1407,9 @@ export default async function ProductPage({
                         className={local.variantMeasures}
                         open={Boolean(variant.weight_grams || variant.width_mm)}
                       >
-                        <summary>Peso e medidas próprios (vazio = igual ao produto)</summary>
+                        <summary>
+                          Peso e medidas próprios (vazio = igual ao produto)
+                        </summary>
                         <input type="hidden" name="measures" value="1" />
                         <label className={styles.field}>
                           Peso
@@ -1033,13 +1417,22 @@ export default async function ProductPage({
                             <input
                               name="weight_value"
                               inputMode="decimal"
-                              defaultValue={weightInput(variant.weight_grams).value}
-                              placeholder={weightInput(product.weight_grams).value || "igual ao produto"}
+                              defaultValue={
+                                weightInput(variant.weight_grams).value
+                              }
+                              placeholder={
+                                weightInput(product.weight_grams).value ||
+                                "igual ao produto"
+                              }
                               disabled={!canWrite}
                             />
                             <select
                               name="weight_unit"
-                              defaultValue={weightInput(variant.weight_grams ?? product.weight_grams).unit}
+                              defaultValue={
+                                weightInput(
+                                  variant.weight_grams ?? product.weight_grams,
+                                ).unit
+                              }
                               disabled={!canWrite}
                               aria-label="Unidade do peso"
                             >
@@ -1050,9 +1443,24 @@ export default async function ProductPage({
                         </label>
                         {(
                           [
-                            ["depth_cm", "Comprimento (cm)", variant.depth_mm, product.depth_mm],
-                            ["width_cm", "Largura (cm)", variant.width_mm, product.width_mm],
-                            ["height_cm", "Altura (cm)", variant.height_mm, product.height_mm],
+                            [
+                              "depth_cm",
+                              "Comprimento (cm)",
+                              variant.depth_mm,
+                              product.depth_mm,
+                            ],
+                            [
+                              "width_cm",
+                              "Largura (cm)",
+                              variant.width_mm,
+                              product.width_mm,
+                            ],
+                            [
+                              "height_cm",
+                              "Altura (cm)",
+                              variant.height_mm,
+                              product.height_mm,
+                            ],
                           ] as const
                         ).map(([name, label, propria, herdada]) => (
                           <label key={name} className={styles.field}>
@@ -1061,12 +1469,16 @@ export default async function ProductPage({
                               name={name}
                               inputMode="decimal"
                               defaultValue={cmInput(propria)}
-                              placeholder={cmInput(herdada) || "igual ao produto"}
+                              placeholder={
+                                cmInput(herdada) || "igual ao produto"
+                              }
                               disabled={!canWrite}
                             />
                           </label>
                         ))}
-                        <span className={styles.fieldHint}>As três medidas vêm juntas; o peso pode ser só ele.</span>
+                        <span className={styles.fieldHint}>
+                          As três medidas vêm juntas; o peso pode ser só ele.
+                        </span>
                       </details>
                     ) : null}
                     {canWrite ? (
@@ -1075,19 +1487,35 @@ export default async function ProductPage({
                       </button>
                     ) : null}
                   </form>
-                  {canPublish && (variant.status === "active" || variant.status === "paused") ? (
+                  {canPublish &&
+                  (variant.status === "active" ||
+                    variant.status === "paused") ? (
                     <form action={setVariantPause} className={local.inlineForm}>
                       {hidden}
-                      <input type="hidden" name="variant_id" value={variant.id} />
-                      <input type="hidden" name="action" value={variant.status === "paused" ? "resume" : "pause"} />
+                      <input
+                        type="hidden"
+                        name="variant_id"
+                        value={variant.id}
+                      />
+                      <input
+                        type="hidden"
+                        name="action"
+                        value={variant.status === "paused" ? "resume" : "pause"}
+                      />
                       {variant.status === "active" ? (
                         <label className={styles.field}>
                           Motivo da pausa
-                          <input name="reason" maxLength={200} placeholder="Opcional" />
+                          <input
+                            name="reason"
+                            maxLength={200}
+                            placeholder="Opcional"
+                          />
                         </label>
                       ) : null}
                       <button type="submit" className={smallButton}>
-                        {variant.status === "paused" ? "Retomar variante" : "Pausar variante"}
+                        {variant.status === "paused"
+                          ? "Retomar variante"
+                          : "Pausar variante"}
                       </button>
                     </form>
                   ) : null}
@@ -1096,34 +1524,49 @@ export default async function ProductPage({
             </ul>
           </Section>
 
-          <Section id="adicionais" title="Adicionais" description="Extras que somam ao preço">
+          <Section
+            id="adicionais"
+            title="Adicionais"
+            description="Extras que somam ao preço"
+          >
             {shownGroups === 0 ? (
               <EmptyState title="Nenhum adicional neste produto" />
             ) : (
               <>
                 <p className={local.sectionIntro}>
-                  Ex.: cobertura, embalagem para presente. Um por linha, no formato <code>Nome = 3,50</code>; sem
-                  preço, sai de graça. Mínimo 1 torna a escolha obrigatória.
+                  Ex.: cobertura, embalagem para presente. Um por linha, no
+                  formato <code>Nome = 3,50</code>; sem preço, sai de graça.
+                  Mínimo 1 torna a escolha obrigatória.
                 </p>
                 <form action={setProductModifiers}>
                   {hidden}
                   <div className={local.groups}>
                     {Array.from({ length: shownGroups }, (_, i) => (
-                      <ModifierGroupFields key={i} index={i} group={product.modifier_groups[i]} disabled={!canWrite} />
+                      <ModifierGroupFields
+                        key={i}
+                        index={i}
+                        group={product.modifier_groups[i]}
+                        disabled={!canWrite}
+                      />
                     ))}
                   </div>
                   {canWrite && shownGroups < MODIFIER_GROUP_ROWS ? (
                     <details className={local.more}>
-                      <summary>Mais grupos ({MODIFIER_GROUP_ROWS - shownGroups})</summary>
+                      <summary>
+                        Mais grupos ({MODIFIER_GROUP_ROWS - shownGroups})
+                      </summary>
                       <div className={local.groups}>
-                        {Array.from({ length: MODIFIER_GROUP_ROWS - shownGroups }, (_, j) => (
-                          <ModifierGroupFields
-                            key={shownGroups + j}
-                            index={shownGroups + j}
-                            group={product.modifier_groups[shownGroups + j]}
-                            disabled={!canWrite}
-                          />
-                        ))}
+                        {Array.from(
+                          { length: MODIFIER_GROUP_ROWS - shownGroups },
+                          (_, j) => (
+                            <ModifierGroupFields
+                              key={shownGroups + j}
+                              index={shownGroups + j}
+                              group={product.modifier_groups[shownGroups + j]}
+                              disabled={!canWrite}
+                            />
+                          ),
+                        )}
                       </div>
                     </details>
                   ) : null}
@@ -1140,15 +1583,22 @@ export default async function ProductPage({
           </Section>
 
           {canArchive ? (
-            <Section title="Arquivar produto" description="Sai da loja e fica só para consulta no painel">
+            <Section
+              title="Arquivar produto"
+              description="Sai da loja e fica só para consulta no painel"
+            >
               {/* Dois cliques: arquivado não volta pelo painel (nem publicar, nem editar). */}
               <details className={local.archive}>
                 <summary className={smallButton}>Arquivar produto…</summary>
-                <form action={setProductStatus} className={local.archiveConfirm}>
+                <form
+                  action={setProductStatus}
+                  className={local.archiveConfirm}
+                >
                   {hidden}
                   <input type="hidden" name="action" value="archive" />
                   <p className={styles.hint}>
-                    O produto sai da loja e deixa de ser editável aqui. Pedidos antigos continuam com ele.
+                    O produto sai da loja e deixa de ser editável aqui. Pedidos
+                    antigos continuam com ele.
                   </p>
                   <button type="submit" className={dangerButton}>
                     Sim, arquivar
