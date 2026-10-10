@@ -176,3 +176,70 @@ async def _pedido_pago(
         )
         await session.commit()
     return tenant, order_id
+
+
+def test_o_email_do_ingresso_manda_link_e_nao_imagem() -> None:
+    """Cliente de e-mail bloqueia imagem por padrão, e QR bloqueado é ingresso inexistente."""
+    from app.notifications.messages import MailContext, ticket_issued
+    from app.orders.models import Order
+
+    order = Order(
+        number=42,
+        currency="BRL",
+        subtotal_cents=1000,
+        total_cents=1000,
+        discount_cents=0,
+        delivery_fee_cents=0,
+        status="payment_confirmed",
+        fulfillment_type="pickup",
+        fulfillment={"name": "Loja"},
+        customer_snapshot={"name": "Ana"},
+        refunded_cents=0,
+    )
+    ctx = MailContext(
+        store_name="Lunares",
+        timezone="America/Sao_Paulo",
+        order=order,
+        items=[],
+        tickets=[("ING-ABCDEFGHJK", "1º lote"), ("ING-MNPQRSTUVW", "1º lote")],
+        store_origin="https://lunares.test",
+    )
+    message = ticket_issued(ctx)
+    corpo = " ".join(message.paragraphs)
+    assert "https://lunares.test/ingresso/ING-ABCDEFGHJK" in corpo
+    assert "https://lunares.test/ingresso/ING-MNPQRSTUVW" in corpo
+    assert "<img" not in corpo and "base64" not in corpo
+    # Plural de verdade quando há mais de um: dois ingressos não são "seu ingresso".
+    assert message.subject == "Seus ingressos — pedido #42"
+    assert message.cta_url == "https://lunares.test/ingresso/ING-ABCDEFGHJK"
+
+
+def test_o_email_do_ingresso_no_singular() -> None:
+    from app.notifications.messages import MailContext, ticket_issued
+    from app.orders.models import Order
+
+    order = Order(
+        number=7,
+        currency="BRL",
+        subtotal_cents=1000,
+        total_cents=1000,
+        discount_cents=0,
+        delivery_fee_cents=0,
+        status="payment_confirmed",
+        fulfillment_type="pickup",
+        fulfillment={"name": "Loja"},
+        customer_snapshot={"name": "Ana"},
+        refunded_cents=0,
+    )
+    message = ticket_issued(
+        MailContext(
+            store_name="Lunares",
+            timezone="America/Sao_Paulo",
+            order=order,
+            items=[],
+            tickets=[("ING-ABCDEFGHJK", "1º lote")],
+            store_origin="https://lunares.test",
+        )
+    )
+    assert message.subject == "Seu ingresso — pedido #7"
+    assert "Guarde este e-mail" in " ".join(message.paragraphs)

@@ -3,7 +3,7 @@ per store are a later stage (ADR 0011 §11)."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -39,6 +39,10 @@ class MailContext:
     payment: Payment | None = None
     refund: Refund | None = None
     online_url: str | None = None  # a ticket's online address, once paid
+    #: [(código, nome do lote)] dos ingressos do MuTickets emitidos neste pedido.
+    tickets: list[tuple[str, str]] = field(default_factory=list)
+    #: Origem da loja (`https://host`), para montar o link de cada ingresso.
+    store_origin: str | None = None
 
 
 def money(cents: int, currency: str = "BRL") -> str:
@@ -136,6 +140,49 @@ def order_paid(ctx: MailContext) -> Message:
         items=_lines(ctx),
         cta_url=ctx.online_url or ctx.url,
         cta_label="Acessar" if ctx.online_url else "Ver pedido",
+    )
+
+
+def ticket_issued(ctx: MailContext) -> Message:
+    """O e-mail que leva o ingresso.
+
+    Manda **link**, não imagem: cliente de e-mail bloqueia imagem por padrão, e um QR bloqueado
+    é um ingresso que não existe na hora da porta. O link abre a página do ingresso, no host da
+    loja, com o QR e o código — e funciona de novo semanas depois, quando a pessoa procurar o
+    e-mail no celular na fila.
+
+    Um por ingresso na lista, porque cada um vale uma entrada e pode ser repassado.
+    """
+    plural = len(ctx.tickets) > 1
+    linhas = [
+        f"{lote} — {codigo}: {ctx.store_origin or ''}/ingresso/{codigo}"
+        for codigo, lote in ctx.tickets
+    ]
+    primeiro = ctx.tickets[0][0] if ctx.tickets else ""
+    return Message(
+        template_key="ticket_issued",
+        subject=(
+            f"Seus ingressos — pedido #{ctx.order.number}"
+            if plural
+            else f"Seu ingresso — pedido #{ctx.order.number}"
+        ),
+        heading="Ingressos emitidos" if plural else "Ingresso emitido",
+        paragraphs=[
+            (
+                "Seus ingressos estão prontos. Abra cada link abaixo e mostre o QR na entrada."
+                if plural
+                else "Seu ingresso está pronto. Abra o link abaixo e mostre o QR na entrada."
+            ),
+            (
+                "Cada ingresso vale uma entrada — dá para repassar o link de um deles para quem "
+                "vai com você."
+                if plural
+                else "Guarde este e-mail: o link funciona até o dia do evento."
+            ),
+            *linhas,
+        ],
+        cta_url=f"{ctx.store_origin or ''}/ingresso/{primeiro}" if primeiro else ctx.url,
+        cta_label="Ver ingresso",
     )
 
 

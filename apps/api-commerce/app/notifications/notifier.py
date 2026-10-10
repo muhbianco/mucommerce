@@ -36,6 +36,7 @@ from app.notifications.messages import (
     payment_pix_pending,
     refund_completed,
     store_order_paid,
+    ticket_issued,
 )
 from app.notifications.models import DeliveryStatus, NotificationDelivery
 from app.notifications.render import Message, render
@@ -93,6 +94,13 @@ async def notifier(session: AsyncSession, event: OutboxEvent) -> None:
         address = await _customer_email(session, order)
         if address:
             await _queue(session, event, tenant, builder(context), address, order_id, queued)
+    # Ingresso vai em e-mail **separado** do "pagamento confirmado": é o que a pessoa vai
+    # procurar na caixa de entrada na fila da porta, e misturar com recibo faz o assunto do
+    # e-mail falar de dinheiro quando ela precisa que fale de entrada.
+    if event.event_type == "order.paid" and context.tickets:
+        address = await _customer_email(session, order)
+        if address:
+            await _queue(session, event, tenant, ticket_issued(context), address, order_id, queued)
     store_builder = STORE_BUILDERS.get(event.event_type)
     if store_builder is not None:
         message = store_builder(context)
@@ -164,7 +172,25 @@ async def _context(
         payment=payment,
         refund=refund,
         online_url=await _online_url(session, items) if order.paid_at else None,
+        tickets=await _tickets(session, order),
+        store_origin=settings.storefront_origin(host) if host else None,
     )
+
+
+async def _tickets(session: AsyncSession, order: Order) -> list[tuple[str, str]]:
+    """Ingressos do MuTickets deste pedido, na ordem em que foram emitidos.
+
+    Lista vazia é o caso comum e o certo: pedido sem ingresso, ou evento `own`, em que a
+    plataforma não emite nada.
+    """
+    from app.tickets.models import Ticket
+
+    rows = await session.execute(
+        select(Ticket)
+        .where(Ticket.order_id == order.id, Ticket.status == "issued")
+        .order_by(Ticket.order_item_id, Ticket.seq)
+    )
+    return [(t.code, t.lot_name) for t in rows.scalars()]
 
 
 async def _is_pix(session: AsyncSession, event: OutboxEvent) -> bool:
