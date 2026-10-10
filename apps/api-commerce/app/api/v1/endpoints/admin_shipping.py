@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
-from app.catalog.models import PHYSICAL_KINDS, Product, ProductKind, ProductStatus
+from app.catalog.models import Product, ProductKind, ProductStatus, travels_sql
 from app.core.cache import TtlCache
 from app.core.exceptions import NotFoundError, ShippingUnavailableError, ValidationError
 from app.core.logging import get_logger
@@ -353,7 +353,7 @@ async def _packing_status(session: AsyncSession, tenant: TenantContext) -> Packi
                 Product.packing_flexible,
             )
             .where(
-                Product.kind.in_(sorted(PHYSICAL_KINDS)),
+                travels_sql(),
                 Product.packing_mode != PackingMode.OWN_CONTAINER,
                 Product.status == ProductStatus.ACTIVE,
                 Product.archived_at.is_(None),

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from app.catalog.models import PHYSICAL_KINDS, Product, ProductVariant
+from app.catalog.models import Product, ProductVariant, TicketDelivery, travels
 from app.catalog.pricing import ChosenModifier, EffectivePrice
 from app.fulfillment.service import FulfillmentQuote
 
@@ -49,6 +49,8 @@ class LotRef:
     lot_name: str
     starts_at: datetime
     venue_name: str | None
+    #: Como o ingresso chega. Decide se a linha entra no frete (ADR 0020, decisão 5).
+    delivery: str = TicketDelivery.DIGITAL.value
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,11 @@ class CouponQuote:
     detail: dict[str, int] | None = None
 
 
+def line_travels(line: PricedLine) -> bool:
+    """A linha precisa de retirada, entrega ou envio?"""
+    return travels(line.product.kind, ticket_delivery=line.event.delivery if line.event else None)
+
+
 @dataclass(frozen=True, slots=True)
 class Quote:
     lines: list[PricedLine]
@@ -93,7 +100,7 @@ class Quote:
 
     @property
     def needs_fulfillment(self) -> bool:
-        return any(line.product.kind in PHYSICAL_KINDS for line in self.lines)
+        return any(line_travels(line) for line in self.lines)
 
     @property
     def can_checkout(self) -> bool:

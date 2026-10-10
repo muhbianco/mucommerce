@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.events import EventRepository, lot_state
 from app.catalog.models import (
-    PHYSICAL_KINDS,
     ProductKind,
     ProductStatus,
     SoldBy,
@@ -55,6 +54,7 @@ from app.pricing.quote import (
     PricedLine,
     Quote,
     line_subtotal,
+    line_travels,
 )
 from app.shipping import signing
 from app.tenancy.context import TenantContext
@@ -175,7 +175,9 @@ class PricingService:
                 if state != "on_sale":
                     problems.append(LineProblem(line, "lot_not_on_sale", {"state": state}))
                     continue
-                event = LotRef(ev.id, lot.id, variant.name, ev.starts_at, ev.venue_name)
+                event = LotRef(
+                    ev.id, lot.id, variant.name, ev.starts_at, ev.venue_name, ev.delivery
+                )
             if policy == StockPolicy.TRACKED:
                 wanted[variant.id] += line.quantity_milli
                 if wanted[variant.id] > available_milli:
@@ -219,7 +221,7 @@ class PricingService:
         subtotal = sum(line.subtotal_cents for line in priced)
         applied = await self._coupon(coupon, coupon_code, subtotal, customer_id)
         discount = applied.discount_cents if applied else 0
-        needs = any(line.product.kind in PHYSICAL_KINDS for line in priced)
+        needs = any(line_travels(line) for line in priced)
         fulfillment: FulfillmentQuote | None
         if not needs:
             fulfillment = FulfillmentQuote("none")

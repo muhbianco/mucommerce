@@ -28,6 +28,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.base import (
     ActorStampMixin,
@@ -64,8 +65,7 @@ class ProductKind(StrEnum):
     TICKET = "ticket"
 
 
-# Kinds that travel: picked up, delivered or shipped. Tickets, services and digital goods do not,
-# so they never enter packing, fulfillment or the "unmeasured" lists.
+# Tipos que sempre viajam: retirados, entregues ou enviados. Serviço e digital nunca viajam.
 PHYSICAL_KINDS = frozenset({ProductKind.PHYSICAL.value, ProductKind.MADE_TO_ORDER.value})
 
 
@@ -93,6 +93,51 @@ class TicketDelivery(StrEnum):
     DIGITAL = "digital"
     PHYSICAL = "physical"
     BOTH = "both"
+
+
+#: Entregas de ingresso que põem papel no correio.
+_TICKET_TRAVELS = frozenset({TicketDelivery.PHYSICAL.value, TicketDelivery.BOTH.value})
+
+
+def travels(kind: str, *, ticket_delivery: str | None = None) -> bool:
+    """Este item viaja? Pergunta do **item**, não do tipo dele (ADR 0020, decisão 5).
+
+    Até a fase D isto era `kind in PHYSICAL_KINDS`, e bastava: ingresso nunca viajava. Com
+    ingresso impresso, dois produtos do mesmo tipo respondem diferente — o show que manda papel
+    pelo correio precisa de embalagem, frete e etiqueta; o do QR por e-mail, não.
+
+    `ticket_delivery` vem do retrato do evento que a linha já carrega (no carrinho, `LotRef`;
+    no pedido, o JSON de `order_items.event`). Retrato, e não consulta: o pedido foi despachado
+    como papel porque o evento **era** de papel quando alguém comprou, e mudar o evento depois
+    não pode alterar o que já saiu.
+    """
+    if kind in PHYSICAL_KINDS:
+        return True
+    if kind == ProductKind.TICKET.value:
+        return (ticket_delivery or "") in _TICKET_TRAVELS
+    return False
+
+
+def travels_sql() -> ColumnElement[bool]:
+    """A mesma pergunta de `travels`, para quem filtra produto no banco.
+
+    As telas de embalagem e de frete listam o que viaja. Com ingresso impresso, não dá mais
+    para perguntar só pelo tipo: o show que manda papel precisa aparecer lá, o do QR não.
+
+    Subconsulta e não `join`: quem chama já tem os seus próprios `join`, e um a mais mudaria a
+    cardinalidade da lista deles sem avisar.
+    """
+    from sqlalchemy import and_, or_, select
+
+    return or_(
+        Product.kind.in_(sorted(PHYSICAL_KINDS)),
+        and_(
+            Product.kind == ProductKind.TICKET.value,
+            Product.id.in_(
+                select(Event.product_id).where(Event.delivery.in_(sorted(_TICKET_TRAVELS)))
+            ),
+        ),
+    )
 
 
 class EventStatus(StrEnum):

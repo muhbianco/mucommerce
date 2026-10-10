@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
-from app.catalog.models import PHYSICAL_KINDS, Product
+from app.catalog.models import Product, travels_sql
 from app.core.exceptions import ValidationError
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope
@@ -585,7 +585,7 @@ async def preview_package(
     stmt = (
         select(Product)
         .where(
-            Product.kind.in_(sorted(PHYSICAL_KINDS)),
+            travels_sql(),
             Product.archived_at.is_(None),
             Product.weight_grams > 0,
             Product.width_mm > 0,

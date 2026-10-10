@@ -134,8 +134,15 @@ silêncio: inventar "o ingresso será enviado" no lugar dele seria prometer entr
 garantiu. Com MuTickets o campo é ignorado — a promessa ali é da plataforma, e o lojista não
 escreve por cima dela.
 
-**D — ingresso físico.** `delivery = physical`, a regra de envio por produto (decisão 5), e o papel
-usando envelope e etiqueta que já existem. Vale para os dois emissores.
+**D — ingresso físico.** Feita. `travels(kind, ticket_delivery=...)` substituiu
+`kind in PHYSICAL_KINDS` nos seis lugares que decidiam envio: orçamento, checkout, medidas de
+embalagem, expedição e as duas telas de configuração (estas por `travels_sql()`, uma subconsulta
+— `join` mudaria a cardinalidade da lista de quem chama).
+
+A entrega viaja como **retrato**, não como consulta: no carrinho em `LotRef`, no pedido no JSON
+de `order_items.event`. O pedido foi despachado como papel porque o evento **era** de papel na
+hora da compra; mudar o evento depois não pode alterar o que já saiu. Pedido anterior a esta
+fase não tem a chave e cai em digital — que é o que ele era.
 
 ## Consequências
 

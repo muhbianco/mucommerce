@@ -25,7 +25,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.models import PHYSICAL_KINDS, Product, ProductVariant
+from app.catalog.models import Event, Product, ProductKind, ProductVariant, travels
 from app.catalog.pricing import variant_price
 from app.shipping.models import ProductPackageRule, ShippingPackage
 from app.shipping.packages import inner_dims, outer_dims
@@ -123,6 +123,15 @@ async def load_packing_inputs(
     )
     pares = {v.id: (v, p) for v, p in (await session.execute(stmt)).tuples()}
     produtos = sorted({p.id for _, p in pares.values()})
+    # Ingresso só entra na embalagem quando é impresso, e isso está no evento. Uma consulta a
+    # mais, e só quando há ingresso no carrinho: o caminho comum não paga nada.
+    ingressos = sorted({p.id for _, p in pares.values() if p.kind == ProductKind.TICKET.value})
+    entrega_por_produto: dict[str, str] = {}
+    if ingressos:
+        linhas_evento = await session.execute(
+            select(Event.product_id, Event.delivery).where(Event.product_id.in_(ingressos))
+        )
+        entrega_por_produto = dict(linhas_evento.tuples())
     regras_por_produto: dict[str, list[ProductPackageRule]] = {}
     if produtos:
         linhas_regra = await session.execute(
@@ -142,7 +151,7 @@ async def load_packing_inputs(
         if par is None:
             continue
         variante, produto = par
-        if produto.kind not in PHYSICAL_KINDS:
+        if not travels(produto.kind, ticket_delivery=entrega_por_produto.get(produto.id)):
             continue
         peso = variante.weight_grams or produto.weight_grams
         if variante.width_mm and variante.height_mm and variante.depth_mm:

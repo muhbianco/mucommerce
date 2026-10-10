@@ -19,7 +19,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.catalog.models import PHYSICAL_KINDS
 from app.core.br_document import normalize_document
 from app.core.exceptions import (
     ShipmentInProgressError,
@@ -30,6 +29,7 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.scopes import Scope
+from app.orders.items import item_travels
 from app.orders.models import Order, OrderItem
 from app.orders.service import OrderService
 from app.orders.state_machine import OrderStatus
@@ -458,7 +458,7 @@ class ShipmentService:
                 unit_label=item.unit_label,
             )
             for item in await self._items(order_id)
-            if item.product_kind in PHYSICAL_KINDS
+            if item_travels(item)
         ]
 
     async def _declare(self, order: Order, congelado: Any) -> tuple[tuple[DeclaredItem, ...], ...]:

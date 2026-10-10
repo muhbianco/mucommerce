@@ -12,6 +12,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.models.base import utcnow
 from app.orders.models import Order, OrderItem
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.models import Tenant
@@ -454,3 +455,88 @@ def test_o_email_de_pago_conta_como_o_ingresso_proprio_chega() -> None:
         )
     )
     assert nota in message.paragraphs
+
+
+# ------------------------------------------------------------------ ingresso impresso
+
+
+def test_quem_viaja_e_pergunta_do_item_nao_do_tipo() -> None:
+    """O coração da fase D: dois ingressos, mesmo tipo, respostas diferentes."""
+    from app.catalog.models import travels
+
+    assert travels("physical") is True
+    assert travels("made_to_order") is True
+    assert travels("service") is False
+    assert travels("digital") is False
+
+    assert travels("ticket", ticket_delivery="physical") is True
+    assert travels("ticket", ticket_delivery="both") is True
+    assert travels("ticket", ticket_delivery="digital") is False
+    # Pedido antigo não tem a chave: antes da fase D, ingresso nunca viajava.
+    assert travels("ticket", ticket_delivery=None) is False
+    assert travels("ticket") is False
+
+
+def test_a_linha_do_carrinho_decide_pelo_retrato_do_evento() -> None:
+    from app.catalog.models import Product, ProductVariant
+    from app.catalog.pricing import EffectivePrice
+    from app.pricing.quote import LineInput, LotRef, PricedLine, line_travels
+
+    def linha(kind: str, entrega: str | None) -> PricedLine:
+        evento = (
+            LotRef("e", "l", "1º lote", utcnow(), None, entrega) if entrega is not None else None
+        )
+        return PricedLine(
+            line=LineInput(variant_id="v", quantity_milli=1000),
+            product=Product(kind=kind, name="x", slug="x", sku="x"),
+            variant=ProductVariant(name="Padrão", sku="x"),
+            base=EffectivePrice(
+                amount_cents=100,
+                compare_at_cents=None,
+                promo_active=False,
+                promo_ends_at=None,
+            ),
+            modifiers=(),
+            unit_cents=100,
+            subtotal_cents=100,
+            stock_policy="tracked",
+            event=evento,
+        )
+
+    assert line_travels(linha("ticket", "physical")) is True
+    assert line_travels(linha("ticket", "digital")) is False
+    assert line_travels(linha("physical", None)) is True
+
+
+def test_o_pedido_despacha_pelo_que_valia_na_compra() -> None:
+    """Mudar o evento depois não altera o que já saiu: o retrato manda."""
+    from app.orders.items import item_travels
+    from app.orders.models import OrderItem
+
+    def item(kind: str, evento: dict | None) -> OrderItem:
+        return OrderItem(
+            order_id="o",
+            line_no=1,
+            product_id="p",
+            variant_id="v",
+            product_kind=kind,
+            sku="x",
+            product_name="x",
+            variant_name="x",
+            event=evento,
+            sold_by="unit",
+            unit_label="un",
+            stock_policy="tracked",
+            quantity_milli=1000,
+            base_unit_cents=100,
+            unit_price_cents=100,
+            subtotal_cents=100,
+            total_cents=100,
+        )
+
+    assert item_travels(item("ticket", {"delivery": "physical"})) is True
+    assert item_travels(item("ticket", {"delivery": "digital"})) is False
+    # Pedido anterior à fase D: sem a chave no retrato, não viaja.
+    assert item_travels(item("ticket", {"event_id": "e"})) is False
+    assert item_travels(item("ticket", None)) is False
+    assert item_travels(item("physical", None)) is True

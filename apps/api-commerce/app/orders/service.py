@@ -682,6 +682,10 @@ def _order_item(order_id: str, line_no: int, line: PricedLine) -> OrderItem:
                 "lot_name": line.event.lot_name,
                 "starts_at": line.event.starts_at.isoformat(),
                 "venue_name": line.event.venue_name,
+                # Guardado no pedido, não consultado depois: este foi despachado como papel
+                # porque o evento **era** de papel na hora da compra, e mudar o evento não
+                # pode alterar o que já saiu.
+                "delivery": line.event.delivery,
             }
             if line.event
             else None
