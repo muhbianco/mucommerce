@@ -5,7 +5,8 @@ import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
-import styles from "../../../../panel.module.css";
+// Cinco níveis: esta página é `validar/[code]/`, um a mais que as outras do painel.
+import styles from "../../../../../panel.module.css";
 import local from "./validar.module.css";
 
 /**
