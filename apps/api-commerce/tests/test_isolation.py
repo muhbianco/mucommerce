@@ -427,14 +427,41 @@ async def test_o_ingresso_de_outra_loja_nao_existe_aqui(
     por id, porque o código viaja em QR e em e-mail.
     """
     from app.core.ids import new_id
+    from app.identity.models import Customer
+    from app.models.base import utcnow
+    from app.orders.models import Order
     from app.tickets.models import Ticket
 
     dona = await create_tenant(session_factory, "ingresso-dona")
     outra = await create_tenant(session_factory, "ingresso-outra")
     code = "ING-ABCDEFGHJK"
-    order_id = new_id()
+    customer_id, order_id = new_id(), new_id()
     async with session_factory() as session:
+        # Pedido de verdade: a FK composta de `tickets` é cobrada pelo MariaDB (o SQLite dos
+        # testes locais não cobra), e ingresso órfão não existe em produção mesmo.
+        session.add(Customer(id=customer_id, email_normalized="dona@cliente.test", full_name="Ana"))
+        await session.flush()
         bind_session_tenant(session, dona.id)
+        session.add(
+            Order(
+                id=order_id,
+                tenant_id=dona.id,
+                number=1,
+                customer_id=customer_id,
+                origin="storefront",
+                idempotency_hash=new_id(),
+                currency="BRL",
+                subtotal_cents=1000,
+                total_cents=1000,
+                fulfillment_type="pickup",
+                fulfillment={"name": "Loja"},
+                customer_snapshot={"name": "Ana"},
+                status="payment_confirmed",
+                placed_at=utcnow(),
+                paid_at=utcnow(),
+            )
+        )
+        await session.flush()
         session.add(
             Ticket(
                 tenant_id=dona.id,
