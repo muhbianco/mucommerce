@@ -88,6 +88,23 @@ do mesmo tipo (`ticket`) respondem diferente. A pergunta passa a ser do **produt
 mudança que toca `pricing/quote.py`, as telas de embalagem e a compra de etiqueta, e por isso fica
 na fase C, sozinha.
 
+### 6. O ingresso é da loja, não da MuhBianco
+
+Ingresso emitido pelo MuTickets sai com a **identidade visual do lojista** — logo, cores e nome
+da loja. A MuhBianco aparece só num "desenvolvido por" discreto no rodapé.
+
+Quem compra ingresso do show da Lunares comprou da Lunares. Um ingresso com a marca de uma
+plataforma que o comprador nunca ouviu falar parece golpe na hora de entrar, e rouba da loja a
+relação que ela pagou para ter.
+
+Isso decide **onde as páginas moram**: a página do ingresso e a da validação ficam no host da
+loja, dentro do `StoreShell`, com o tema do tenant — não em `muhbianco.com.br`. Um link para
+domínio nosso carregaria a nossa identidade antes de qualquer CSS, e o cliente leria o remetente
+errado no e-mail. O mesmo vale para o papel: o layout de impressão usa o tema da loja.
+
+Consequência operacional: loja sem domínio próprio usa o subdomínio dela na plataforma, que já
+é o endereço da vitrine. Nenhum endereço novo para o lojista configurar.
+
 ## Fases
 
 **A — o ingresso existe (MuTickets digital).** Tabela `tickets`, emissão idempotente quando o
