@@ -729,6 +729,75 @@
   border-bottom: 0;
 }
 
+/* ------------------------------------------------------------------ o ingresso
+
+   O cartão que o cliente mostra na porta. Estreito e centrado: quem usa está de pé, com uma
+   mão só, num lugar com pouca luz. A ordem é a da conversa na entrada — que evento, qual lote,
+   o QR, e só depois o código escrito, que serve para quando o leitor falha. */
+
+.ticket {
+  max-width: 24rem;
+  margin: 2rem auto;
+  padding: 1.5rem;
+  border: 1px solid var(--store-line);
+  border-radius: var(--store-radius-lg);
+  background: var(--store-paper);
+  text-align: center;
+}
+
+.ticketEvent {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.ticketLot {
+  color: var(--store-muted);
+  margin: 0.25rem 0 0;
+}
+
+.ticketHolder {
+  margin: 0.5rem 0 0;
+  font-weight: 600;
+}
+
+/* A "zona quieta" do QR vem daqui, sempre branca: o símbolo precisa de contraste real, e no
+   tema escuro o fundo do cartão deixaria o leitor sem borda para achar o código. */
+.ticketQr,
+.ticketQrOff {
+  margin: 1.25rem auto 0;
+  padding: 0.75rem;
+  width: fit-content;
+  background: #fff;
+  border-radius: var(--store-radius);
+}
+
+.ticketQr svg,
+.ticketQrOff svg {
+  display: block;
+  width: 13rem;
+  height: 13rem;
+}
+
+/* Ingresso que não vale mais continua mostrando o QR — a porta precisa poder ler e confirmar
+   que já foi usado — mas apagado, para ninguém achar que vai entrar com ele. */
+.ticketQrOff {
+  opacity: 0.35;
+}
+
+.ticketCode {
+  margin: 1rem 0 0.75rem;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 1.1rem;
+  letter-spacing: 0.08em;
+}
+
+.ticketHint {
+  color: var(--store-muted);
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+
 /* Lotes de ingresso.
    Era uma tabela de cinco colunas (nome, preço, estado, janela de vendas, formulário de
    compra). Numa coluna estreita, as cinco se espremiam: a janela quebrava em quatro linhas e o
