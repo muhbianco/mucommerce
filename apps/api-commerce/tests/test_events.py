@@ -191,7 +191,7 @@ async def test_a_ticket_publishes_only_with_a_lot_and_takes_no_options(
     await add_ready_image(session_factory, tenant, product["id"])
 
     blocked = await client.post(f"{product_url}/publish", headers=headers)
-    assert blocked.json()["error"]["details"] == {"missing": ["event"]}
+    assert blocked.json()["error"]["details"] == {"missing": ["event"], "reason": "event"}
 
     await client.put(f"{product_url}/event", json=event_body(), headers=headers)
     await client.post(

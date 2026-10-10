@@ -75,6 +75,12 @@ const OK: Record<string, string> = {
 const ERRORS: Record<string, string> = {
   validation_error: "Algum campo está inválido.",
   conflict: "Conflito com o estado atual (ex.: SKU/slug em uso ou produto sem imagem).",
+  // O que falta para publicar, dito pelo nome. A API manda `reason` com o primeiro item de
+  // `missing`; resolvido ele, a próxima tentativa aponta o seguinte.
+  "conflict.event": "Para publicar um ingresso, crie ao menos um lote no evento.",
+  "conflict.price": "Informe um preço maior que zero para publicar.",
+  "conflict.active_variant": "O produto precisa de ao menos uma variante ativa para ir à vitrine.",
+  "conflict.media": "Adicione ao menos uma foto pronta (o processamento precisa ter terminado).",
   insufficient_stock: "Estoque insuficiente para essa saída.",
   permission_denied: "Seu papel não permite essa ação.",
   email_teste_falhou:

@@ -303,7 +303,12 @@ async def test_publish_needs_price_and_keeps_first_publication_time(
 
     blocked = await client.post(f"{url}/publish", headers=headers)
     assert blocked.status_code == 409
-    assert blocked.json()["error"]["details"] == {"missing": ["price", "media"]}
+    assert blocked.json()["error"]["details"] == {
+        "missing": ["price", "media"],
+        # O painel só sabe traduzir `reason`; é dele que sai "informe um preço maior que zero"
+        # em vez do texto genérico de conflito, que fala de SKU e slug.
+        "reason": "price",
+    }
     await add_ready_image(session_factory, tenant, product["id"])
 
     await client.patch(url, json={"base_price_cents": 2500}, headers=headers)
@@ -586,3 +591,47 @@ async def test_tenant_sequence_counts_per_tenant(
     async with session_factory() as session:
         bind_session_tenant(session, alpha.id)
         assert await TenantRepository(session).next_sequence("product_sku") == 4
+
+
+async def test_sku_prefix_and_sequence_are_per_kind(
+    client: AsyncClient, shop: tuple[Tenant, dict[str, str]]
+) -> None:
+    """A letra diz o tipo e o número conta aquele tipo.
+
+    Iniciais em português porque quem lê o SKU é o lojista, numa etiqueta ou numa planilha.
+    Cada tipo conta do 1: o primeiro ingresso é `I00001` mesmo numa loja com 300 produtos.
+    """
+    tenant, headers = shop
+    fisico = await create_product(client, tenant, headers, name="Brownie")
+    assert fisico["sku"] == "P00001"
+
+    esperado = {
+        "made_to_order": ("E00001", "Bolo sob encomenda"),
+        "service": ("S00001", "Consultoria"),
+        "digital": ("D00001", "E-book"),
+        "ticket": ("I00001", "Ingresso do show"),
+    }
+    for kind, (sku, nome) in esperado.items():
+        criado = await create_product(client, tenant, headers, name=nome, kind=kind)
+        assert criado["sku"] == sku, kind
+
+    # Cada sequência anda sozinha: o segundo ingresso não pula por causa dos outros tipos.
+    segundo = await create_product(client, tenant, headers, name="Ingresso 2", kind="ticket")
+    assert segundo["sku"] == "I00002"
+    outro_fisico = await create_product(client, tenant, headers, name="Cookie")
+    assert outro_fisico["sku"] == "P00002"
+
+
+async def test_publish_diz_o_que_falta_em_vez_de_conflito_generico(
+    client: AsyncClient, shop: tuple[Tenant, dict[str, str]]
+) -> None:
+    """O painel traduz `reason` em frase; sem ele a tela falava de SKU quando faltava lote."""
+    tenant, headers = shop
+    ingresso = await create_product(client, tenant, headers, name="Show", kind="ticket")
+    response = await client.post(
+        f"{base(tenant)}/products/{ingresso['id']}/publish", headers=headers
+    )
+    assert response.status_code == 409, response.text
+    detalhe = response.json()["error"]["details"]
+    assert "event" in detalhe["missing"]
+    assert detalhe["reason"] == detalhe["missing"][0]

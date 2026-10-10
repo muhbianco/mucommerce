@@ -85,7 +85,23 @@ from app.tenancy.context import TenantContext
 from app.tenancy.repository import TenantRepository
 from app.tenancy.service import Actor
 
-SKU_SEQUENCE = "product_sku"
+#: Prefixo e sequência por tipo de produto. Iniciais em português porque quem lê o SKU é o
+#: lojista, numa etiqueta ou numa planilha: "I" liga com ingresso, "T" de `ticket` não liga com
+#: nada. Cada tipo conta do 1 — o número vira quantos daquele tipo a loja tem.
+#:
+#: `PHYSICAL` mantém `P` e a sequência `product_sku` original de propósito: é a que as lojas no
+#: ar já usaram, e mudar daria um salto de numeração no meio do catálogo de quem já vende.
+#:
+#: Prefixo é identidade impressa: aparece em etiqueta, planilha e nota. Mudar uma letra depois
+#: não renomeia o que já saiu da loja, só cria uma segunda família de SKU. Por isso isto muda
+#: com o dono, não sozinho.
+SKU_RULES: dict[str, tuple[str, str]] = {
+    ProductKind.PHYSICAL.value: ("P", "product_sku"),
+    ProductKind.MADE_TO_ORDER.value: ("E", "product_sku_made_to_order"),
+    ProductKind.SERVICE.value: ("S", "product_sku_service"),
+    ProductKind.DIGITAL.value: ("D", "product_sku_digital"),
+    ProductKind.TICKET.value: ("I", "product_sku_ticket"),
+}
 SKU_ATTEMPTS = 20
 DEFAULT_VARIANT_NAME = "Padrão"
 
@@ -174,7 +190,7 @@ class CatalogService:
             await check_legacy_box(self.session, self.tenant.settings, data.shipping_box_id)
         category_ids = await self._checked_category_ids(data.category_ids)
         tags = await self._resolve_tags(data.tags)
-        sku = data.sku or await self._generate_sku()
+        sku = data.sku or await self._generate_sku(str(data.kind))
         if data.sku and await self.repo.sku_taken(sku):
             raise ConflictError("SKU já usado nesta loja.", sku=sku)
         slug = await self._product_slug(data.slug, data.name)
@@ -361,7 +377,16 @@ class CatalogService:
         if not any(m.status == MediaStatus.READY for m in view.media):
             problems.append("media")
         if problems:
-            raise ConflictError("Produto ainda não pode ser publicado.", missing=problems)
+            # `reason` além de `missing`: é o campo que o painel sabe traduzir em frase
+            # ("crie ao menos um lote no evento"). Sem ele a tela caía no texto genérico de
+            # conflito, que fala de SKU e slug — e mandava a lojista procurar no lugar errado
+            # quando o que faltava era um lote. O primeiro da lista basta: resolvido um, a
+            # próxima tentativa aponta o seguinte.
+            raise ConflictError(
+                "Produto ainda não pode ser publicado.",
+                missing=problems,
+                reason=problems[0],
+            )
         before = product.status
         product.status = ProductStatus.ACTIVE
         product.published_at = product.published_at or utcnow()
@@ -815,10 +840,17 @@ class CatalogService:
             if await self.repo.has_children(moving.id):
                 raise ValidationError("Categoria com subcategorias não pode virar subcategoria.")
 
-    async def _generate_sku(self) -> str:
+    async def _generate_sku(self, kind: str) -> str:
+        """`I00001` para ingresso, `S00003` para serviço: o prefixo diz o tipo, o número conta.
+
+        Tipo desconhecido cai na regra do produto físico em vez de estourar: criar produto é
+        caminho quente, e um `kind` novo no enum sem entrada aqui não pode derrubar a loja —
+        ele sai com `P` e o teste de cobertura avisa.
+        """
+        prefixo, sequencia = SKU_RULES.get(kind, SKU_RULES[ProductKind.PHYSICAL.value])
         sequences = TenantRepository(self.session)
         for _ in range(SKU_ATTEMPTS):
-            candidate = f"P{await sequences.next_sequence(SKU_SEQUENCE):05d}"
+            candidate = f"{prefixo}{await sequences.next_sequence(sequencia):05d}"
             if not await self.repo.sku_taken(candidate):
                 return candidate
         raise ConflictError("Não foi possível gerar um SKU livre; informe um SKU.")

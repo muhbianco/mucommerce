@@ -156,7 +156,7 @@ async def test_upload_complete_process_and_publish(
     publish_url = f"{base(tenant)}/products/{product['id']}/publish"
 
     blocked = await client.post(publish_url, headers=headers)
-    assert blocked.json()["error"]["details"] == {"missing": ["media"]}
+    assert blocked.json()["error"]["details"] == {"missing": ["media"], "reason": "media"}
 
     created = await request_upload(client, tenant, headers, owner_id=product["id"], bytes=1234)
     media_id = created["media"]["id"]
