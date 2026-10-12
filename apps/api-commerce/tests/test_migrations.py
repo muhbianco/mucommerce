@@ -344,3 +344,55 @@ def test_bolsocoberto_perde_a_cortesia_e_so_ela(sqlite_url: str) -> None:
 
     command.downgrade(config, "0040_customer_login_always_on")
     assert len(ligados()) == 6
+
+
+def test_telefones_dos_pedidos_e_dos_clientes_entram_no_mapa(sqlite_url: str) -> None:
+    """0048: o WhatsApp de cada pedido e o telefone de quem tem acesso viram linhas do mapa
+    telefone → cliente da loja, sem repetir."""
+    import json as _json
+
+    from sqlalchemy import text
+
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "0047_product_home_exposure")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    loja = "01a00000-0000-7000-8000-0000000000c1"
+    lia = "01a00000-0000-7000-8000-0000000000c2"
+    ana = "01a00000-0000-7000-8000-0000000000c3"
+    with engine.begin() as conn:
+        _insert(conn, "tenants", id=loja, slug="lunares")
+        _insert(conn, "customers", id=lia, email_normalized="lia@example.com")
+        _insert(conn, "customers", id=ana, phone_e164="5511944443333")
+        for n, numero in enumerate(("5511955551234", "5511955551234", None)):
+            _insert(
+                conn,
+                "orders",
+                id=f"01a00000-0000-7000-8000-0000000000d{n}",
+                tenant_id=loja,
+                customer_id=lia,
+                number=n + 1,
+                customer_snapshot=_json.dumps({"name": "Lia", "phone": numero}),
+            )
+        _insert(
+            conn,
+            "customer_tenant_access",
+            id="01a00000-0000-7000-8000-0000000000e1",
+            tenant_id=loja,
+            customer_id=ana,
+            status="pending",
+            source="agent",
+        )
+    engine.dispose()
+
+    command.upgrade(config, "0048_customer_phones")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    with engine.connect() as conn:
+        linhas = conn.execute(
+            text("SELECT customer_id, phone_e164, source FROM customer_phones ORDER BY source")
+        ).all()
+    engine.dispose()
+    assert [tuple(r) for r in linhas] == [
+        (lia, "5511955551234", "checkout"),
+        (ana, "5511944443333", "whatsapp"),
+    ]
+    command.downgrade(config, "0047_product_home_exposure")

@@ -500,6 +500,9 @@ export interface OrderDetail {
     timeline: { status: string; at: string; reason: string | null }[];
   };
   customer: { name?: string; phone?: string; email?: string };
+  customer_id?: string | null;
+  /** Situação do cliente nesta loja; nula = nunca pediu acesso (ex.: comprou pela senha da loja). */
+  customer_access?: string | null;
   payments: {
     id: string;
     provider: string;

@@ -45,6 +45,8 @@ from app.core.logging import get_logger
 from app.core.phone import br_phone_variants, normalize_br_phone
 from app.core.scopes import Scope
 from app.customers.access import Viewer, check_catalog_access
+from app.customers.lead_gate import lead_gate
+from app.customers.phones import customers_of_phone, remember_phone
 from app.fulfillment.service import public_fulfillment
 from app.identity.models import AccessStatus, Customer, CustomerTenantAccess
 from app.models.base import utcnow
@@ -82,6 +84,21 @@ class ItemIn(StrictModel):
 class ResolveIn(StrictModel):
     telefone: Annotated[str, Field(min_length=8, max_length=20)]
     nome: Annotated[str, Field(max_length=200)] | None = None
+
+
+class LeadGateIn(StrictModel):
+    #: O número de quem escreveu, como o servidor do WhatsApp recebeu — nunca o que o modelo
+    #: de linguagem disser.
+    telefone: Annotated[str, Field(min_length=8, max_length=20)]
+    nome: Annotated[str, Field(max_length=200)] | None = None
+
+
+class LeadGateRead(BaseModel):
+    #: O robô pode responder esta pessoa agora.
+    responder: bool
+    #: `public` (loja aberta), `approved`, `pending`, `blocked`, `new` (lead novo, já pendente).
+    motivo: str
+    cliente_id: str | None = None
 
 
 class QuoteIn(StrictModel):
@@ -189,6 +206,27 @@ def _blocker(context: TenantContext, access: CustomerTenantAccess | None) -> str
 
 
 @router.post(
+    "/sales/leads/gate",
+    response_model=LeadGateRead,
+    summary="O robô de vendas pode responder este número? (loja fechada: só cliente liberado)",
+)
+async def gate_lead(session: DbSession, store: Store, body: LeadGateIn) -> LeadGateRead:
+    """Chamado pelo canal próprio **antes** do modelo de linguagem. Lead novo em loja fechada
+    vira cliente pendente (aparece em Clientes) e o robô fica quieto: quem responde é gente."""
+    _sells(store)
+    decisao = await lead_gate(session, store.context, body.telefone, body.nome)
+    await session.commit()
+    if not decisao.answer:
+        logger.info(
+            "robô calado: cliente não liberado",
+            extra={"tenant_id": store.context.id, "motivo": decisao.reason},
+        )
+    return LeadGateRead(
+        responder=decisao.answer, motivo=decisao.reason, cliente_id=decisao.customer_id
+    )
+
+
+@router.post(
     "/customers/resolve",
     response_model=CustomerRead,
     summary="Acha (ou cadastra) o cliente pelo telefone",
@@ -206,7 +244,14 @@ async def resolve_customer(session: DbSession, store: Store, body: ResolveIn) ->
         raise ValidationError("Telefone inválido.", fields=["telefone"])
 
     variantes = sorted(br_phone_variants(phone))
-    cliente = await session.scalar(select(Customer).where(Customer.phone_e164.in_(variantes)))
+    # Primeiro quem a loja já conhece por este número (checkout, confirmação, o próprio
+    # WhatsApp); depois a pessoa que tem o número na conta.
+    conhecidos = await customers_of_phone(session, phone)
+    cliente = (
+        await session.scalar(select(Customer).where(Customer.id == conhecidos[0]))
+        if conhecidos
+        else await session.scalar(select(Customer).where(Customer.phone_e164.in_(variantes)))
+    )
     if cliente is None:
         cliente = Customer(
             phone_e164=phone,
@@ -221,6 +266,13 @@ async def resolve_customer(session: DbSession, store: Store, body: ResolveIn) ->
         )
     elif body.nome and not cliente.full_name:
         cliente.full_name = body.nome.strip()[:200]
+    await remember_phone(
+        session,
+        tenant_id=store.context.id,
+        customer_id=cliente.id,
+        phone=phone,
+        source="whatsapp",
+    )
 
     acesso = await _access_of(session, cliente.id)
     if acesso is None:

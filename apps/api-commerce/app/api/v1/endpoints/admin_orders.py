@@ -20,6 +20,7 @@ from app.audit.idempotency import idempotent
 from app.core.exceptions import NotFoundError, PermissionDeniedError, StaleOrderError
 from app.core.pagination import Page, decode_cursor, encode_cursor
 from app.core.scopes import Scope, scopes_for_tenant_role
+from app.identity.models import CustomerTenantAccess
 from app.identity.repository import AdminUserRepository
 from app.notifications.models import NotificationDelivery
 from app.orders.models import Order
@@ -90,6 +91,10 @@ class EmailRead(BaseModel):
 class OrderDetailRead(BaseModel):
     order: OrderRead
     customer: dict[str, Any]
+    customer_id: str | None = None
+    #: A situação do cliente nesta loja (`approved`, `pending`, `blocked`, `revoked`) ou nula: quem
+    #: comprou pela senha da loja não tem linha. A tela do pedido oferece "Liberar cliente".
+    customer_access: str | None = None
     payments: list[PaymentRead]
     refunds: list[RefundSummaryRead]
     emails: list[EmailRead]
@@ -219,6 +224,12 @@ async def _detail(
             for_store=True,
         ),
         customer=dict(order.customer_snapshot or {}),
+        customer_id=order.customer_id,
+        customer_access=await session.scalar(
+            select(CustomerTenantAccess.status).where(
+                CustomerTenantAccess.customer_id == order.customer_id
+            )
+        ),
         payments=[payment_read(p) for p in payments],
         refunds=[
             RefundSummaryRead(

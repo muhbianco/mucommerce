@@ -22,6 +22,19 @@ function version(form: FormData): number | undefined {
 }
 
 /**
+ * Libera o cliente do pedido na loja fechada: vitrine com a conta dele e o robô de vendas no
+ * WhatsApp que ele deixou no checkout (docs/14-pedidos-lunares.md §5).
+ */
+export async function approveCustomer(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const orderId = id(text(form, "order_id"));
+  const customerId = id(text(form, "customer_id"));
+  await run(`${page}/pedidos/${orderId}`, "cliente_liberado", async () => {
+    await api(`${path}/customers/${customerId}/access`, { json: { status: "approved" } });
+  });
+}
+
+/**
  * Move the order along, or cancel it. The version on the page goes with it: if someone else
  * moved the order meanwhile, the API refuses instead of applying the wrong step.
  */

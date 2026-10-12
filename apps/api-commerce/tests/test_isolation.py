@@ -92,6 +92,9 @@ COVERED_TENANT_SCOPED_TABLES = {
     # confirma em outra — `test_customer_password.py`.
     "customer_passwords",
     "customer_email_challenges",
+    # Telefone → cliente: o mapa é por loja (`test_lead_gate.py`), e o portão do robô só olha
+    # a loja do vínculo.
+    "customer_phones",
 }
 
 

@@ -118,3 +118,22 @@ class CustomerEmailChallenge(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, 
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     ip: Mapped[str | None] = mapped_column(String(45))
+
+
+class CustomerPhone(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Um número de telefone que uma pessoa usou nesta loja (`app/customers/phones.py`)."""
+
+    __tablename__ = "customer_phones"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name="fk_customer_phones_tenant"),
+        ForeignKeyConstraint(["customer_id"], ["customers.id"], name="fk_customer_phones_customer"),
+        UniqueConstraint("tenant_id", "phone_e164", "customer_id", name="uq_customer_phones_line"),
+        Index("ix_customer_phones_customer", "customer_id", "tenant_id"),
+    )
+
+    customer_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    phone_e164: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: De onde veio da primeira vez: `checkout`, `account`, `whatsapp` ou `panel`.
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    first_seen_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)

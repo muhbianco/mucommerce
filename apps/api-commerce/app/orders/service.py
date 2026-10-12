@@ -41,6 +41,7 @@ from app.coupons.service import CouponService
 from app.customers.address_models import CustomerAddress
 from app.customers.addresses import address_snapshot
 from app.customers.legal import Acceptance, LegalService
+from app.customers.phones import remember_phone
 from app.identity.models import Customer
 from app.inventory.repository import InventoryRepository
 from app.inventory.reservations import ReservationService
@@ -208,6 +209,16 @@ class OrderService:
             updated_by_actor=self.actor.id,
         )
         await self.session.flush()
+        # O WhatsApp do checkout liga o número à pessoa nesta loja: é por ele que o lojista
+        # libera o cliente para o robô de vendas (docs/14-pedidos-lunares.md §5).
+        await remember_phone(
+            self.session,
+            tenant_id=self.tenant.id,
+            customer_id=cmd.customer_id,
+            phone=telefone,
+            source="checkout",
+            now=now,
+        )
         for number_in_order, line in enumerate(quote.lines, start=1):
             self.session.add(_order_item(order.id, number_in_order, line))
         needs: dict[str, int] = defaultdict(int)

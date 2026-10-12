@@ -35,7 +35,7 @@ import {
 import styles from "../../../../../panel.module.css";
 import { Flash } from "../../flash";
 import { KeyValues, PageHeader, Pill, Section, TableWrap } from "../../ui";
-import { decideRefund, dispatchShipment, moveOrder, requestRefund } from "../actions";
+import { approveCustomer, decideRefund, dispatchShipment, moveOrder, requestRefund } from "../actions";
 import local from "./order.module.css";
 import { PackingList } from "./packing-list";
 
@@ -118,6 +118,9 @@ export default async function OrderPage({
     }).format(new Date(iso));
   const place = order.fulfillment ? String(order.fulfillment.name ?? "") : "";
   const canRefund = scopes.can("payments:refund_request");
+  const storefront = context.settings.storefront as Record<string, unknown> | undefined;
+  const lojaFechada = String(storefront?.access_mode ?? "whitelist") !== "public";
+  const podeLiberar = scopes.can("customers:approve");
   const canDecide = scopes.can("payments:refund_approve");
   const refundable = order.paid_at && detail.payments.some((p) => p.status === "approved");
   const moves = detail.allowed_transitions.filter((t) => t !== "cancelled");
@@ -659,6 +662,24 @@ export default async function OrderPage({
 
           <Section title="Cliente">
             <KeyValues items={person} />
+            {lojaFechada && detail.customer_id && detail.customer_access !== "approved" && podeLiberar ? (
+              detail.customer_access === "blocked" ? (
+                <p className={styles.hint}>Cliente bloqueado nesta loja (veja em Clientes).</p>
+              ) : (
+                <form action={approveCustomer}>
+                  <input type="hidden" name="tenant_id" value={tenantId} />
+                  <input type="hidden" name="customer_id" value={detail.customer_id} />
+                  <input type="hidden" name="order_id" value={orderId} />
+                  <p className={styles.hint}>
+                    Este cliente ainda não foi liberado na loja. Liberado, ele vê a vitrine com a
+                    conta dele e o robô de vendas passa a atender o WhatsApp dele.
+                  </p>
+                  <button type="submit" className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
+                    Liberar cliente
+                  </button>
+                </form>
+              )
+            ) : null}
           </Section>
 
           <Section title={order.fulfillment_type === "pickup" ? "Retirada" : "Entrega"}>

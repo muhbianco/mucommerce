@@ -4,6 +4,7 @@ through the `customer.access.*` events."""
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
@@ -15,9 +16,11 @@ from app.core.exceptions import (
     NotFoundError,
     ValidationError,
 )
+from app.customers.models import CustomerPhone
 from app.customers.repository import AccessRepository, CustomerSessionRepository
-from app.identity.models import AccessStatus, CustomerTenantAccess
+from app.identity.models import AccessStatus, CustomerSession, CustomerTenantAccess
 from app.models.base import utcnow
+from app.orders.models import Order
 from app.tenancy.context import TenantContext
 from app.tenancy.service import Actor
 
@@ -87,6 +90,17 @@ class CustomerAccessService:
         )
         return row
 
+    async def _known_here(self, customer_id: str) -> bool:
+        """A pessoa já passou por esta loja: pedido, sessão ou telefone registrado aqui."""
+        for stmt in (
+            select(Order.id).where(Order.customer_id == customer_id).limit(1),
+            select(CustomerSession.id).where(CustomerSession.customer_id == customer_id).limit(1),
+            select(CustomerPhone.id).where(CustomerPhone.customer_id == customer_id).limit(1),
+        ):
+            if await self.session.scalar(stmt) is not None:
+                return True
+        return False
+
     async def decide(
         self,
         tenant: TenantContext,
@@ -99,7 +113,19 @@ class CustomerAccessService:
         """The store approves, blocks or revokes a customer who signed in to it."""
         row = await self.repo.for_customer(customer_id)
         if row is None:
-            raise NotFoundError("Cliente não encontrado nesta loja.")
+            # Quem comprou pela senha da loja (ou só deixou o WhatsApp no checkout) não tem
+            # linha de acesso: liberar cria a linha — mas só para quem já passou por esta loja.
+            if status != AccessStatus.APPROVED or not await self._known_here(customer_id):
+                raise NotFoundError("Cliente não encontrado nesta loja.")
+            row = CustomerTenantAccess(
+                tenant_id=tenant.id,
+                customer_id=customer_id,
+                status=AccessStatus.PENDING,
+                source="panel",
+                requested_at=utcnow(),
+            )
+            self.session.add(row)
+            await self.session.flush()
         if status not in TRANSITIONS:
             raise ValidationError("Status inválido.", fields=["status"])
         if status in NOTE_REQUIRED and not (note and note.strip()):

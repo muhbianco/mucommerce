@@ -36,6 +36,7 @@ from app.core.exceptions import (
 from app.core.logging import get_logger
 from app.core.phone import br_phone_variants, normalize_br_phone, same_br_phone
 from app.customers.models import CustomerPhoneChallenge
+from app.customers.phones import remember_phone
 from app.identity.models import Customer
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
@@ -202,6 +203,14 @@ class PhoneVerificationService:
         customer.phone_e164 = row.phone_e164
         customer.phone_verified_at = now
         await self.session.flush()
+        await remember_phone(
+            self.session,
+            tenant_id=row.tenant_id,
+            customer_id=customer.id,
+            phone=row.phone_e164,
+            source="account",
+            now=now,
+        )
 
         tenant = await TenantRepository(self.session).get(row.tenant_id)
         await audit(

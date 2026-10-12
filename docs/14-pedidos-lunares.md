@@ -171,3 +171,49 @@ Cada etapa traz pytest, cenário Playwright quando mexe em tela, e a verificaç�
 
 _A preencher pela sonda, com data, chamada e resposta saneada. Precisa da aprovação do dono antes
 de o provedor ser escrito._
+
+A sonda é `apps/api-commerce/scripts/frenet_probe.py`. Ela lê `~/.secrets/frenet-token` (cliente)
+e `~/.secrets/frenet-partner-token` (parceiro) e grava `probe-frenet.json`, que está no gitignore.
+O que ela precisa responder antes do provedor:
+- se `POST whitelabel/v1/quotes` aceita PascalCase (a doc mistura com camelCase);
+- as unidades (kg/cm);
+- se o preço vem em número ou em texto;
+- se 2 volumes custam a soma de 2 cotações de 1;
+- os limites (lado de 105 cm, 31 kg);
+- se o token de parceiro é aceito junto com o do cliente.
+
+Com `--etiqueta`, ela cria e apaga um envio sem pagar.
+
+## Estado em 12/10/2026
+
+Nada foi para produção: o deploy segue congelado pela revisão da Meta.
+
+| Etapa | Estado | Onde |
+|---|---|---|
+| 1. Promoção que acaba com o estoque | pronta | `924735e`, migration 0045 |
+| 2. Conta com e-mail e senha | pronta | `8f73556`, migration 0046 |
+| 3. Visibilidade (modos, senha da loja, produto na home) | pronta | `a415b59`, migration 0047 |
+| 4. Envio: credenciais genéricas, provedor congelado no pedido, tela em passos | pronta | branch `feat/lunares` |
+| 4. Provedor Frenet | espera a sonda e o ok do dono | — |
+| 5. Robô por telefone (mucommerce) | pronto | migration 0048 |
+| 5. Robô por telefone (api-agents) | pronto | branch `feat/robo-por-telefone` |
+| 6. Caixa de pedidos no Chatwoot + `liberar_loja` | depois (fase 6 do roadmap) | — |
+
+**Ordem de deploy quando liberar:**
+1. mucommerce. As migrations 0045 a 0048 são só aditivas; a 0048 preenche `customer_phones` a
+   partir dos pedidos.
+2. api-agents.
+
+Na ordem contrária nada quebra: sem a rota nova, o portão recebe 404 e o robô segue como hoje.
+
+**Variáveis de ambiente:** nenhuma nova até o provedor Frenet. Com ele entra
+`FRENET_PARTNER_TOKEN` no Env da stack `commerce`, gravado na hel1 sem passar pelo modelo, e
+`frenet` em `SHIPPING_ALLOWED_PROVIDERS`.
+
+**Limites conhecidos:**
+- Duas mensagens do mesmo número novo, no mesmo instante, podem criar dois clientes pendentes.
+  O lojista libera qualquer um e o robô passa a responder.
+- O limitador de tentativas (senha da loja, login por senha) cai aberto se o Redis cair, como o
+  resto da API.
+- A loja fechada com a home aberta deixa o cliente pendente chegar ao carrinho, mas só com
+  produtos de compra direta: o carrinho e o pedido recusam os outros.
