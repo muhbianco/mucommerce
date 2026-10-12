@@ -300,46 +300,76 @@ class CustomerAuthService:
         customer = await self.session.get(Customer, flow.customer_id)
         if customer is None:
             raise InvalidHandoffError()
-
-        sessions = CustomerSessionRepository(self.session)
-        if previous_session:
-            old = await sessions.by_token_hash(hash_token(previous_session))
-            if old is not None and old.revoked_at is None:
-                old.revoked_at, old.revoked_reason = now, "rotated"
-        token, row = open_session(
+        return await finish_sign_in(
             self.session,
-            tenant_id=tenant.id,
-            customer_id=customer.id,
+            tenant,
+            customer,
+            provider=PROVIDER,
+            return_to=flow.return_to,
+            previous_session=previous_session,
+            terms_version=flow.terms_version,
+            privacy_version=flow.privacy_version,
             now=now,
             ip=ip,
             user_agent=user_agent,
         )
-        await self.session.flush()
-        await audit(
-            self.session,
-            actor=f"customer:{customer.id}",
-            action="customer.signed_in",
-            entity_type="customer_session",
-            entity_id=row.id,
-            tenant_id=tenant.id,
-            after={"provider": PROVIDER},
-            ip=ip,
-            user_agent=user_agent,
+
+
+async def finish_sign_in(
+    session: AsyncSession,
+    tenant: TenantContext,
+    customer: Customer,
+    *,
+    provider: str,
+    return_to: str,
+    previous_session: str | None,
+    terms_version: str | None,
+    privacy_version: str | None,
+    now: datetime,
+    ip: str | None,
+    user_agent: str | None,
+) -> Completed:
+    """O fim comum de todo login de cliente (Google, senha): troca a sessão anterior deste
+    navegador, abre a nova, audita e registra o aceite dos documentos mostrados na tela."""
+    sessions = CustomerSessionRepository(session)
+    if previous_session:
+        old = await sessions.by_token_hash(hash_token(previous_session))
+        if old is not None and old.revoked_at is None:
+            old.revoked_at, old.revoked_reason = now, "rotated"
+    token, row = open_session(
+        session,
+        tenant_id=tenant.id,
+        customer_id=customer.id,
+        now=now,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    await session.flush()
+    await audit(
+        session,
+        actor=f"customer:{customer.id}",
+        action="customer.signed_in",
+        entity_type="customer_session",
+        entity_id=row.id,
+        tenant_id=tenant.id,
+        after={"provider": provider},
+        ip=ip,
+        user_agent=user_agent,
+    )
+    accepted = [
+        Acceptance(kind, int(version))
+        for kind, version in (("terms", terms_version), ("privacy", privacy_version))
+        if version and version.isdigit()
+    ]
+    if accepted:
+        await LegalService(session, tenant).record_acceptance(
+            customer.id, accepted, at=now, ip=ip, user_agent=user_agent
         )
-        accepted = [
-            Acceptance(kind, int(version))
-            for kind, version in (("terms", flow.terms_version), ("privacy", flow.privacy_version))
-            if version and version.isdigit()
-        ]
-        if accepted:
-            await LegalService(self.session, tenant).record_acceptance(
-                customer.id, accepted, at=now, ip=ip, user_agent=user_agent
-            )
-        access = await AccessRepository(self.session).for_customer(customer.id)
-        return Completed(
-            session_token=token,
-            expires_at=row.expires_at,
-            return_to=flow.return_to,
-            customer=customer,
-            access_status=access.status if access else None,
-        )
+    access = await AccessRepository(session).for_customer(customer.id)
+    return Completed(
+        session_token=token,
+        expires_at=row.expires_at,
+        return_to=return_to,
+        customer=customer,
+        access_status=access.status if access else None,
+    )

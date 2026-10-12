@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import get_logger
+from app.customers.email_links import fill_token
 from app.models.base import utcnow
 from app.notifications.models import DeliveryStatus, NotificationDelivery
 from app.notifications.resolver import transport_for
@@ -78,7 +79,7 @@ async def send_one(
     message_id: str | None = None
     error: TransportError | None = None
     try:
-        message_id = await transport.send(delivery)
+        message_id = await transport.send(_with_link(delivery))
     except TransportError as exc:
         error = exc
 
@@ -110,6 +111,26 @@ async def send_one(
     status = str(delivery.status)
     await session.commit()
     return status
+
+
+def _with_link(delivery: NotificationDelivery) -> NotificationDelivery:
+    """E-mail com link de conta: uma cópia solta (fora da sessão, nunca gravada) com o token no
+    lugar do marcador. O que fica no banco continua sem link que funcione."""
+    if not delivery.secret_ref:
+        return delivery
+    ref, key = delivery.secret_ref, delivery.template_key
+    return NotificationDelivery(
+        id=delivery.id,
+        tenant_id=delivery.tenant_id,
+        event_id=delivery.event_id,
+        template_key=key,
+        channel=delivery.channel,
+        recipient=delivery.recipient,
+        order_id=delivery.order_id,
+        subject=delivery.subject,
+        body_html=fill_token(delivery.body_html, key, ref),
+        body_text=fill_token(delivery.body_text, key, ref),
+    )
 
 
 async def run_send_notifications(

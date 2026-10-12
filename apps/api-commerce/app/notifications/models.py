@@ -48,6 +48,9 @@ class NotificationDelivery(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Ba
     channel: Mapped[str] = mapped_column(String(16), nullable=False, default="email")
     recipient: Mapped[str] = mapped_column(String(320), nullable=False)
     order_id: Mapped[str | None] = mapped_column(String(36))
+    #: E-mail com link de uso único (confirmar conta, trocar senha): o corpo guarda só o lugar do
+    #: token, e o token sai deste id na hora do envio. A fila nunca guarda um link que funcione.
+    secret_ref: Mapped[str | None] = mapped_column(String(36))
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
     body_html: Mapped[str | None] = mapped_column(LONG_TEXT)
     body_text: Mapped[str | None] = mapped_column(LONG_TEXT)

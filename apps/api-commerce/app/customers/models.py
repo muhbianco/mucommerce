@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 
-from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, TimestampMixin, UtcDateTime, UUIDPrimaryKeyMixin
+from app.models.base import Base, TenantScoped, TimestampMixin, UtcDateTime, UUIDPrimaryKeyMixin
 
 
 class CustomerAuthFlow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -58,6 +59,62 @@ class CustomerPhoneChallenge(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     customer_id: Mapped[str] = mapped_column(String(36), ForeignKey("customers.id"), nullable=False)
     phone_e164: Mapped[str] = mapped_column(String(20), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    ip: Mapped[str | None] = mapped_column(String(45))
+
+
+class CustomerPassword(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """A senha que a pessoa criou **nesta loja** (docs/14-pedidos-lunares.md §2).
+
+    Por loja, e não no `Customer` global: a senha criada na Lunares não abre outra loja, e uma
+    loja não fica sabendo que o e-mail tem cadastro em outra. Só existe depois que a pessoa
+    provou ser dona do e-mail (link do `CustomerEmailChallenge`): é o que impede alguém de
+    amarrar uma senha ao e-mail de outra pessoa antes dela.
+    """
+
+    __tablename__ = "customer_passwords"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name="fk_customer_passwords_tenant"),
+        ForeignKeyConstraint(
+            ["customer_id"], ["customers.id"], name="fk_customer_passwords_customer"
+        ),
+        UniqueConstraint("customer_id", "tenant_id", name="uq_customer_passwords_customer"),
+    )
+
+    customer_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
+
+
+class EmailChallengePurpose(StrEnum):
+    SIGNUP = "signup"
+    RESET = "reset"
+
+
+class CustomerEmailChallenge(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
+    """Um link mandado por e-mail: confirmar o cadastro, ou trocar a senha.
+
+    Nenhum segredo fica aqui nem na fila de e-mail: o token do link é
+    `HMAC(chave do servidor, propósito:id)`, calculado na hora de montar o e-mail e de novo na
+    hora de conferir. A senha escolhida no cadastro espera aqui, já em hash, até o clique.
+    """
+
+    __tablename__ = "customer_email_challenges"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id"], ["tenants.id"], name="fk_customer_email_challenges_tenant"
+        ),
+        Index("ix_customer_email_challenges_email", "tenant_id", "email_normalized", "created_at"),
+    )
+
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    email_normalized: Mapped[str] = mapped_column(String(320), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(200))
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    return_to: Mapped[str] = mapped_column(String(512), nullable=False, default="/")
+    terms_version: Mapped[str | None] = mapped_column(String(32))
+    privacy_version: Mapped[str | None] = mapped_column(String(32))
     expires_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     ip: Mapped[str | None] = mapped_column(String(45))

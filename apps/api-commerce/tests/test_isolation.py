@@ -88,6 +88,10 @@ COVERED_TENANT_SCOPED_TABLES = {
     # MuTickets: o ingresso de outra loja não existe aqui, nem pelo código — exercitado em
     # `test_o_ingresso_de_outra_loja_nao_existe_aqui`.
     "tickets",
+    # Conta com e-mail e senha: a senha de uma loja não abre outra e o link de uma loja não
+    # confirma em outra — `test_customer_password.py`.
+    "customer_passwords",
+    "customer_email_challenges",
 }
 
 

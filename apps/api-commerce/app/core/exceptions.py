@@ -265,6 +265,32 @@ class InvalidHandoffError(DomainError):
     message = "Login expirado ou já usado. Entre de novo."
 
 
+class InvalidCredentialsError(AuthenticationError):
+    """E-mail ou senha errados. Uma mensagem só para os dois: dizer qual errou conta a quem
+    testa e-mails se aquele tem conta na loja."""
+
+    error_code = "invalid_credentials"
+    message = "E-mail ou senha incorretos."
+
+
+class CustomerUnavailableError(PermissionDeniedError):
+    error_code = "customer_unavailable"
+    message = "Esta conta não pode entrar na loja."
+
+
+class InvalidEmailLinkError(DomainError):
+    """Link de confirmar conta ou trocar senha desconhecido, adulterado, vencido ou já usado."""
+
+    status_code = 400
+    error_code = "invalid_link"
+    message = "Este link expirou ou já foi usado. Peça outro."
+
+
+class WeakPasswordError(ValidationError):
+    error_code = "weak_password"
+    message = "Escolha uma senha mais forte."
+
+
 class CsrfOriginError(PermissionDeniedError):
     error_code = "csrf_origin"
     message = "Requisição recusada: origem diferente da loja."

@@ -30,7 +30,8 @@ from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.phone import mask_phone
 from app.core.rate_limit import rate_limit
 from app.customers.access_service import CustomerAccessService
-from app.customers.auth_service import CustomerAuthService, mask_email
+from app.customers.auth_service import Completed, CustomerAuthService, mask_email
+from app.customers.password_auth import PasswordAuthService
 from app.customers.phone import PhoneVerificationService
 from app.customers.repository import CustomerSessionRepository
 from app.identity.models import Customer
@@ -68,6 +69,51 @@ class CustomerRead(BaseModel):
     phone_verified: bool
     #: O WhatsApp que o checkout usa se o campo ficar em branco (mascarado).
     phone_masked: str | None = None
+
+
+#: Endereço plausível; a prova de que é da pessoa é o clique no link, não esta regra.
+Email = Annotated[
+    str, Field(min_length=6, max_length=254, pattern=r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
+]
+# Sem teto de 128 o Argon2 viraria porta de negação de serviço; o mínimo é do serviço.
+PasswordIn = Annotated[str, Field(min_length=1, max_length=128)]
+ChallengeId = Annotated[str, Field(min_length=36, max_length=36)]
+LinkToken = Annotated[str, Field(min_length=16, max_length=64)]
+
+
+class SignupBody(StrictModel):
+    email: Email
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    password: PasswordIn
+    return_to: Annotated[str, Field(max_length=512)] = "/"
+    terms_version: Annotated[int, Field(ge=1, le=100_000)] | None = None
+    privacy_version: Annotated[int, Field(ge=1, le=100_000)] | None = None
+
+
+class LinkBody(StrictModel):
+    challenge_id: ChallengeId
+    token: LinkToken
+    previous_session: Annotated[str, Field(max_length=128)] | None = None
+
+
+class LoginBody(StrictModel):
+    email: Email
+    password: PasswordIn
+    return_to: Annotated[str, Field(max_length=512)] = "/"
+    previous_session: Annotated[str, Field(max_length=128)] | None = None
+
+
+class ForgotBody(StrictModel):
+    email: Email
+
+
+class ResetBody(LinkBody):
+    password: PasswordIn
+
+
+class Accepted(BaseModel):
+    #: Sempre `sent`, exista a conta ou não: a resposta não conta quem tem cadastro.
+    status: str = "sent"
 
 
 class CompleteResponse(BaseModel):
@@ -183,6 +229,140 @@ async def complete_google(
         customer=customer_read(done.customer),
         access_status=done.access_status,
     )
+
+
+def _signed_in(done: Completed) -> CompleteResponse:
+    return CompleteResponse(
+        session_token=done.session_token,
+        expires_at=done.expires_at,
+        return_to=done.return_to,
+        customer=customer_read(done.customer),
+        access_status=done.access_status,
+    )
+
+
+# ------------------------------------------------------------------ e-mail e senha (web → API)
+# Fora de `/me/`: a suíte de vazamento exige sessão de cliente em tudo que mora lá.
+@router.post(
+    "/internal/customer-auth/password/signup",
+    response_model=Accepted,
+    status_code=202,
+    summary="Cadastro com e-mail e senha: manda o link de confirmação",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("customer_password_signup", limit=5, window_seconds=600)),
+    ],
+)
+async def password_signup(
+    session: DbSession, tenant: StorefrontTenant, body: SignupBody, ip: ClientIp
+) -> Accepted:
+    await PasswordAuthService(session, tenant).signup(
+        email=body.email,
+        name=body.name,
+        password=body.password,
+        return_to=body.return_to,
+        terms_version=body.terms_version,
+        privacy_version=body.privacy_version,
+        ip=ip,
+    )
+    return Accepted()
+
+
+@router.post(
+    "/internal/customer-auth/password/confirm",
+    response_model=CompleteResponse,
+    summary="Confirma o e-mail pelo link e abre a sessão",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("customer_password_link", limit=20, window_seconds=600)),
+    ],
+)
+async def password_confirm(
+    session: DbSession,
+    tenant: StorefrontTenant,
+    body: LinkBody,
+    ip: ClientIp,
+    user_agent: Annotated[str | None, Header()] = None,
+) -> CompleteResponse:
+    done = await PasswordAuthService(session, tenant).confirm_signup(
+        challenge_id=body.challenge_id,
+        token=body.token,
+        previous_session=body.previous_session,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _signed_in(done)
+
+
+@router.post(
+    "/internal/customer-auth/password/login",
+    response_model=CompleteResponse,
+    summary="Entra com e-mail e senha",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("customer_password_login", limit=20, window_seconds=300)),
+    ],
+)
+async def password_login(
+    session: DbSession,
+    tenant: StorefrontTenant,
+    body: LoginBody,
+    ip: ClientIp,
+    user_agent: Annotated[str | None, Header()] = None,
+) -> CompleteResponse:
+    done = await PasswordAuthService(session, tenant).login(
+        email=body.email,
+        password=body.password,
+        return_to=body.return_to,
+        previous_session=body.previous_session,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _signed_in(done)
+
+
+@router.post(
+    "/internal/customer-auth/password/forgot",
+    response_model=Accepted,
+    status_code=202,
+    summary="Esqueci a senha: manda o link para trocar, se a conta existir",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("customer_password_forgot", limit=5, window_seconds=600)),
+    ],
+)
+async def password_forgot(
+    session: DbSession, tenant: StorefrontTenant, body: ForgotBody, ip: ClientIp
+) -> Accepted:
+    await PasswordAuthService(session, tenant).request_reset(email=body.email, ip=ip)
+    return Accepted()
+
+
+@router.post(
+    "/internal/customer-auth/password/reset",
+    response_model=CompleteResponse,
+    summary="Troca a senha pelo link do e-mail e abre a sessão",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("customer_password_link", limit=20, window_seconds=600)),
+    ],
+)
+async def password_reset(
+    session: DbSession,
+    tenant: StorefrontTenant,
+    body: ResetBody,
+    ip: ClientIp,
+    user_agent: Annotated[str | None, Header()] = None,
+) -> CompleteResponse:
+    done = await PasswordAuthService(session, tenant).confirm_reset(
+        challenge_id=body.challenge_id,
+        token=body.token,
+        password=body.password,
+        previous_session=body.previous_session,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return _signed_in(done)
 
 
 _EXPIRED_PAGE = """<!doctype html><html lang="pt-BR"><meta charset="utf-8">
