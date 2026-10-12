@@ -30,6 +30,18 @@ class EffectivePrice:
     promo_ends_at: datetime | None
 
 
+def promo_deadline(ends_at: datetime | None, sold_out_at: datetime | None) -> datetime | None:
+    """Fim efetivo da promoção: a data escolhida pelo lojista ou o instante em que o estoque
+    zerou (opção "encerrar ao zerar o estoque"), o que vier primeiro. Todo ponto que precifica
+    passa o resultado como `ends_at`, para nenhuma tela mostrar a promoção que o carrinho já
+    não cobra."""
+    if sold_out_at is None:
+        return ends_at
+    if ends_at is None:
+        return sold_out_at
+    return min(ends_at, sold_out_at)
+
+
 def promo_is_active(
     *,
     base_cents: int,

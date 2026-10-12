@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import Event, Product, ProductKind, ProductVariant, travels
-from app.catalog.pricing import variant_price
+from app.catalog.pricing import promo_deadline, variant_price
 from app.shipping.models import ProductPackageRule, ShippingPackage
 from app.shipping.packages import inner_dims, outer_dims
 from app.shipping.packing.model import (
@@ -181,7 +181,7 @@ async def load_packing_inputs(
                 base_cents=produto.base_price_cents,
                 promo_cents=produto.promo_price_cents,
                 starts_at=produto.promo_starts_at,
-                ends_at=produto.promo_ends_at,
+                ends_at=promo_deadline(produto.promo_ends_at, produto.promo_sold_out_at),
                 now=now,
             ).amount_cents
             if cfg.declare_value

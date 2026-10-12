@@ -150,6 +150,8 @@ export interface Product extends ProductSummary {
   price_tiers?: { min_qty_milli: number; unit_price_cents: number }[] | null;
   promo_starts_at: string | null;
   promo_ends_at: string | null;
+  promo_ends_on_sellout: boolean;
+  promo_sold_out_at: string | null;
   cost_cents_estimate: number | null;
   stock_policy: string;
   sold_by: string;

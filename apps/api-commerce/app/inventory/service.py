@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit.outbox import emit
 from app.audit.writer import audit
 from app.catalog.models import Product, ProductVariant, SoldBy, StockPolicy
+from app.catalog.promotions import crossed_to_zero, emit_sold_out
 from app.core.exceptions import (
     ConflictError,
     NotFoundError,
@@ -171,6 +172,7 @@ class InventoryService:
         now = utcnow()
         movements: list[InventoryMovement] = []
         crossed_low: list[str] = []
+        sold_out: list[str] = []
         for line in data.lines:
             balance = balances[line.variant_id]
             before = balance.on_hand_milli
@@ -196,6 +198,8 @@ class InventoryService:
             balance.on_hand_milli = after
             if _crossed_below(balance, before, after):
                 crossed_low.append(line.variant_id)
+            if crossed_to_zero(before, after):
+                sold_out.append(line.variant_id)
         await self.session.flush()
 
         lines_payload = [
@@ -253,6 +257,8 @@ class InventoryService:
                 },
                 tenant_id=self.tenant.id,
             )
+        for variant_id in sold_out:
+            await emit_sold_out(self.session, self.tenant.id, variant_id)
         return AdjustmentResult(adjustment, movements)
 
     async def list_stock(

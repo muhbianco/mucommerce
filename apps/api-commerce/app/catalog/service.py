@@ -40,6 +40,7 @@ from app.catalog.models import (
     ProductKind,
     ProductStatus,
     ProductVariant,
+    StockPolicy,
     Tag,
     VariantStatus,
 )
@@ -49,8 +50,10 @@ from app.catalog.pricing import (
     check_promotion,
     check_tiers,
     effective_price,
+    promo_deadline,
     variant_price,
 )
+from app.catalog.promotions import promo_variants
 from app.catalog.repository import MAX_CATEGORIES, MAX_TAGS, CatalogRepository
 from app.catalog.schemas import (
     CATEGORY_REQUIRED_FIELDS,
@@ -112,8 +115,14 @@ _PRODUCT_AUDITED = (
     "promo_price_cents",
     "promo_starts_at",
     "promo_ends_at",
+    "promo_ends_on_sellout",
+    "promo_sold_out_at",
     "stock_policy",
     "kind",
+)
+# Mexer em qualquer um destes rearma a promoção que o estoque encerrou.
+_PROMO_FIELDS = frozenset(
+    {"promo_price_cents", "promo_starts_at", "promo_ends_at", "promo_ends_on_sellout"}
 )
 
 
@@ -132,7 +141,7 @@ def product_price(product: Product, now: datetime) -> EffectivePrice:
         base_cents=product.base_price_cents,
         promo_cents=product.promo_price_cents,
         starts_at=product.promo_starts_at,
-        ends_at=product.promo_ends_at,
+        ends_at=promo_deadline(product.promo_ends_at, product.promo_sold_out_at),
         now=now,
     )
 
@@ -143,7 +152,7 @@ def price_of_variant(product: Product, variant: ProductVariant, now: datetime) -
         base_cents=product.base_price_cents,
         promo_cents=product.promo_price_cents,
         starts_at=product.promo_starts_at,
-        ends_at=product.promo_ends_at,
+        ends_at=promo_deadline(product.promo_ends_at, product.promo_sold_out_at),
         now=now,
     )
 
@@ -179,6 +188,12 @@ class CatalogService:
             [t.model_dump() for t in data.price_tiers] if data.price_tiers else None,
             base_cents=data.base_price_cents,
         )
+        if data.promo_ends_on_sellout:
+            _check_sellout(
+                promo_cents=data.promo_price_cents,
+                kind=str(data.kind),
+                tracked=data.stock_policy == StockPolicy.TRACKED,
+            )
         if data.packing_mode == "restricted":
             # Regras só chegam no PATCH: criar já restrito deixaria o produto sem embalagem.
             raise PackingInvalidError(
@@ -260,6 +275,14 @@ class CatalogService:
             "ends_at": changes.get("promo_ends_at", product.promo_ends_at),
         }
         check_promotion(**merged)
+        if changes.get("promo_ends_on_sellout", product.promo_ends_on_sellout):
+            _check_sellout(
+                promo_cents=merged["promo_cents"],
+                kind=str(changes.get("kind", product.kind)),
+                tracked=await self._sells_tracked(
+                    product, str(changes.get("stock_policy", product.stock_policy))
+                ),
+            )
         if "price_tiers" in changes:
             faixas = changes["price_tiers"]
             check_tiers(
@@ -312,6 +335,12 @@ class CatalogService:
         changed = sorted(name for name, value in changes.items() if old[name] != value)
         for name in changed:
             setattr(product, name, changes[name])
+        if _PROMO_FIELDS.intersection(changed) and product.promo_sold_out_at is not None:
+            # Promoção nova (ou a mesma, com outra regra): o estoque que zerou a anterior não
+            # vale para ela.
+            old["promo_sold_out_at"] = product.promo_sold_out_at
+            product.promo_sold_out_at = None
+            changed.append("promo_sold_out_at")
         if categories != categories_before:
             await self.repo.replace_product_categories(
                 product.id, categories, current=categories_before
@@ -811,6 +840,10 @@ class CatalogService:
             raise NotFoundError("Produto não encontrado.")
         return product
 
+    async def _sells_tracked(self, product: Product, product_policy: str) -> bool:
+        variants = (await self.repo.variants_for([product.id])).get(product.id, [])
+        return bool(promo_variants(variants, product_policy))
+
     async def _category_or_404(self, category_id: str) -> Category:
         category = await self.repo.get_category(category_id)
         if category is None:
@@ -940,6 +973,29 @@ class CatalogService:
                 **extra,
             },
             tenant_id=self.tenant.id,
+        )
+
+
+def _check_sellout(*, promo_cents: int | None, kind: str, tracked: bool) -> None:
+    """A opção só existe onde pode disparar: com preço promocional, fora de ingresso (lote tem
+    preço próprio e não herda promoção) e com alguma variação que conta estoque."""
+    if promo_cents is None:
+        raise ValidationError(
+            "Encerrar ao zerar o estoque precisa de um preço promocional.",
+            fields=["promo_ends_on_sellout"],
+            reason="sellout_needs_promo",
+        )
+    if kind == ProductKind.TICKET:
+        raise ValidationError(
+            "Ingresso não tem promoção por estoque: cada lote tem o seu preço.",
+            fields=["promo_ends_on_sellout"],
+            reason="sellout_ticket",
+        )
+    if not tracked:
+        raise ValidationError(
+            "Este produto não controla estoque, então a promoção nunca acabaria por ele.",
+            fields=["promo_ends_on_sellout"],
+            reason="sellout_untracked",
         )
 
 

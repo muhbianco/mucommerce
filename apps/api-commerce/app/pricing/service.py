@@ -30,6 +30,7 @@ from app.catalog.pricing import (
     apply_tiers,
     parse_tiers,
     price_with_modifiers,
+    promo_deadline,
     variant_price,
 )
 from app.core.exceptions import ValidationError
@@ -138,7 +139,7 @@ class PricingService:
                 base_cents=product.base_price_cents,
                 promo_cents=product.promo_price_cents,
                 starts_at=product.promo_starts_at,
-                ends_at=product.promo_ends_at,
+                ends_at=promo_deadline(product.promo_ends_at, product.promo_sold_out_at),
                 now=self.now,
             )
             da_variante = parse_tiers(variant.price_tiers)

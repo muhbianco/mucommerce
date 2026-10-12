@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.models import OutboxEvent
 from app.audit.outbox import registry
+from app.catalog.promotions import SOLD_OUT_EVENT, end_promotion_on_sellout
 from app.core.logging import get_logger
 from app.core.storage import get_storage
 from app.notifications.notifier import EVENT_TYPES as NOTIFIED_EVENTS
@@ -72,3 +73,4 @@ registry.register("notifier", NOTIFIED_EVENTS, notifier)
 registry.register("media_processor", ("media.uploaded",), media_processor)
 registry.register("media_janitor", ("media.deleted",), media_janitor)
 registry.register("landing_generator", ("landing.draft_requested",), landing_generator)
+registry.register("promo_sellout", (SOLD_OUT_EVENT,), end_promotion_on_sellout)

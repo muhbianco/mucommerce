@@ -25,7 +25,7 @@ from app.catalog.models import (
     Tag,
     VariantStatus,
 )
-from app.catalog.pricing import EffectivePrice, effective_price, variant_price
+from app.catalog.pricing import EffectivePrice, effective_price, promo_deadline, variant_price
 from app.inventory.models import InventoryBalance
 from app.media.models import MediaAsset, MediaOwner
 from app.media.repository import MediaRepository
@@ -230,7 +230,7 @@ class StorefrontCatalog:
                     base_cents=product.base_price_cents,
                     promo_cents=product.promo_price_cents,
                     starts_at=product.promo_starts_at,
-                    ends_at=product.promo_ends_at,
+                    ends_at=promo_deadline(product.promo_ends_at, product.promo_sold_out_at),
                     now=self.now,
                 ),
                 variant_availability(v, product, balances.get(v.id)),
@@ -294,7 +294,7 @@ class StorefrontCatalog:
             base_cents=product.base_price_cents,
             promo_cents=product.promo_price_cents,
             starts_at=product.promo_starts_at,
-            ends_at=product.promo_ends_at,
+            ends_at=promo_deadline(product.promo_ends_at, product.promo_sold_out_at),
             now=self.now,
         )
 

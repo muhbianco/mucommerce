@@ -151,6 +151,11 @@ const ERRORS: Record<string, string> = {
   "conflict.package_inactive": "Embalagem arquivada não pode ser a padrão. Reative antes.",
   "conflict.package_conflict": "A embalagem mudou ao mesmo tempo em outra tela. Recarregue e tente de novo.",
   "validation_error.inner_required": "Informe as três medidas por dentro.",
+  "validation_error.sellout_needs_promo":
+    "Para encerrar a promoção quando o estoque zerar, informe o preço promocional.",
+  "validation_error.sellout_ticket": "Ingresso não tem promoção por estoque: cada lote tem o seu preço.",
+  "validation_error.sellout_untracked":
+    "A promoção por estoque precisa que o produto controle estoque. Mude o controle ou desmarque a opção.",
   "validation_error.not_connected": "Conecte a conta da transportadora antes de escolher os serviços.",
   "validation_error.provider_unavailable": "A transportadora ainda não foi liberada para esta loja.",
   "validation_error.unknown_service": "Um dos serviços não está mais na sua conta. Recarregue a página e escolha de novo.",

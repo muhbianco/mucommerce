@@ -68,6 +68,7 @@ export async function updateProduct(form: FormData): Promise<void> {
     const promoEnds = localToUtcIso(text(form, "promo_ends_at"), timeZone);
     if (promoStarts === "invalid" || promoEnds === "invalid")
       throw new FormError("data_invalida");
+    const promoPrice = money(form, "promo_price");
     await api(`${path}/products/${productId}`, {
       method: "PATCH",
       json: {
@@ -76,9 +77,13 @@ export async function updateProduct(form: FormData): Promise<void> {
         short_description: optional(form, "short_description"),
         description_md: optional(form, "description_md"),
         base_price_cents: money(form, "price", { required: true }),
-        promo_price_cents: money(form, "promo_price"),
+        promo_price_cents: promoPrice,
         promo_starts_at: promoStarts,
         promo_ends_at: promoEnds,
+        // Sem preço promocional não há promoção para encerrar: apagar o preço desliga a opção
+        // junto, em vez de a lojista tropeçar num erro por uma caixinha esquecida marcada.
+        promo_ends_on_sellout:
+          promoPrice !== null && form.get("promo_ends_on_sellout") === "on",
         cost_cents_estimate: money(form, "cost"),
         price_tiers: priceTiers(form),
         kind: text(form, "kind") || undefined,

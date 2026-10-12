@@ -70,6 +70,8 @@ class _ProductFields(StrictModel):
     promo_price_cents: Money | None = None
     promo_starts_at: AwareDatetime | None = None
     promo_ends_at: AwareDatetime | None = None
+    #: Encerrar a promoção quando o estoque zerar (vale o que vier primeiro: data ou estoque).
+    promo_ends_on_sellout: bool = False
     cost_cents_estimate: Money | None = None
     stock_policy: StockPolicyIn = "tracked"
     sold_by: Literal["unit", "weight"] = "unit"
@@ -132,6 +134,7 @@ class ProductUpdate(StrictModel):
     promo_price_cents: Money | None = None
     promo_starts_at: AwareDatetime | None = None
     promo_ends_at: AwareDatetime | None = None
+    promo_ends_on_sellout: bool | None = None
     cost_cents_estimate: Money | None = None
     stock_policy: StockPolicyIn | None = None
     sold_by: Literal["unit", "weight"] | None = None
@@ -173,6 +176,7 @@ PRODUCT_REQUIRED_FIELDS = frozenset(
         "packing_rotation",
         "packing_flexible",
         "packing_ship_alone",
+        "promo_ends_on_sellout",
     }
 )
 
@@ -316,6 +320,9 @@ class ProductRead(ProductSummary):
     promo_price_cents: int | None
     promo_starts_at: datetime | None
     promo_ends_at: datetime | None
+    promo_ends_on_sellout: bool
+    #: Quando o estoque zerou e encerrou a promoção; nulo enquanto não aconteceu.
+    promo_sold_out_at: datetime | None
     cost_cents_estimate: int | None
     stock_policy: str
     sold_by: str

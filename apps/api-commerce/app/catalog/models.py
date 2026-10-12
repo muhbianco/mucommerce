@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
@@ -228,6 +229,14 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     price_tiers: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     promo_starts_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     promo_ends_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    #: "Encerrar a promoção quando o estoque zerar": vale o que vier primeiro, data ou estoque.
+    #: Default também no banco: a imagem anterior insere produto sem conhecer a coluna.
+    promo_ends_on_sellout: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    #: Quando o estoque físico de todas as variações em promoção chegou a zero. Carimbo e não
+    #: cálculo: repor o estoque não ressuscita a promoção; mexer nela rearma (limpa o carimbo).
+    promo_sold_out_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     cost_cents_estimate: Mapped[int | None] = mapped_column(BigInteger)
     stock_policy: Mapped[str] = mapped_column(
         String(16), nullable=False, default=StockPolicy.TRACKED

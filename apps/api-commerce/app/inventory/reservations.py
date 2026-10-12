@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.outbox import emit
+from app.catalog.promotions import crossed_to_zero, emit_sold_out
 from app.inventory.models import (
     InventoryBalance,
     InventoryMovement,
@@ -65,6 +66,7 @@ class ReservationService:
         balances = await self._lock([r.variant_id for r in reservations])
         now = utcnow()
         low: list[str] = []
+        sold_out: list[str] = []
         for reservation in reservations:
             balance = balances[reservation.variant_id]
             before = balance.on_hand_milli
@@ -77,9 +79,13 @@ class ReservationService:
             reservation.committed_at = now
             if _crossed_below(balance, before):
                 low.append(reservation.variant_id)
+            if crossed_to_zero(before, balance.on_hand_milli):
+                sold_out.append(reservation.variant_id)
         await self.session.flush()
         for variant_id in low:
             await self._low_stock(variant_id, balances[variant_id])
+        for variant_id in sold_out:
+            await emit_sold_out(self.session, self.tenant.id, variant_id)
         return len(reservations)
 
     async def release(self, order_id: str, *, reason: str, expired: bool = False) -> int:
@@ -115,6 +121,7 @@ class ReservationService:
                 return False
         now = utcnow()
         low: list[str] = []
+        sold_out: list[str] = []
         for reservation in reservations:
             balance = balances[reservation.variant_id]
             before = balance.on_hand_milli
@@ -127,9 +134,13 @@ class ReservationService:
             reservation.release_reason = None
             if _crossed_below(balance, before):
                 low.append(reservation.variant_id)
+            if crossed_to_zero(before, balance.on_hand_milli):
+                sold_out.append(reservation.variant_id)
         await self.session.flush()
         for variant_id in low:
             await self._low_stock(variant_id, balances[variant_id])
+        for variant_id in sold_out:
+            await emit_sold_out(self.session, self.tenant.id, variant_id)
         return True
 
     async def return_stock(self, order_id: str, *, reason: str) -> int:

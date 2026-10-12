@@ -3,7 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { api, ApiError, requireMe } from "@/lib/panel/api";
-import { formatMoney, moneyInput, utcToLocalInput } from "@/lib/panel/format";
+import {
+  formatMoney,
+  moneyInput,
+  parseInstant,
+  utcToLocalInput,
+} from "@/lib/panel/format";
 import { cmInput, weightInput } from "@/lib/panel/measure";
 import type { PackageCapacity, ShippingPackage } from "@/lib/panel/packaging";
 import { tenantScopes } from "@/lib/panel/scopes";
@@ -737,6 +742,36 @@ export default async function ProductPage({
                     </span>
                   </label>
                 </div>
+                <label className={styles.check}>
+                  <input
+                    type="checkbox"
+                    name="promo_ends_on_sellout"
+                    defaultChecked={product.promo_ends_on_sellout}
+                  />
+                  <span>
+                    Encerrar a promoção quando o estoque zerar
+                    <span className={styles.fieldHint}>
+                      {" "}
+                      Vale o que vier primeiro: a data ou o estoque. Repor o
+                      estoque não traz a promoção de volta; para reabrir, mude o
+                      preço ou as datas.
+                    </span>
+                  </span>
+                </label>
+                {product.promo_sold_out_at ? (
+                  <p className={styles.hint}>
+                    Promoção encerrada porque o estoque zerou em{" "}
+                    {parseInstant(product.promo_sold_out_at)?.toLocaleString(
+                      "pt-BR",
+                      {
+                        timeZone: zone,
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      },
+                    ) ?? "—"}
+                    .
+                  </p>
+                ) : null}
                 <p className={styles.hint}>
                   Datas no horário da loja ({zone}).
                 </p>
