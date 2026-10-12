@@ -21,6 +21,7 @@ from app.core.logging import get_logger
 from app.orders.models import Order
 from app.orders.service import OrderService
 from app.shipping import registry
+from app.shipping.credentials import load_credentials
 from app.shipping.models import (
     OPEN_SHIPMENT_STATUSES,
     OrderShipment,
@@ -73,17 +74,9 @@ async def track_one(
         provider = registry.get_provider(remessa.provider)
         if provider is None:
             return "ignorado"
-        from app.core.config import settings
-        from app.integrations.credentials import CredentialStore
-
-        token = await CredentialStore(session, tenant_id).get(remessa.provider, "access_token")
-        if not token:
+        credenciais = await load_credentials(session, tenant_id, remessa.provider)
+        if credenciais is None:
             return "sem-credencial"
-        credenciais = ShippingCredentials(
-            secrets={"access_token": token},
-            public_config={},
-            sandbox=settings.environment != "production",
-        )
         # Marca a tentativa antes de perguntar: provedor mudo não vira consulta em loop.
         remessa.tracked_at = now
         etiquetas = [

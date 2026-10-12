@@ -60,12 +60,16 @@ def advance(provider_shipment_id: str, status: TrackingStatus) -> None:
     _STATUS[provider_shipment_id] = status
 
 
+#: O token que a transportadora de mentira recusa (o teste de "token errado não conecta").
+REFUSED_TOKEN = "token-recusado"  # noqa: S105 (valor de teste)
+
+
 class FakeShippingProvider:
     name = "fake"
 
     @property
     def capabilities(self) -> ShippingCapabilities:
-        return ShippingCapabilities(services=SERVICES, required_secrets=("token",))
+        return ShippingCapabilities(services=SERVICES, required_secrets=("access_token",))
 
     async def quote(
         self, credentials: ShippingCredentials, request: QuoteRequest
@@ -169,7 +173,12 @@ class FakeShippingProvider:
         return True
 
     async def test_credentials(self, credentials: ShippingCredentials) -> CredentialTest:
-        return CredentialTest(ok=bool(credentials.secrets.get("token")), detail="fake")
+        token = credentials.secrets.get("access_token", "")
+        if token == REFUSED_TOKEN:
+            return CredentialTest(
+                ok=False, detail="token recusado pela transportadora", refused=True
+            )
+        return CredentialTest(ok=bool(token), detail="fake")
 
     async def list_services(self, credentials: ShippingCredentials) -> tuple[ServiceInfo, ...]:
         # Os mesmos dois da cotação: o Econômico como os Correios (uma etiqueta por volume), o

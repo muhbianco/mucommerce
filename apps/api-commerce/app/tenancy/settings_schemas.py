@@ -232,6 +232,16 @@ class PackingSettings(_Setting):
     charge_material: bool = False
 
 
+class AccountCheck(_Setting):
+    """O último "testar conta" da transportadora, para a tela mostrar sem perguntar de novo."""
+
+    provider: Annotated[str, Field(max_length=24)]
+    ok: bool
+    detail: Annotated[str, Field(max_length=200)] = ""
+    #: ISO-8601 UTC.
+    at: Annotated[str, Field(max_length=40)]
+
+
 class ShippingSettings(_Setting):
     """Envio por transportadora (ADR 0015). Convive com retirada e entrega por zona."""
 
@@ -254,6 +264,8 @@ class ShippingSettings(_Setting):
     handling_days: Annotated[int, Field(ge=0, le=30)] = 0
     #: Regras do motor de embalagem (folga, flexíveis, combinações, teto de volumes).
     packing: PackingSettings = PackingSettings()
+    #: O último teste da conta (docs/14-pedidos-lunares.md §4). Nulo = nunca testada.
+    account_check: AccountCheck | None = None
 
 
 class FulfillmentV2(_Setting):

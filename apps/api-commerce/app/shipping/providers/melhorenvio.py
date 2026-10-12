@@ -351,7 +351,7 @@ class MelhorEnvioProvider:
         try:
             dados = await self._request(credentials, "GET", _BALANCE, None)
         except ShippingProviderError as exc:
-            return CredentialTest(ok=False, detail=str(exc)[:200])
+            return CredentialTest(ok=False, detail=str(exc)[:200], refused=exc.definitive)
         saldo = dados.get("balance") if isinstance(dados, dict) else None
         return CredentialTest(ok=True, detail=f"saldo {saldo}" if saldo is not None else "ok")
 

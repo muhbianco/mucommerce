@@ -213,6 +213,9 @@ class TrackingResult:
 class CredentialTest:
     ok: bool
     detail: str = ""
+    #: A transportadora **recusou** o token (4xx). Falso com `ok` falso = não deu para conferir
+    #: agora (rede, 5xx): a tela não pode chamar de "token errado" o que foi um soluço dela.
+    refused: bool = False
 
 
 @dataclass(frozen=True, slots=True)

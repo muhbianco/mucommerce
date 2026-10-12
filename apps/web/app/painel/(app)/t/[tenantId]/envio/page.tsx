@@ -3,16 +3,34 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { api, requireMe } from "@/lib/panel/api";
+import { parseInstant } from "@/lib/panel/format";
 import { isStoreMember, tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
-import { KeyValues, PageHeader, Pill, Section } from "../ui";
-import { connectAccount, saveOrigin, saveRules, saveServices, testAccount } from "./actions";
+import { PageHeader, Pill, Section } from "../ui";
+import {
+  chooseProvider,
+  connectAccount,
+  saveOrigin,
+  saveRules,
+  saveServices,
+  setShippingEnabled,
+  testAccount,
+} from "./actions";
 import local from "./envio.module.css";
 
 export const metadata: Metadata = { title: "Envio por transportadora" };
+
+interface ProviderOption {
+  name: string;
+  label: string;
+  token_help: string;
+  flag_on: boolean;
+  connected: boolean;
+  active: boolean;
+}
 
 interface ShippingStatus {
   provider: string;
@@ -27,6 +45,8 @@ interface ShippingStatus {
   oversized: { id: string; name: string; detail: string }[];
   last_test_ok?: boolean | null;
   last_test_detail?: string | null;
+  last_test_at?: string | null;
+  providers?: ProviderOption[];
   /** As embalagens da loja (opcionais: sem elas, o pedido sai em caixa sob medida). */
   packing?: {
     packages_active: number;
@@ -64,7 +84,7 @@ const SERVICE_KIND: Record<string, string> = {
 };
 
 const SERVICES_PROBLEM: Record<string, string> = {
-  not_connected: "Conecte a conta da transportadora acima para ver os serviços.",
+  not_connected: "Conecte a conta da transportadora (passo 2) para ver os serviços.",
   provider_unavailable: "A transportadora ainda não foi liberada para esta loja. Fale com a MuhBianco.",
   unavailable: "A transportadora não respondeu agora. Recarregue a página em instantes.",
 };
@@ -108,22 +128,28 @@ interface ShippingSettings {
   handling_days?: number;
 }
 
-const PROVIDER_LABEL: Record<string, string> = {
-  melhorenvio: "Melhor Envio",
-  fake: "Transportadora de teste",
-};
-
-/** O que ainda falta, em palavras de lojista (a API devolve códigos). */
-const MISSING_LABEL: Record<string, string> = {
-  "secret:access_token": "Conectar a conta da transportadora",
-  "config:origem": "Informar o endereço de onde a mercadoria sai",
-  "provider:indisponivel": "Transportadora indisponível nesta instalação",
-  "config:embalagem": "Cadastrar a embalagem padrão (em Embalagens)",
-};
-
 function reais(cents?: number | null): string {
   if (cents === null || cents === undefined) return "";
   return (cents / 100).toFixed(2).replace(".", ",");
+}
+
+function when(iso: string | null | undefined, zone: string): string {
+  return (
+    parseInstant(iso)?.toLocaleString("pt-BR", { timeZone: zone, dateStyle: "short", timeStyle: "short" }) ?? ""
+  );
+}
+
+/** Um passo do caminho: feito, o próximo a fazer, ou esperando o anterior. */
+function Step({ done, current, href, children }: { done: boolean; current: boolean; href: string; children: string }) {
+  return (
+    <li className={local.step} data-state={done ? "done" : current ? "current" : "todo"}>
+      <span className={local.stepMark} aria-hidden="true">
+        {done ? "✓" : "•"}
+      </span>
+      <a href={href}>{children}</a>
+      <span className={local.stepState}>{done ? "feito" : current ? "a fazer agora" : "depois"}</span>
+    </li>
+  );
 }
 
 export default async function Shipping({
@@ -147,14 +173,32 @@ export default async function Shipping({
   // CPF tem 11 dígitos, CNPJ 14: é assim que a etiqueta sai (o mesmo teste do provedor).
   const documento = (origin.document ?? "").replace(/\D/g, "");
   const origemPR = (origin.state ?? "").trim().toUpperCase() === "PR";
-  const pronto = status.connected && status.has_origin && status.flag_on;
   const embalagens = `/t/${context.tenant_id}/embalagens`;
-  const carrier = PROVIDER_LABEL[status.provider] ?? status.provider;
+  const providers = status.providers ?? [];
+  const active = providers.find((p) => p.active);
+  const carrier = active?.label ?? status.provider;
   // A lista vem da conta na transportadora (cache de 10 min no servidor); sem conta, nem pergunta.
   const servicos =
     status.connected && status.flag_on
       ? await api<ServicesRead>(`/admin/tenants/${tenantId}/shipping/services`).catch(() => null)
       : null;
+  const zone = context.timezone;
+
+  // O caminho, em ordem. O primeiro que falta é o "a fazer agora".
+  const passos = [
+    { id: "transportadora", label: "Escolher a transportadora", done: Boolean(active) && status.flag_on },
+    { id: "conta", label: "Conectar a conta dela", done: status.connected && status.last_test_ok !== false },
+    { id: "origem", label: "Informar de onde a mercadoria sai", done: status.has_origin },
+    {
+      id: "servicos",
+      label: "Escolher os serviços do checkout",
+      done: status.connected && (servicos?.services.some((s) => s.offered) ?? status.services.length > 0),
+    },
+    { id: "preco", label: "Ligar o envio no checkout", done: Boolean(cfg.enabled) },
+  ];
+  const atual = passos.findIndex((p) => !p.done);
+  const pronto = status.connected && status.has_origin && status.flag_on;
+  const noAr = Boolean(cfg.enabled) && pronto;
 
   return (
     <>
@@ -163,14 +207,13 @@ export default async function Shipping({
         title="Envio por transportadora"
         lead={
           <>
-            Correios (PAC e SEDEX), Jadlog e Azul Cargo pelo <strong>{carrier}</strong>, com preço
-            calculado pelo endereço de quem compra. Retirada e entrega por zona continuam na tela de{" "}
-            <strong>Entrega e checkout</strong>.
+            O cliente vê o preço e o prazo do frete pelo CEP dele, e você compra a etiqueta na tela do pedido.
+            Retirada e entrega por zona continuam em <strong>Entrega e checkout</strong>.
           </>
         }
         actions={
-          <Pill state={cfg.enabled && pronto ? "live" : status.connected ? "pending" : "off"}>
-            {cfg.enabled && pronto ? "No ar" : status.connected ? "Falta configurar" : "Desligado"}
+          <Pill state={noAr ? "live" : status.connected ? "pending" : "off"}>
+            {noAr ? "No ar" : status.connected ? "Falta configurar" : "Desligado"}
           </Pill>
         }
       />
@@ -178,138 +221,111 @@ export default async function Shipping({
 
       {readOnly ? (
         <p className={styles.note}>
-          Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a
-          configuração é da equipe da loja — aqui dá para conferir o estado.
+          Você está vendo esta loja como equipe MuhBianco. Conectar a conta e gravar a configuração é da equipe
+          da loja — aqui dá para conferir o estado.
         </p>
       ) : null}
 
-      {status.packing && status.packing.unfit.length > 0 ? (
-        <Section
-          title="Produtos que não cabem em nenhuma embalagem"
-          description="Eles vão em caixa sob medida, do tamanho do pedido: você monta a caixa na hora de despachar."
-        >
-          <ul className={styles.steps}>
-            {status.packing.unfit.map((produto) => (
-              <li key={produto.id}>
-                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
-              </li>
-            ))}
-          </ul>
-          <p className={styles.hint}>
-            Se você tem uma caixa onde eles cabem, cadastre em <Link href={embalagens}>Embalagens</Link>; ou
-            marque no produto que ele vai na embalagem dele.
+      <Section title="Passo a passo" description="Cinco passos. O que falta aparece marcado.">
+        <ol className={local.progress}>
+          {passos.map((p, i) => (
+            <Step key={p.id} done={p.done} current={i === atual} href={`#${p.id}`}>
+              {`${i + 1}. ${p.label}`}
+            </Step>
+          ))}
+        </ol>
+        {!status.flag_on ? (
+          <p className={styles.note}>
+            O envio por {carrier} está desligado em Módulos. Ligue lá para a transportadora poder cotar.
           </p>
-        </Section>
-      ) : null}
-
-      {status.packing && status.packing.orphans.length > 0 ? (
-        <Section
-          title="Produtos sem embalagem ativa"
-          description="Eles só aceitavam embalagens que foram arquivadas; enquanto isso, o sistema escolhe sozinho."
-        >
-          <ul className={styles.steps}>
-            {status.packing.orphans.map((produto) => (
-              <li key={produto.id}>
-                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
-
-      {status.oversized.length > 0 ? (
-        <Section
-          title="Produtos grandes demais para os Correios"
-          description="PAC e SEDEX levam até 1 m por lado, 2 m somados e 30 kg. Acima disso eles somem da cotação, e sobra pouca ou nenhuma opção para o cliente."
-        >
-          <ul className={styles.steps}>
-            {status.oversized.map((produto) => (
-              <li key={produto.id}>
-                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link> —{" "}
-                {produto.detail}
-              </li>
-            ))}
-          </ul>
+        ) : null}
+        <form action={setShippingEnabled} className={local.toggle}>
+          <input type="hidden" name="tenant_id" value={tenantId} />
+          <input type="hidden" name="enabled" value={cfg.enabled ? "0" : "1"} />
           <p className={styles.hint}>
-            Confira a unidade: o campo é em milímetros, então uma caixa de 30 cm se escreve 300.
+            {cfg.enabled
+              ? pronto
+                ? "O checkout oferece envio por transportadora."
+                : "O envio está ligado, mas o checkout só mostra frete quando os passos 1 a 3 estiverem feitos."
+              : "O checkout ainda não oferece envio por transportadora."}
           </p>
-        </Section>
-      ) : null}
-
-      {status.unmeasured.length > 0 ? (
-        <Section
-          title="Produtos sem peso ou medida"
-          description="A transportadora cota pelo volume. Sem as quatro medidas, o carrinho não mostra frete nenhum para estes — e o cliente não descobre por quê."
-        >
-          <ul className={styles.steps}>
-            {status.unmeasured.map((produto) => (
-              <li key={produto.id}>
-                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link>
-              </li>
-            ))}
-          </ul>
-          <p className={styles.hint}>
-            Peso com embalagem, e altura × largura × profundidade da caixa em que ele viaja.
-          </p>
-        </Section>
-      ) : null}
-
-      {status.missing.length > 0 ? (
-        <Section title="Para começar a cotar" description="Enquanto faltar isto, a loja não mostra frete no checkout.">
-          <ul className={styles.steps}>
-            {status.missing.map((item) => (
-              <li key={item}>{MISSING_LABEL[item] ?? item}</li>
-            ))}
-          </ul>
-          {!status.flag_on ? (
-            <p className={styles.hint}>
-              O módulo de envio ainda não foi liberado para esta loja. Fale com a MuhBianco.
-            </p>
-          ) : null}
-        </Section>
-      ) : null}
+          {readOnly ? null : (
+            <button type="submit" className={cfg.enabled ? styles.buttonGhost : styles.button}>
+              {cfg.enabled ? "Desligar envio no checkout" : "Ligar envio no checkout"}
+            </button>
+          )}
+        </form>
+      </Section>
 
       <Section
-        title="Conta da transportadora"
-        description="A conta é sua: o frete sai do seu saldo e a etiqueta é emitida no seu nome."
+        id="transportadora"
+        title="1. Transportadora"
+        description="A conta é sua: o frete sai do seu saldo nela e a etiqueta é emitida no seu nome."
       >
-        <KeyValues
-          items={[
-            { label: "Transportadora", value: carrier },
-            { label: "Conta", value: status.connected ? "Conectada" : "Não conectada" },
-            ...(status.last_test_detail
-              ? [
-                  {
-                    label: "Último teste",
-                    value: `${status.last_test_ok ? "Funcionando" : "Não passou"} — ${status.last_test_detail}`,
-                  },
-                ]
-              : []),
-          ]}
-        />
+        <div className={local.providers}>
+          {providers.map((p) => (
+            <div key={p.name} className={local.provider} data-active={p.active ? "1" : undefined}>
+              <strong>{p.label}</strong>
+              <span className={styles.fieldHint}>
+                {!p.flag_on ? "desligada em Módulos" : p.connected ? "conta conectada" : "conta não conectada"}
+              </span>
+              {p.active ? (
+                <Pill state="live">em uso</Pill>
+              ) : readOnly || !p.flag_on ? null : (
+                <form action={chooseProvider}>
+                  <input type="hidden" name="tenant_id" value={tenantId} />
+                  <input type="hidden" name="provider" value={p.name} />
+                  <button type="submit" className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
+                    Usar {p.label}
+                  </button>
+                </form>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className={styles.hint}>
+          Trocar de transportadora não muda pedido já feito: ele é despachado e rastreado pela que cotou. Os
+          serviços escolhidos (passo 4) começam do zero na nova.
+        </p>
+      </Section>
+
+      <Section id="conta" title={`2. Conta ${carrier}`} description={active?.token_help}>
+        {status.connected ? (
+          <p className={styles.hint}>
+            <strong>Conta conectada.</strong>{" "}
+            {status.last_test_at
+              ? `Último teste em ${when(status.last_test_at, zone)}: ${
+                  status.last_test_ok ? "funcionando" : "não passou"
+                }${status.last_test_detail ? ` (${status.last_test_detail})` : ""}.`
+              : "Ainda não testada."}
+          </p>
+        ) : (
+          <p className={styles.hint}>Cole o token da sua conta. Antes de guardar, a transportadora confere se ele vale.</p>
+        )}
         <form action={connectAccount} className={styles.fields}>
           <input type="hidden" name="tenant_id" value={tenantId} />
+          <input type="hidden" name="provider" value={status.provider} />
           <label className={`${styles.field} ${styles.fieldWide}`}>
             Token de acesso
             <input
               name="access_token"
               type="password"
               autoComplete="off"
-              placeholder={status.connected ? "•••••••• (já conectado — cole outro para trocar)" : "Cole o token gerado no painel da transportadora"}
+              placeholder={status.connected ? "•••••••• (cole outro para trocar)" : "Cole aqui o token da transportadora"}
               required
+              disabled={readOnly}
             />
             <span className={styles.fieldHint}>
-              Guardamos cifrado e nunca mostramos de volta. Ele compra etiqueta, então só o dono da
-              loja pode mexer aqui.
+              Guardamos cifrado e nunca mostramos de volta. Ele compra etiqueta, então só o dono da loja mexe aqui.
             </span>
           </label>
           <div className={`${styles.formActions} ${styles.fieldWide}`}>
-            <button type="submit" className={styles.button}>
+            <button type="submit" className={styles.button} disabled={readOnly}>
               {status.connected ? "Trocar token" : "Conectar conta"}
             </button>
           </div>
         </form>
-        {status.connected ? (
+        {status.connected && !readOnly ? (
           <form action={testAccount}>
             <input type="hidden" name="tenant_id" value={tenantId} />
             <button type="submit" className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
@@ -320,8 +336,9 @@ export default async function Shipping({
       </Section>
 
       <Section
-        title="De onde sai a mercadoria"
-        description="Endereço de coleta/postagem. É daqui que a transportadora calcula o preço e o prazo."
+        id="origem"
+        title="3. De onde sai a mercadoria"
+        description="Endereço de coleta ou postagem. É daqui que a transportadora calcula o preço e o prazo."
       >
         <form action={saveOrigin}>
           <input type="hidden" name="tenant_id" value={tenantId} />
@@ -373,52 +390,42 @@ export default async function Shipping({
             </label>
           </div>
           <div className={styles.formActions}>
-            <button type="submit" className={styles.button}>
+            <button type="submit" className={styles.button} disabled={readOnly}>
               Salvar endereço
             </button>
           </div>
         </form>
-      </Section>
-
-      <Section
-        title="Nota fiscal e declaração de conteúdo"
-        description="Como as suas etiquetas saem, pelo documento de quem envia."
-      >
+        <h3>Nota fiscal e declaração de conteúdo</h3>
         {documento.length === 11 ? (
           <p className={styles.hint}>
-            Você envia como <strong>pessoa física (CPF)</strong>. Cada etiqueta sai com a declaração de
-            conteúdo eletrônica (DC-e), que o Melhor Envio emite com os produtos do pedido — você não
-            precisa de nota fiscal nem de certificado digital.
+            Você envia como <strong>pessoa física (CPF)</strong>
+            {status.provider === "melhorenvio"
+              ? ". Cada etiqueta sai com a declaração de conteúdo eletrônica (DC-e), que o Melhor Envio emite com os produtos do pedido — você não precisa de nota fiscal nem de certificado digital."
+              : ", com declaração de conteúdo. Confira na sua conta da transportadora como ela emite a declaração."}
           </p>
         ) : documento.length === 14 ? (
           <p className={styles.hint}>
-            Você envia como <strong>empresa (CNPJ), sem nota fiscal</strong>, com a declaração de conteúdo
-            eletrônica (DC-e) que o Melhor Envio emite. Isso vale para MEI que vende para pessoa física e
-            para empresa que não é contribuinte de ICMS. Envio com nota fiscal ainda não é suportado.
+            Você envia como <strong>empresa (CNPJ), sem nota fiscal</strong>, com declaração de conteúdo. Isso vale
+            para MEI que vende para pessoa física e para empresa que não é contribuinte de ICMS. Envio com nota
+            fiscal ainda não é suportado.
           </p>
         ) : (
-          <p className={styles.note}>
-            Informe o CPF ou o CNPJ de quem envia, no endereço de origem acima: sem ele a etiqueta não sai.
-          </p>
+          <p className={styles.note}>Informe o CPF ou o CNPJ de quem envia, acima: sem ele a etiqueta não sai.</p>
         )}
-        <p className={styles.hint}>
-          A declaração (DACE) sai na mesma página da etiqueta: imprima as duas e mande a DACE junto com o
-          pacote.
-        </p>
-        {origemPR ? (
+        {origemPR && status.provider === "melhorenvio" ? (
           <p className={styles.note}>
-            Saindo do Paraná, a Jadlog só aceita envio com nota fiscal: ela não aparece para os seus
-            clientes.
+            Saindo do Paraná, a Jadlog só aceita envio com nota fiscal: ela não aparece para os seus clientes.
           </p>
         ) : null}
         <p className={styles.hint}>
-          A própria declaração traz impresso que é contribuinte de ICMS quem vende com frequência ou em
-          volume de comércio. Se você ainda não tem MEI, confirme com um contador como enviar.
+          A declaração traz impresso que é contribuinte de ICMS quem vende com frequência ou em volume de comércio.
+          Se você ainda não tem MEI, confirme com um contador como enviar.
         </p>
       </Section>
 
       <Section
-        title="Serviços oferecidos"
+        id="servicos"
+        title="4. Serviços oferecidos"
         description="Os marcados aparecem para o cliente no checkout, cada um com o preço e o prazo dele."
       >
         {!status.connected ? (
@@ -430,7 +437,12 @@ export default async function Shipping({
             </p>
             {status.services.length ? (
               <p className={styles.hint}>
-                Hoje a loja oferece: {status.services.filter((s) => s.active).map((s) => s.name).join(", ") || "nenhum"}.
+                Hoje a loja oferece:{" "}
+                {status.services
+                  .filter((s) => s.active)
+                  .map((s) => s.name)
+                  .join(", ") || "nenhum"}
+                .
               </p>
             ) : null}
           </>
@@ -459,9 +471,7 @@ export default async function Shipping({
                     ) : !s.available ? (
                       <Pill state="off">indisponível na sua conta</Pill>
                     ) : null}
-                    <span className={`${styles.fieldHint} ${local.facts}`}>
-                      {s.blocked_reason ?? serviceFacts(s)}
-                    </span>
+                    <span className={`${styles.fieldHint} ${local.facts}`}>{s.blocked_reason ?? serviceFacts(s)}</span>
                   </span>
                 </label>
               ))}
@@ -475,22 +485,9 @@ export default async function Shipping({
         )}
       </Section>
 
-      <Section
-        title="Preço do frete"
-        description="O acréscimo cobre embalagem e trabalho."
-      >
+      <Section id="preco" title="5. Preço do frete" description="O acréscimo cobre embalagem e trabalho.">
         <form action={saveRules}>
           <input type="hidden" name="tenant_id" value={tenantId} />
-          <label className={styles.check}>
-            <input type="checkbox" name="enabled" defaultChecked={cfg.enabled ?? false} />
-            <span>
-              Oferecer envio por transportadora no checkout
-              <span className={styles.fieldHint}>
-                Desligar aqui não mexe em pedido nenhum: a loja volta a oferecer só retirada e
-                entrega por zona.
-              </span>
-            </span>
-          </label>
           <div className={styles.fields}>
             <label className={styles.field}>
               Acréscimo sobre o frete (%)
@@ -502,7 +499,12 @@ export default async function Shipping({
             </label>
             <label className={styles.field}>
               Frete grátis acima de (R$)
-              <input name="free_above" inputMode="decimal" defaultValue={reais(cfg.free_above_cents)} placeholder="deixe vazio para não ter" />
+              <input
+                name="free_above"
+                inputMode="decimal"
+                defaultValue={reais(cfg.free_above_cents)}
+                placeholder="deixe vazio para não ter"
+              />
               <span className={styles.fieldHint}>O cliente não paga; a etiqueta continua saindo do seu saldo.</span>
             </label>
             <label className={styles.field}>
@@ -512,31 +514,99 @@ export default async function Shipping({
             </label>
           </div>
           <div className={styles.formActions}>
-            <button type="submit" className={styles.button}>
-              Salvar
+            <button type="submit" className={styles.button} disabled={readOnly}>
+              Salvar preço
             </button>
           </div>
         </form>
+        <p className={styles.hint}>Ligar ou desligar o envio no checkout fica no topo, no passo a passo.</p>
       </Section>
+
+      {status.packing && status.packing.unfit.length > 0 ? (
+        <Section
+          title="Produtos que não cabem em nenhuma embalagem"
+          description="Eles vão em caixa sob medida, do tamanho do pedido: você monta a caixa na hora de despachar."
+        >
+          <ul className={styles.steps}>
+            {status.packing.unfit.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Se você tem uma caixa onde eles cabem, cadastre em <Link href={embalagens}>Embalagens</Link>; ou marque no
+            produto que ele vai na embalagem dele.
+          </p>
+        </Section>
+      ) : null}
+
+      {status.packing && status.packing.orphans.length > 0 ? (
+        <Section
+          title="Produtos sem embalagem ativa"
+          description="Eles só aceitavam embalagens que foram arquivadas; enquanto isso, o sistema escolhe sozinho."
+        >
+          <ul className={styles.steps}>
+            {status.packing.orphans.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/t/${context.tenant_id}/produtos/${produto.id}#envio`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : null}
+
+      {status.oversized.length > 0 ? (
+        <Section
+          title="Produtos grandes demais para os Correios"
+          description="PAC e SEDEX levam até 1 m por lado, 2 m somados e 30 kg. Acima disso eles somem da cotação, e sobra pouca ou nenhuma opção para o cliente."
+        >
+          <ul className={styles.steps}>
+            {status.oversized.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link> — {produto.detail}
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>
+            Confira a unidade: o campo é em milímetros, então uma caixa de 30 cm se escreve 300.
+          </p>
+        </Section>
+      ) : null}
+
+      {status.unmeasured.length > 0 ? (
+        <Section
+          title="Produtos sem peso ou medida"
+          description="A transportadora cota pelo volume. Sem as quatro medidas, o carrinho não mostra frete nenhum para estes — e o cliente não descobre por quê."
+        >
+          <ul className={styles.steps}>
+            {status.unmeasured.map((produto) => (
+              <li key={produto.id}>
+                <Link href={`/painel/t/${tenantId}/produtos/${produto.id}`}>{produto.name}</Link>
+              </li>
+            ))}
+          </ul>
+          <p className={styles.hint}>Peso com embalagem, e altura × largura × profundidade da caixa em que ele viaja.</p>
+        </Section>
+      ) : null}
 
       <Section title="Embalagens" description="Opcional.">
         <p className={styles.hint}>
-          Sem embalagem cadastrada, cada pedido sai numa <strong>caixa sob medida</strong>: o sistema
-          calcula a menor caixa que leva o que foi vendido, e você monta a caixa nessas medidas. Se
-          você usa caixas de tamanho fixo, cadastre em <Link href={embalagens}>Embalagens</Link> — lá
-          também dá para testar como um pedido seria montado.
+          Sem embalagem cadastrada, cada pedido sai numa <strong>caixa sob medida</strong>: o sistema calcula a menor
+          caixa que leva o que foi vendido, e você monta a caixa nessas medidas. Se você usa caixas de tamanho fixo,
+          cadastre em <Link href={embalagens}>Embalagens</Link> — lá também dá para testar como um pedido seria montado.
         </p>
       </Section>
 
       <Section title="Como o pedido anda" description="O que acontece depois que alguém compra.">
         <ol className={styles.steps}>
           <li>
-            <strong>O cliente escolhe o frete</strong> no checkout, pelo CEP dele. O preço que ele viu
-            é o que entra no pedido.
+            <strong>O cliente escolhe o frete</strong> no checkout, pelo CEP dele. O preço que ele viu é o que entra
+            no pedido.
           </li>
           <li>
-            <strong>Você despacha</strong> na tela do pedido: a etiqueta é comprada e o código de
-            rastreio aparece ali. Produto sem peso e medida não deixa cotar — a tela diz quais faltam.
+            <strong>Você despacha</strong> na tela do pedido: a etiqueta é comprada e o código de rastreio aparece
+            ali. Produto sem peso e medida não deixa cotar — a tela diz quais faltam.
           </li>
           <li>
             <strong>O pedido se fecha sozinho</strong> quando a transportadora confirma a entrega.

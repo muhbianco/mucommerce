@@ -11,10 +11,6 @@ import { FormError, money, run, tenantBase, text } from "../form-kit";
  * do lojista, e a tela de entrega não pode apagar o envio.
  */
 
-function checked(form: FormData, name: string): boolean {
-  return form.get(name) === "on";
-}
-
 function int(form: FormData, name: string, fallback: number): number {
   const raw = text(form, name);
   if (!raw) return fallback;
@@ -74,7 +70,6 @@ export async function saveOrigin(form: FormData): Promise<void> {
 export async function saveRules(form: FormData): Promise<void> {
   await saveMerged(form, "envio_regras", (shipping) => ({
     ...shipping,
-    enabled: checked(form, "enabled"),
     markup_percent: int(form, "markup_percent", 0),
     markup_cents: money(form, "markup") ?? 0,
     free_above_cents: money(form, "free_above"),
@@ -98,13 +93,41 @@ export async function saveServices(form: FormData): Promise<void> {
   });
 }
 
-/** Conecta a conta da loja na transportadora (só o dono; o token compra etiqueta). */
+/** Liga ou desliga o envio no checkout (o topo da tela, separado do preço). */
+export async function setShippingEnabled(form: FormData): Promise<void> {
+  const enabled = text(form, "enabled") === "1";
+  await saveMerged(form, enabled ? "envio_ligado" : "envio_desligado", (shipping) => ({
+    ...shipping,
+    enabled,
+  }));
+}
+
+const PROVIDER = /^[a-z_]{1,24}$/;
+
+/** Escolhe a transportadora. Pedido já feito segue com a que cotou. */
+export async function chooseProvider(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const provider = text(form, "provider");
+  if (!PROVIDER.test(provider)) throw new FormError("id_invalido");
+  await run(`${page}/envio`, "envio_transportadora", async () => {
+    await api(`${path}/shipping/provider`, { method: "PUT", json: { provider } });
+  });
+}
+
+/**
+ * Conecta a conta da loja na transportadora (só o dono; o token compra etiqueta). A API confere
+ * o token antes de guardar: recusado volta como erro, sem virar "conectada".
+ */
 export async function connectAccount(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   await run(`${page}/envio`, "envio_conectado", async () => {
     const token = text(form, "access_token");
     if (token.length < 10) throw new FormError("token_invalido");
-    await api(`${path}/shipping/credentials`, { method: "PUT", json: { access_token: token } });
+    const provider = text(form, "provider");
+    await api(`${path}/shipping/credentials`, {
+      method: "PUT",
+      json: { access_token: token, ...(PROVIDER.test(provider) ? { provider } : {}) },
+    });
   });
 }
 

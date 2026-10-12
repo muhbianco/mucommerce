@@ -46,3 +46,5 @@ apps/web/e2e/playwright-report/
 probe-melhorenvio*.json
 # Remetente e destinatário de teste do carrinho do sandbox: dados pessoais, nunca no git
 melhorenvio-partes*.json
+probe-frenet*.json
+frenet-partes*.json

@@ -27,8 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import TtlCache
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.integrations.credentials import CredentialStore
 from app.shipping import registry, signing
+from app.shipping.credentials import load_credentials
 from app.shipping.inputs import LineIn, load_packing_inputs
 from app.shipping.packing.candidates import plan_candidates
 from app.shipping.packing.model import ParcelPlan
@@ -236,10 +236,19 @@ class ShippingQuoteService:
         return await self._quote_many(provider, credenciais, cfg, destino, plans), None
 
     async def quote_volumes(
-        self, volumes: tuple[Parcel, ...], *, destination_postal_code: str
+        self,
+        volumes: tuple[Parcel, ...],
+        *,
+        destination_postal_code: str,
+        provider_name: str | None = None,
     ) -> tuple[tuple[ShippingOption, ...] | None, QuoteProblem | None]:
-        """Cota volumes prontos (a prévia do custo da etiqueta no pedido)."""
+        """Cota volumes prontos (a prévia do custo da etiqueta no pedido).
+
+        `provider_name`: o provedor congelado no pedido. Se a loja trocou de transportadora
+        depois, a prévia ainda pergunta a quem cotou — e sem o filtro de serviços da nova."""
         cfg = fulfillment_settings(self.tenant.settings).shipping
+        if provider_name and provider_name != cfg.provider:
+            cfg = cfg.model_copy(update={"provider": provider_name, "services": []})
         destino = _digits(destination_postal_code)
         if not cfg.enabled or cfg.origin is None or len(destino) != 8:
             return None, "shipping_disabled"
@@ -276,15 +285,7 @@ class ShippingQuoteService:
     # ------------------------------------------------------------------ interno
 
     async def _credentials(self, cfg: ShippingSettings) -> ShippingCredentials | None:
-        store = CredentialStore(self.session, self.tenant.id)
-        token = await store.get(cfg.provider, "access_token")
-        if not token:
-            return None
-        return ShippingCredentials(
-            secrets={"access_token": token},
-            public_config={},
-            sandbox=settings.environment != "production",
-        )
+        return await load_credentials(self.session, self.tenant.id, cfg.provider)
 
     async def _ask(
         self,

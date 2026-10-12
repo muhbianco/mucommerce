@@ -58,7 +58,11 @@ const OK: Record<string, string> = {
   envio_regras: "Configuração de envio salva.",
   envio_servicos: "Serviços salvos: o checkout passa a mostrar só os marcados.",
   envio_conectado: "Conta da transportadora conectada.",
-  envio_testado: "Teste feito: veja o resultado acima.",
+  envio_testado: "Teste feito: o resultado está no passo 2.",
+  envio_transportadora: "Transportadora escolhida. Conecte a conta dela no passo 2.",
+  cliente_liberado: "Cliente liberado: ele vê a vitrine e o robô de vendas passa a atendê-lo.",
+  envio_ligado: "Envio por transportadora ligado no checkout.",
+  envio_desligado: "Envio por transportadora desligado. Pedidos já feitos não mudam.",
   modulo_ligado: "Módulo ligado.",
   modulo_desligado: "Módulo desligado. Nada foi apagado.",
   vitrine: "Quem vê a vitrine foi atualizado.",
@@ -161,6 +165,8 @@ const ERRORS: Record<string, string> = {
     "A promoção por estoque precisa que o produto controle estoque. Mude o controle ou desmarque a opção.",
   "validation_error.not_connected": "Conecte a conta da transportadora antes de escolher os serviços.",
   "validation_error.provider_unavailable": "A transportadora ainda não foi liberada para esta loja.",
+  "validation_error.token_refused":
+    "A transportadora recusou este token. Confira se copiou inteiro e se ele tem as permissões pedidas.",
   "validation_error.unknown_service": "Um dos serviços não está mais na sua conta. Recarregue a página e escolha de novo.",
   "validation_error.service_unavailable": "Um dos serviços está indisponível na sua conta agora.",
   servico_obrigatorio:

@@ -46,7 +46,7 @@ test("criar produto; publicar sem imagem é recusado; vitrine não mostra", asyn
   await expect(page.locator('input[name="name"]').first()).toHaveValue("Torta E2E");
 
   await page.getByRole("button", { name: "Publicar" }).click();
-  await expect(page.getByText(/produto sem imagem/)).toBeVisible();
+  await expect(page.getByText(/Adicione ao menos uma foto pronta/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Publicar" })).toBeVisible();
 
   const shop = await page.goto(`${STORE}/loja/produto/torta-e2e`);
@@ -260,6 +260,8 @@ test("no celular, nenhuma tela do painel rola de lado", async ({ page }) => {
     "/vitrine/propostas",
     "/produtos",
     "/pedidos",
+    "/envio",
+    "/modulos",
   ]) {
     await page.goto(`${tenant}${rota}`);
     const { scroll, client } = await page.evaluate(() => ({

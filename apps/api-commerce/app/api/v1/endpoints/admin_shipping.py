@@ -16,8 +16,10 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
+from app.audit.writer import audit
 from app.catalog.models import Product, ProductKind, ProductStatus, travels_sql
 from app.core.cache import TtlCache
+from app.core.config import settings
 from app.core.exceptions import NotFoundError, ShippingUnavailableError, ValidationError
 from app.core.logging import get_logger
 from app.core.rate_limit import rate_limit
@@ -27,12 +29,18 @@ from app.integrations.credentials import CredentialStore
 from app.models.base import utcnow
 from app.orders.models import Order
 from app.shipping import registry
+from app.shipping.credentials import STORE_SECRET, is_connected, load_credentials
 from app.shipping.dispatch import ShipmentService
 from app.shipping.inputs import active_packages, package_spec, packing_rules
 from app.shipping.models import OrderShipment, ProductPackageRule, ShipmentEvent, ShippingPackage
 from app.shipping.packing.model import Dims, ItemClass, PackingMode, Rotation
 from app.shipping.packing.placement import unit_capacity
-from app.shipping.provider import ServiceInfo, ShippingCredentials, ShippingProviderError
+from app.shipping.provider import (
+    CredentialTest,
+    ServiceInfo,
+    ShippingCredentials,
+    ShippingProviderError,
+)
 from app.shipping.service import invoice_only
 from app.tenancy.context import TenantContext
 from app.tenancy.service import TenantService
@@ -73,6 +81,40 @@ class PackingStatus(BaseModel):
     orphans: list[UnmeasuredProduct] = []
 
 
+class ProviderRead(BaseModel):
+    """Uma transportadora que a loja pode escolher, com o estado da conta dela nessa."""
+
+    name: str
+    label: str
+    #: Onde a loja gera o token, na língua do lojista.
+    token_help: str
+    #: A loja pode usar (módulo ligado e o ambiente permite).
+    flag_on: bool
+    connected: bool
+    active: bool
+
+
+#: O que a tela diz de cada transportadora. Sem endereço de painel: muda sem aviso, e um link
+#: quebrado ensina errado; o caminho no painel deles a lojista acha pelo nome.
+PROVIDER_INFO: dict[str, tuple[str, str]] = {
+    "melhorenvio": (
+        "Melhor Envio",
+        "No painel do Melhor Envio, gere um token de acesso com permissão para cotar, comprar e "
+        "imprimir etiquetas, ver o saldo e rastrear envios. Copie e cole aqui.",
+    ),
+    "frenet": (
+        "Frenet",
+        "No painel da Frenet, copie o token de acesso da sua conta (o mesmo que lojas virtuais "
+        "usam para cotar frete) e cole aqui.",
+    ),
+    "fake": ("Transportadora de teste", "Qualquer texto serve: só existe em teste."),
+}
+
+
+class ProviderIn(BaseModel):
+    provider: Annotated[str, Field(min_length=1, max_length=24, pattern=r"^[a-z_]+$")]
+
+
 class ShippingStatusRead(BaseModel):
     provider: str
     flag_on: bool
@@ -88,7 +130,11 @@ class ShippingStatusRead(BaseModel):
     oversized: list[OversizedProduct] = []
     last_test_ok: bool | None = None
     last_test_detail: str | None = None
+    #: Quando foi o último teste (o que a tela mostra junto de `last_test_*`).
+    last_test_at: str | None = None
     packing: PackingStatus | None = None
+    #: As transportadoras que a loja pode escolher (a ativa entre elas).
+    providers: list[ProviderRead] = []
 
 
 class ServiceOptionRead(BaseModel):
@@ -127,6 +173,8 @@ class ServicesIn(BaseModel):
 
 class CredentialIn(BaseModel):
     access_token: Annotated[str, Field(min_length=10, max_length=2000)]
+    #: De qual transportadora é o token. Omitido = a ativa.
+    provider: Annotated[str, Field(min_length=1, max_length=24, pattern=r"^[a-z_]+$")] | None = None
 
 
 class ShipmentEventRead(BaseModel):
@@ -296,6 +344,35 @@ async def _oversized(session: AsyncSession, tenant_id: str) -> list[OversizedPro
     return achados
 
 
+async def _providers(
+    session: AsyncSession, tenant: TenantContext, active: str
+) -> list[ProviderRead]:
+    lista: list[ProviderRead] = []
+    for nome in registry.allowed():
+        if nome == "fake" and active != "fake":
+            continue  # a de teste só aparece onde ela é a escolhida (E2E)
+        label, ajuda = PROVIDER_INFO.get(nome, (nome, ""))
+        lista.append(
+            ProviderRead(
+                name=nome,
+                label=label,
+                token_help=ajuda,
+                flag_on=registry.flag_on(tenant, nome),
+                connected=await is_connected(session, tenant.id, nome),
+                active=nome == active,
+            )
+        )
+    return lista
+
+
+def _with_check(estado: ShippingStatusRead, cfg: ShippingSettings) -> ShippingStatusRead:
+    check = cfg.account_check
+    if check is not None and check.provider == cfg.provider:
+        estado.last_test_ok, estado.last_test_detail = check.ok, check.detail
+        estado.last_test_at = check.at
+    return estado
+
+
 def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
     cfg = fulfillment_settings(tenant.settings).shipping
     provider = registry.get_provider(cfg.provider)
@@ -321,8 +398,10 @@ def _status(tenant: TenantContext, *, connected: bool) -> ShippingStatusRead:
 @router.get("", response_model=ShippingStatusRead, summary="Como está o envio da loja")
 async def read_status(session: DbSession, user: CurrentAdmin, tenant: ShippingReader) -> Any:
     cfg = fulfillment_settings(tenant.settings).shipping
-    token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
-    status = _status(tenant, connected=bool(token))
+    status = _with_check(
+        _status(tenant, connected=await is_connected(session, tenant.id, cfg.provider)), cfg
+    )
+    status.providers = await _providers(session, tenant, cfg.provider)
     status.unmeasured = await _unmeasured(session, tenant.id)
     status.oversized = await _oversized(session, tenant.id)
     status.packing = await _packing_status(session, tenant)
@@ -418,10 +497,67 @@ async def _packing_status(session: AsyncSession, tenant: TenantContext) -> Packi
     )
 
 
+async def _fresh_shipping(service: TenantService, tenant_id: str) -> dict[str, Any]:
+    """`fulfillment` lido do banco (o contexto vem de cache de 60 s)."""
+    return dict((await service.repo.settings(tenant_id)).get("fulfillment") or {})
+
+
+async def _save_shipping(
+    request: Request,
+    session: AsyncSession,
+    user: Any,
+    tenant: TenantContext,
+    changes: dict[str, Any],
+) -> None:
+    service = TenantService(session)
+    row = await service.get_or_404(tenant.id)
+    valor = await _fresh_shipping(service, tenant.id)
+    valor["shipping"] = {**dict(valor.get("shipping") or {}), **changes}
+    await service.set_setting(row, "fulfillment", valor, admin_actor(request, user))
+
+
+def _usable(tenant: TenantContext, nome: str) -> None:
+    if registry.get_provider(nome) is None or not registry.flag_on(tenant, nome):
+        raise ValidationError(
+            "Esta transportadora não está liberada para a loja.", reason="provider_unavailable"
+        )
+
+
+@router.put(
+    "/provider",
+    response_model=ShippingStatusRead,
+    summary="Escolhe a transportadora da loja (só o dono)",
+)
+async def choose_provider(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: ShippingOwner,
+    body: ProviderIn,
+) -> Any:
+    """Trocar de transportadora limpa a escolha de serviços: os códigos de uma não existem na
+    outra. Pedido já feito continua com a transportadora que cotou (despacho e rastreio usam a
+    do pedido)."""
+    _usable(tenant, body.provider)
+    cfg = fulfillment_settings(tenant.settings).shipping
+    if body.provider != cfg.provider:
+        await _save_shipping(
+            request, session, user, tenant, {"provider": body.provider, "services": []}
+        )
+    estado = _status(tenant, connected=await is_connected(session, tenant.id, body.provider))
+    if body.provider != cfg.provider:
+        # O contexto desta requisição ainda é o de antes da troca.
+        estado.provider, estado.services = body.provider, []
+        estado.flag_on = registry.flag_on(tenant, body.provider)
+    estado.providers = await _providers(session, tenant, body.provider)
+    return estado
+
+
 @router.put(
     "/credentials",
     response_model=ShippingStatusRead,
     summary="Conecta a conta da loja na transportadora (só o dono)",
+    dependencies=[Depends(rate_limit("shipping_test", 5, 60))],
 )
 async def save_credentials(
     request: Request,
@@ -430,39 +566,84 @@ async def save_credentials(
     tenant: ShippingOwner,
     body: CredentialIn,
 ) -> Any:
+    """Confere o token com a transportadora **antes** de guardar: token recusado não vira
+    "Conectada" na tela. Se a transportadora não respondeu, guarda e diz que não deu para
+    conferir — não é culpa do token."""
     cfg = fulfillment_settings(tenant.settings).shipping
-    await CredentialStore(session, tenant.id).put(
-        cfg.provider, "access_token", body.access_token.strip()
+    nome = body.provider or cfg.provider
+    _usable(tenant, nome)
+    provider = registry.get_provider(nome)
+    assert provider is not None
+    token = body.access_token.strip()
+    resultado = await provider.test_credentials(
+        ShippingCredentials(
+            secrets={STORE_SECRET: token},
+            public_config={},
+            sandbox=settings.environment != "production",
+        )
     )
-    return _status(tenant, connected=True)
+    if not resultado.ok and resultado.refused:
+        raise ValidationError(
+            "A transportadora recusou este token. Confira se copiou inteiro e se ele tem as "
+            "permissões pedidas.",
+            reason="token_refused",
+        )
+    masked = await CredentialStore(session, tenant.id).put(nome, STORE_SECRET, token)
+    check = _check(nome, resultado)
+    await _save_shipping(request, session, user, tenant, {"account_check": check})
+    await audit(
+        session,
+        actor=admin_actor(request, user).id,
+        action="shipping.credentials_saved",
+        entity_type="tenant",
+        entity_id=tenant.id,
+        tenant_id=tenant.id,
+        after={"provider": nome, "masked": masked, "checked": resultado.ok},
+    )
+    estado = _status(tenant, connected=True)
+    estado.last_test_ok, estado.last_test_detail = resultado.ok, check["detail"]
+    estado.last_test_at = check["at"]
+    estado.providers = await _providers(session, tenant, cfg.provider)
+    return estado
+
+
+def _check(nome: str, resultado: CredentialTest) -> dict[str, Any]:
+    detalhe = (
+        resultado.detail
+        if resultado.ok
+        else ("token recusado" if resultado.refused else "a transportadora não respondeu agora")
+    )
+    return {
+        "provider": nome,
+        "ok": resultado.ok,
+        "detail": detalhe[:200],
+        "at": utcnow().isoformat(),
+    }
 
 
 @router.post(
     "/test",
     response_model=ShippingStatusRead,
-    summary="Pergunta à transportadora se a credencial vale",
+    summary="Pergunta à transportadora se a credencial vale (e guarda o resultado)",
     dependencies=[Depends(rate_limit("shipping_test", 5, 60))],
 )
-async def test_credentials(session: DbSession, user: CurrentAdmin, tenant: ShippingOwner) -> Any:
-    from app.core.config import settings
-
+async def test_credentials(
+    request: Request, session: DbSession, user: CurrentAdmin, tenant: ShippingOwner
+) -> Any:
     cfg = fulfillment_settings(tenant.settings).shipping
     provider = registry.get_provider(cfg.provider)
-    token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
-    estado = _status(tenant, connected=bool(token))
-    if provider is None or not token:
+    credenciais = await load_credentials(session, tenant.id, cfg.provider)
+    estado = _status(tenant, connected=credenciais is not None)
+    estado.providers = await _providers(session, tenant, cfg.provider)
+    if provider is None or credenciais is None:
         estado.last_test_ok = False
         estado.last_test_detail = "sem credencial"
         return estado
-    resultado = await provider.test_credentials(
-        ShippingCredentials(
-            secrets={"access_token": token},
-            public_config={},
-            sandbox=settings.environment != "production",
-        )
-    )
-    estado.last_test_ok = resultado.ok
-    estado.last_test_detail = resultado.detail
+    resultado = await provider.test_credentials(credenciais)
+    check = _check(cfg.provider, resultado)
+    await _save_shipping(request, session, user, tenant, {"account_check": check})
+    estado.last_test_ok, estado.last_test_detail = resultado.ok, check["detail"]
+    estado.last_test_at = check["at"]
     return estado
 
 
@@ -475,24 +656,19 @@ async def _service_catalog(
     session: AsyncSession, tenant: TenantContext
 ) -> tuple[tuple[ServiceInfo, ...] | None, str | None]:
     """Os serviços da conta da loja: `(lista, None)` ou `(None, motivo)`."""
-    from app.core.config import settings
-
     cfg = fulfillment_settings(tenant.settings).shipping
     provider = registry.get_provider(cfg.provider)
     if provider is None or not registry.flag_on(tenant, cfg.provider):
         return None, "provider_unavailable"
-    token = await CredentialStore(session, tenant.id).get(cfg.provider, "access_token")
-    if not token:
+    credenciais = await load_credentials(session, tenant.id, cfg.provider)
+    if credenciais is None:
         return None, "not_connected"
-    sandbox = settings.environment != "production"
-    chave = f"{tenant.id}:{cfg.provider}:{int(sandbox)}"
+    chave = f"{tenant.id}:{cfg.provider}:{int(credenciais.sandbox)}"
     guardado = await _services_cache.get(chave)
     if isinstance(guardado, list):
         return tuple(ServiceInfo(**item) for item in guardado), None
     try:
-        lista = await provider.list_services(
-            ShippingCredentials(secrets={"access_token": token}, public_config={}, sandbox=sandbox)
-        )
+        lista = await provider.list_services(credenciais)
     except ShippingProviderError as exc:
         logger.warning(
             "Lista de serviços indisponível",

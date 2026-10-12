@@ -34,6 +34,7 @@ from app.orders.models import Order, OrderItem
 from app.orders.service import OrderService
 from app.orders.state_machine import OrderStatus
 from app.shipping import registry
+from app.shipping.credentials import load_credentials
 from app.shipping.declaration import (
     OrderLine,
     line_name,
@@ -136,10 +137,12 @@ class ShipmentService:
         self._recipient_document(order, recipient_document)
         remessa = await self._row(order, cfg)
 
-        provider = registry.get_provider(cfg.provider)
+        # O provedor congelado no pedido (quem cotou), não o atual da loja: quem troca de
+        # transportadora com pedidos na fila não pode despachá-los pela outra.
+        provider = registry.get_provider(remessa.provider)
         if provider is None:
             raise ShippingUnavailableError
-        credenciais = await self._credentials(cfg)
+        credenciais = await self._credentials(remessa.provider)
         pedido = await self._request(order, remessa, cfg)
         congelado = (order.fulfillment or {}).get("parcel_plan") or {}
         if congelado.get("label_mode") == "per_volume":
@@ -169,7 +172,7 @@ class ShipmentService:
             "Pedido despachado",
             extra={
                 "order_id": order.id,
-                "provider": cfg.provider,
+                "provider": remessa.provider,
                 "service": remessa.service_code,
                 "cost_cents": resultado.cost_cents,
             },
@@ -207,7 +210,11 @@ class ShipmentService:
         sem_documento = not (escolhido.get("address") or {}).get("document")
         opcoes, problema = await ShippingQuoteService(
             self.session, self.tenant, self.now
-        ).quote_volumes(volumes, destination_postal_code=destino)
+        ).quote_volumes(
+            volumes,
+            destination_postal_code=destino,
+            provider_name=str(escolhido.get("provider") or "") or None,
+        )
         servico = str(escolhido.get("service_code") or "")
         achada = next((o for o in opcoes or () if o.service_code == servico and o.usable), None)
         if achada is None:
@@ -388,20 +395,11 @@ class ShipmentService:
             raise ShipmentInProgressError from exc
         return remessa
 
-    async def _credentials(self, cfg: ShippingSettings) -> ShippingCredentials:
-        from app.core.config import settings
-        from app.integrations.credentials import CredentialStore
-
-        token = await CredentialStore(self.session, self.tenant.id).get(
-            cfg.provider, "access_token"
-        )
-        if not token:
+    async def _credentials(self, provider_name: str) -> ShippingCredentials:
+        credenciais = await load_credentials(self.session, self.tenant.id, provider_name)
+        if credenciais is None:
             raise ValidationError("Conecte a conta da transportadora antes de despachar.")
-        return ShippingCredentials(
-            secrets={"access_token": token},
-            public_config={},
-            sandbox=settings.environment != "production",
-        )
+        return credenciais
 
     async def _request(
         self, order: Order, remessa: OrderShipment, cfg: ShippingSettings
