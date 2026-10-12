@@ -193,7 +193,7 @@ class CatalogService:
             _check_sellout(
                 promo_cents=data.promo_price_cents,
                 kind=str(data.kind),
-                tracked=data.stock_policy == StockPolicy.TRACKED,
+                tracked=str(data.stock_policy) == StockPolicy.TRACKED.value,
             )
         if data.packing_mode == "restricted":
             # Regras só chegam no PATCH: criar já restrito deixaria o produto sem embalagem.
