@@ -9,6 +9,11 @@
  */
 export const CUSTOMER_SESSION_COOKIE = "__Host-mb_sess";
 export const CUSTOMER_BINDING_COOKIE = "__Host-mb_oidc";
+/**
+ * `__Host-mb_pass`: o passe de quem acertou a senha da loja fechada, 30 dias. Assinado pela API,
+ * preso à loja e à versão da senha: trocar a senha invalida todos.
+ */
+export const STORE_PASS_COOKIE = "__Host-mb_pass";
 export const BINDING_MAX_AGE = 600;
 /** Pending "CONFIRMAR <código>" wa.me link, 10 minutes (the challenge's lifetime). */
 export const WHATSAPP_LINK_COOKIE = "__Host-mb_wa";

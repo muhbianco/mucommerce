@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { lookupPanelHost, lookupStorefrontContext, type PanelHost } from "@/lib/context-cache";
-import { CUSTOMER_SESSION_COOKIE as SESSION_COOKIE } from "@/lib/customer-cookies";
+import { CUSTOMER_SESSION_COOKIE as SESSION_COOKIE, STORE_PASS_COOKIE } from "@/lib/customer-cookies";
 import { callRefresh, refreshOnce } from "@/lib/panel/refresh";
 import {
   ACCESS_COOKIE,
@@ -17,7 +17,7 @@ import {
   classifyHost,
   isPanelPath,
   panelRewritePath,
-  requiresSession,
+  needsEntry,
   resolveRequestHost,
   tenantPanelGate,
 } from "@/lib/tenant";
@@ -163,7 +163,8 @@ export async function middleware(request: NextRequest) {
   headers.set("x-tenant-host", host ?? "");
   headers.set("x-tenant-context", Buffer.from(JSON.stringify(context), "utf-8").toString("base64"));
 
-  if (requiresSession(pathname, context.access_mode) && !request.cookies.get(SESSION_COOKIE)) {
+  const entered = request.cookies.get(SESSION_COOKIE) || request.cookies.get(STORE_PASS_COOKIE);
+  if (needsEntry(pathname, context) && !entered) {
     const login = new URL("/entrar", request.url);
     login.searchParams.set("next", pathname);
     return NextResponse.redirect(login);

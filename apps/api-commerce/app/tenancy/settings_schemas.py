@@ -32,6 +32,13 @@ class StorefrontV1(_Setting):
     # `whitelist` is the safe default: nothing is shown until access is granted.
     access_mode: AccessMode = "whitelist"
     currency: Literal["BRL"] = "BRL"
+    #: Loja fechada "toda fechada": nem a página inicial aparece antes de entrar. Falso é a
+    #: "fechada com a home aberta" (docs/14-pedidos-lunares.md §3). Sem efeito na loja aberta.
+    landing_locked: bool = False
+    #: A loja tem senha (cifrada no cofre, provedor `storefront`; nunca aqui). Só a versão fica
+    #: aqui: trocar ou tirar a senha sobe o número, e todo passe antigo para de valer.
+    password_set: bool = False
+    password_version: Annotated[int, Field(ge=0, le=1_000_000)] = 0
 
 
 class BrandingV1(_Setting):

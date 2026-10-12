@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.api.deps import CheckoutShopper, DbSession, customer_rate_key, require_same_origin
 from app.audit.idempotency import IDEMPOTENCY_HEADER, idempotent
+from app.catalog.exposure import cart_variant_ids, ensure_open_to_buy
 from app.core.rate_limit import client_ip, rate_limit
 from app.identity.models import Customer
 from app.orders.commands import CartSource, Contact, PlaceOrder
@@ -80,6 +81,10 @@ async def place_order(
     request: Request, session: DbSession, shopper: CheckoutShopper, body: PlaceOrderIn
 ) -> OrderRead:
     customer_id = shopper.viewer.customer_id
+    if shopper.refusal is not None:
+        # Sem acesso à vitrine, o pedido só fecha com produtos de compra direta na home.
+        variants = await cart_variant_ids(session, body.cart_id)
+        await ensure_open_to_buy(session, variants, shopper.refusal)
     consent = {
         kind: version
         for kind, version in (

@@ -31,6 +31,10 @@ class StorefrontContext(BaseModel):
     host: str | None
     primary_host: str | None
     access_mode: str
+    #: Loja fechada "toda fechada": nem a página inicial antes de entrar (docs/14 §3).
+    landing_locked: bool = False
+    #: A loja fechada tem senha: a porta oferece "tenho a senha" ao lado do Google.
+    password_gate: bool = False
     features: dict[str, bool]
     branding: dict[str, Any]
     seo: dict[str, Any]

@@ -1,7 +1,12 @@
 import type { NextRequest, NextResponse } from "next/server";
 
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
-import { CUSTOMER_BINDING_COOKIE, CUSTOMER_SESSION_COOKIE, customerCookie } from "@/lib/customer-cookies";
+import {
+  CUSTOMER_BINDING_COOKIE,
+  CUSTOMER_SESSION_COOKIE,
+  customerCookie,
+  STORE_PASS_COOKIE,
+} from "@/lib/customer-cookies";
 import { destinationAfterSignIn, sessionMaxAge, type SignedIn } from "@/lib/customer-signin";
 import { relativeRedirect } from "@/lib/relative-redirect";
 import { getStorefrontContext } from "@/lib/server-context";
@@ -29,7 +34,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return fail(error instanceof CustomerApiError && error.status < 500 ? "sessao_expirada" : "login_indisponivel");
   }
 
-  const response = relativeRedirect(destinationAfterSignIn(await getStorefrontContext(), done));
+  const hasPass = Boolean(request.cookies.get(STORE_PASS_COOKIE));
+  const response = relativeRedirect(destinationAfterSignIn(await getStorefrontContext(), done, hasPass));
   response.cookies.set(CUSTOMER_SESSION_COOKIE, done.session_token, customerCookie(sessionMaxAge(done)));
   response.cookies.set(CUSTOMER_BINDING_COOKIE, "", customerCookie(0));
   response.headers.set("Referrer-Policy", "no-referrer");

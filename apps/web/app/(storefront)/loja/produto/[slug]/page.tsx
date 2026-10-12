@@ -104,11 +104,16 @@ export default async function ProductPage({
   const origin = storeOrigin(context);
   const url = `${origin}/loja/produto/${product.slug}`;
   const category = product.categories[0];
-  const sells = Boolean(context.features.checkout);
+  // Produto exposto na home de loja fechada: quem ainda não entrou vê, mas só compra direto o que
+  // o lojista marcou para isso.
+  const sells = Boolean(context.features.checkout) && !product.buy_requires_access;
   const back = `/loja/produto/${product.slug}`;
   // Frete por CEP (F6): só para o que vai pela transportadora, numa loja que envia.
   const estimaFrete =
-    sells && ["physical", "made_to_order"].includes(product.kind) && Boolean(context.fulfillment.shipping?.enabled);
+    sells &&
+    !product.exposed_view &&
+    ["physical", "made_to_order"].includes(product.kind) &&
+    Boolean(context.fulfillment.shipping?.enabled);
   const varianteFrete =
     product.variants.find((v) => v.id === variante) ??
     product.variants.find((v) => v.availability === "available") ??
@@ -180,6 +185,13 @@ export default async function ProductPage({
               </ul>
             ) : null}
             {erro ? <Notice kind="error">{CART_ERRORS[erro] ?? "Não foi possível adicionar. Tente de novo."}</Notice> : null}
+            {product.buy_requires_access && context.features.checkout ? (
+              <p>
+                <Link className="button" href={`/entrar?next=${encodeURIComponent(back)}`}>
+                  Entrar para comprar
+                </Link>
+              </p>
+            ) : null}
             {ok === "adicionado" ? (
               // Quem clicou "Adicionar" ficou aqui de propósito: o recado precisa dizer o que
               // aconteceu e oferecer a saída, senão parece que o clique não fez nada.

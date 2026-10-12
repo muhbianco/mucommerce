@@ -15,7 +15,11 @@ O que este arquivo faz, além de trocar id por conteúdo:
   saiu do ar;
 - **põe um teto no total da página**: doze blocos podendo pedir doze imagens cada dá cento e
   quarenta e quatro imagens numa consulta. O teto corta o excedente sem recusar o que já está
-  salvo — regra de gosto não vira erro de validação.
+  salvo — regra de gosto não vira erro de validação;
+- **mostra os expostos** na loja fechada com a home aberta: quem ainda não entrou vê os
+  produtos que o lojista marcou para aparecer na home (docs/14-pedidos-lunares.md §3), e só
+  eles. Os da vitrine de destaques entram no bloco; os que nenhum bloco cita vão para o primeiro
+  bloco de destaques, ou para um bloco "Destaques" criado logo depois do primeiro.
 """
 
 from __future__ import annotations
@@ -34,6 +38,9 @@ from app.tenancy.settings_schemas import LandingV1
 MAX_PAGE_MEDIA = 32
 MAX_PAGE_PRODUCTS = 48
 MAX_PAGE_CATEGORIES = 20
+#: Produtos expostos na home de quem ainda não entrou (o mesmo teto de um bloco de destaques).
+MAX_EXPOSED = 12
+EXPOSED_TITLE = "Destaques"
 
 CATALOG_BLOCKS = frozenset({"featured_products", "categories"})
 
@@ -53,6 +60,7 @@ async def resolve_landing(
     tenant: TenantContext,
     *,
     show_catalog: bool,
+    exposed: bool = False,
     blocks_override: list[dict[str, Any]] | None = None,
     card_payload: Any,
     category_payload: Any,
@@ -62,7 +70,9 @@ async def resolve_landing(
 
     `blocks_override` é o que permite a prévia: em vez do que está publicado, resolve os blocos
     que o painel está mostrando. `show_catalog` diz se este visitante pode ver produto — a
-    vitrine calcula pelo acesso da loja; a prévia é sempre do dono, que pode.
+    vitrine calcula pelo acesso da loja; a prévia é sempre do dono, que pode. `exposed` (só
+    com `show_catalog` falso): a loja é fechada com a home aberta, e os produtos expostos
+    aparecem para quem ainda não entrou.
 
     Os três `*_payload` chegam de fora porque quem sabe desenhar produto, categoria e imagem são
     os esquemas da API; aqui só se decide o que entra.
@@ -97,6 +107,16 @@ async def resolve_landing(
             else []
         )
     }
+    exposed_cards = (
+        (await catalog.list_cards(limit=MAX_EXPOSED, exposed_only=True))[:MAX_EXPOSED]
+        if exposed and not show_catalog and tenant.feature("catalog")
+        else []
+    )
+    if exposed_cards:
+        cards = {c.product.id: c for c in exposed_cards}
+        cited = {pid for b in blocks for pid in (b.get("product_ids") or [])}
+        loose = [c.product.id for c in exposed_cards if c.product.id not in cited]
+        blocks = _place_loose(blocks, loose)
     categories = {c.id: c for c in (await catalog.categories() if show_catalog else [])}
 
     catalog_on = tenant.feature("catalog")
@@ -128,10 +148,32 @@ async def resolve_landing(
                 if cid in categories
             ]
             out.pop("category_ids", None)
-        if catalog_block and not show_catalog:
+        if catalog_block and not show_catalog and not out.get("products"):
             # Falta login ou aprovação: fica a seção e o título que a loja escreveu, marcados
             # como travados, para o visitante ver que há mais depois de entrar. As listas
-            # montadas acima estão vazias — nenhum produto sai da loja por este caminho.
+            # montadas acima estão vazias — nenhum produto sai da loja por este caminho, a não
+            # ser os que o lojista expôs na home.
             out["locked"] = True
         resolved.append(out)
     return resolved
+
+
+def _place_loose(blocks: list[dict[str, Any]], loose: list[str]) -> list[dict[str, Any]]:
+    """Os expostos que nenhum bloco cita entram no primeiro bloco de destaques (até o teto
+    dele), ou num bloco novo logo depois do primeiro bloco da página."""
+    if not loose:
+        return blocks
+    out = [dict(b) for b in blocks]
+    for block in out:
+        if block.get("type") == "featured_products":
+            ids = list(block.get("product_ids") or [])
+            block["product_ids"] = ids + loose[: max(MAX_EXPOSED - len(ids), 0)]
+            return out
+    novo = {
+        "id": "destaques-expostos",
+        "type": "featured_products",
+        "title": EXPOSED_TITLE,
+        "product_ids": loose,
+        "variant": "grid",
+    }
+    return [*out[:1], novo, *out[1:]]

@@ -6,6 +6,7 @@ import {
   isPublicStorefrontPath,
   normalizeHost,
   panelRewritePath,
+  needsEntry,
   requiresSession,
   resolveRequestHost,
   tenantPanelGate,
@@ -88,6 +89,19 @@ describe("access gating", () => {
     expect(requiresSession("/loja", "login_required")).toBe(true);
     expect(requiresSession("/loja", "public")).toBe(false);
     expect(requiresSession("/", "whitelist")).toBe(false);
+  });
+  it("toda fechada: só a porta abre; home aberta: a página do produto decide", () => {
+    const locked = { access_mode: "whitelist" as const, landing_locked: true };
+    expect(needsEntry("/", locked)).toBe(true);
+    expect(needsEntry("/eventos/x", locked)).toBe(true);
+    expect(needsEntry("/entrar", locked)).toBe(false);
+    expect(needsEntry("/entrar/criar", locked)).toBe(false);
+    expect(needsEntry("/politicas/termos", locked)).toBe(false);
+    const open = { access_mode: "whitelist" as const, landing_locked: false };
+    expect(needsEntry("/", open)).toBe(false);
+    expect(needsEntry("/loja/produto/brownie", open)).toBe(false);
+    expect(needsEntry("/loja", open)).toBe(true);
+    expect(needsEntry("/", { access_mode: "public", landing_locked: true })).toBe(false);
   });
 });
 

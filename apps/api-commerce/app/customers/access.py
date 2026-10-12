@@ -22,22 +22,27 @@ class Viewer:
     access_status: str | None
 
 
-def check_catalog_access(access_mode: str, viewer: Viewer | None) -> None:
+def check_catalog_access(
+    access_mode: str, viewer: Viewer | None, *, store_pass: bool = False
+) -> None:
     """Raise unless `viewer` may see the catalog of a store in `access_mode`.
 
     - `public`: anyone, signed in or not;
+    - blocked customers: 403 `access_blocked` in every non-public mode, password or not;
+    - `store_pass`: the visitor typed the store's password (a valid `__Host-mb_pass`): in;
     - no session: 401 `login_required`;
-    - blocked customers: 403 `access_blocked` in every non-public mode;
     - `login_required`: any signed-in customer;
     - `whitelist` (and any unknown mode, closed by default): approved only; pending → 403
       `access_pending`; no row or revoked → 403 `access_required` (they may ask again).
     """
     if access_mode == "public":
         return
+    if viewer is not None and viewer.access_status == AccessStatus.BLOCKED:
+        raise AccessBlockedError()
+    if store_pass:
+        return
     if viewer is None:
         raise LoginRequiredError()
-    if viewer.access_status == AccessStatus.BLOCKED:
-        raise AccessBlockedError()
     if access_mode == "login_required":
         return
     if viewer.access_status == AccessStatus.APPROVED:

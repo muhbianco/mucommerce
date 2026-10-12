@@ -62,6 +62,8 @@ const OK: Record<string, string> = {
   modulo_ligado: "Módulo ligado.",
   modulo_desligado: "Módulo desligado. Nada foi apagado.",
   vitrine: "Quem vê a vitrine foi atualizado.",
+  senha_loja_salva: "Senha da loja salva. Quem entrou com a senha anterior precisa da nova.",
+  senha_loja_removida: "A loja não tem mais senha. A entrada volta a ser só por conta aprovada.",
   taxa: "Repasse da taxa salvo.",
   embalagem_criada: "Embalagem cadastrada. Veja ao lado onde os seus produtos cabem.",
   embalagem_salva: "Embalagem salva.",
@@ -73,6 +75,7 @@ const OK: Record<string, string> = {
 };
 
 const ERRORS: Record<string, string> = {
+  senha_loja_curta: "A senha da loja precisa ter de 4 a 64 caracteres.",
   validation_error: "Algum campo está inválido.",
   conflict: "Conflito com o estado atual (ex.: SKU/slug em uso ou produto sem imagem).",
   // O que falta para publicar, dito pelo nome. A API manda `reason` com o primeiro item de

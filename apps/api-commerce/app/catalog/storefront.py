@@ -13,6 +13,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import (
+    EXPOSED,
     LIVE_VARIANT_STATUSES,
     PUBLISHED_STATUSES,
     Category,
@@ -154,8 +155,11 @@ class StorefrontCatalog:
         category: Category | None = None,
         tag: Tag | None = None,
         product_ids: Sequence[str] | None = None,
+        exposed_only: bool = False,
     ) -> list[CardData]:
-        """Published products by (position, id); `limit + 1` rows for keyset paging."""
+        """Published products by (position, id); `limit + 1` rows for keyset paging.
+
+        `exposed_only`: só os que a loja fechada mostra na home a quem ainda não entrou."""
         stmt = (
             select(Product)
             .where(Product.status.in_(PUBLISHED_STATUSES))
@@ -189,6 +193,8 @@ class StorefrontCatalog:
             stmt = stmt.where(Product.id.in_(tagged))
         if product_ids is not None:
             stmt = stmt.where(Product.id.in_(list(product_ids)))
+        if exposed_only:
+            stmt = stmt.where(Product.home_exposure.in_(list(EXPOSED)))
         products = list((await self.session.execute(stmt)).scalars())
         return await self._cards(products)
 

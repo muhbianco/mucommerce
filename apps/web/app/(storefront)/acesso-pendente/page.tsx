@@ -3,11 +3,13 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
-import { CUSTOMER_SESSION_COOKIE, safeStorePath } from "@/lib/customer-cookies";
+import { CUSTOMER_SESSION_COOKIE, safeStorePath, STORE_PASS_COOKIE } from "@/lib/customer-cookies";
 import { getStorefrontContext } from "@/lib/server-context";
 
 import { PhoneConfirm } from "../_store/phone-confirm";
 import { StoreShell } from "../_store/store-shell";
+import styles from "../_store/store.module.css";
+import { enterWithStorePassword } from "../entrar/actions";
 import { requestAccess } from "./actions";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
@@ -32,7 +34,8 @@ export default async function PendingAccessPage({
   if (!context) notFound();
   const { next, ok, tel } = await searchParams;
   const target = safeStorePath(next ?? "/loja");
-  if (!(await cookies()).get(CUSTOMER_SESSION_COOKIE)) redirect(`/entrar?next=${encodeURIComponent(target)}`);
+  const jar = await cookies();
+  if (!jar.get(CUSTOMER_SESSION_COOKIE)) redirect(`/entrar?next=${encodeURIComponent(target)}`);
 
   let access: Access;
   try {
@@ -43,7 +46,9 @@ export default async function PendingAccessPage({
     }
     throw error;
   }
-  if (access.status === "approved" || context.access_mode !== "whitelist") redirect(target);
+  // Quem entrou pela senha da loja já vê a vitrine; a API confere o passe na página seguinte.
+  const hasPass = Boolean(jar.get(STORE_PASS_COOKIE));
+  if (access.status === "approved" || context.access_mode !== "whitelist" || hasPass) redirect(target);
 
   return (
     <StoreShell context={context}>
@@ -68,6 +73,18 @@ export default async function PendingAccessPage({
           </form>
         </>
       )}
+      {context.password_gate && access.status !== "blocked" ? (
+        <form action={enterWithStorePassword} className={styles.checkoutForm} aria-label="Senha da loja">
+          <input type="hidden" name="next" value={target} />
+          <label className={styles.field}>
+            Tem a senha da loja?
+            <input name="store_password" type="password" autoComplete="off" required maxLength={64} />
+          </label>
+          <button type="submit" className="button">
+            Entrar com a senha
+          </button>
+        </form>
+      ) : null}
       <PhoneConfirm context={context} back={`/acesso-pendente?next=${encodeURIComponent(target)}`} error={tel} />
       <form action="/auth/sair" method="post">
         <button type="submit" className="muted">

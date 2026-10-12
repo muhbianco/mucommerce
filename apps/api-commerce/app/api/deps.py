@@ -15,6 +15,7 @@ from app.core.exceptions import (
     AccessBlockedError,
     AuthenticationError,
     CsrfOriginError,
+    DomainError,
     FeatureDisabledError,
     InactiveUserError,
     LoginRequiredError,
@@ -26,6 +27,7 @@ from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.rate_limit import client_ip
 from app.core.scopes import PlatformRole, Scope, platform_role_covers, scopes_for_tenant_role
 from app.core.security import constant_time_equals, decode_access_token
+from app.customers import store_pass
 from app.customers.access import Viewer, check_catalog_access
 from app.customers.sessions import SESSION_COOKIE, resolve_viewer
 from app.identity.models import AccessStatus, AdminUser
@@ -227,15 +229,62 @@ def storefront_access_mode(tenant: TenantContext) -> str:
     return str(tenant.settings.get("storefront", {}).get("access_mode", "whitelist"))
 
 
-def check_storefront_catalog(tenant: TenantContext, viewer: Viewer | None) -> None:
+def landing_locked(tenant: TenantContext) -> bool:
+    """Loja "toda fechada": nem a página inicial aparece para quem não entrou."""
+    storefront = tenant.settings.get("storefront", {})
+    return storefront.get("access_mode", "whitelist") != "public" and bool(
+        storefront.get("landing_locked")
+    )
+
+
+def home_open(tenant: TenantContext) -> bool:
+    """Loja fechada com a página inicial aberta: é nela que produto pode aparecer na home."""
+    return storefront_access_mode(tenant) != "public" and not landing_locked(tenant)
+
+
+async def get_store_pass(
+    request: Request,
+    tenant: StorefrontTenant,
+    x_store_pass: Annotated[str | None, Header()] = None,
+    x_internal_token: Annotated[str | None, Header()] = None,
+) -> bool:
+    """O visitante acertou a senha da loja (passe válido, da versão de senha vigente).
+
+    Mesmo desenho da sessão: o navegador manda o cookie no `/api` da loja; o web encaminha o
+    passe em `X-Store-Pass`, aceito só com o token do web.
+    """
+    token = request.cookies.get(store_pass.PASS_COOKIE)
+    if x_store_pass and _is_web(x_internal_token):
+        token = x_store_pass
+    return store_pass.is_valid(token, tenant.id, tenant.settings.get("storefront"), utcnow())
+
+
+StorePass = Annotated[bool, Depends(get_store_pass)]
+
+
+def check_storefront_catalog(
+    tenant: TenantContext, viewer: Viewer | None, *, has_pass: bool = False
+) -> None:
     """Raise unless the catalog of `tenant` is visible to `viewer` (see check_catalog_access)."""
     if not tenant.feature("catalog"):
         raise NotFoundError("Recurso não encontrado.")
-    check_catalog_access(storefront_access_mode(tenant), viewer)
+    check_catalog_access(storefront_access_mode(tenant), viewer, store_pass=has_pass)
+
+
+def catalog_access_error(
+    tenant: TenantContext, viewer: Viewer | None, has_pass: bool
+) -> DomainError | None:
+    """O erro que `check_storefront_catalog` levantaria, ou None. Para quem decide o que fazer
+    com a recusa (a home mostra os produtos expostos; a página de produto abre os expostos)."""
+    try:
+        check_storefront_catalog(tenant, viewer, has_pass=has_pass)
+    except (AuthenticationError, PermissionDeniedError) as exc:
+        return exc
+    return None
 
 
 async def require_catalog_access(
-    tenant: StorefrontTenant, viewer: OptionalCustomer
+    tenant: StorefrontTenant, viewer: OptionalCustomer, has_pass: StorePass
 ) -> TenantContext:
     """Gate for every storefront catalog read.
 
@@ -247,7 +296,7 @@ async def require_catalog_access(
     The web's internal token only changes which Host is resolved and lets the web forward the
     customer's session; it never grants access by itself.
     """
-    check_storefront_catalog(tenant, viewer)
+    check_storefront_catalog(tenant, viewer, has_pass=has_pass)
     return tenant
 
 
@@ -265,29 +314,65 @@ async def require_events_access(tenant: CatalogReader) -> TenantContext:
 EventsReader = Annotated[TenantContext, Depends(require_events_access)]
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogView:
+    tenant: TenantContext
+    #: None = acesso à vitrine. Senão, a recusa que a rota levanta se o produto pedido não está
+    #: exposto na home (loja fechada com a home aberta, docs/14-pedidos-lunares.md §3).
+    refusal: DomainError | None
+
+
+async def require_catalog_or_exposed(
+    tenant: StorefrontTenant, viewer: OptionalCustomer, has_pass: StorePass
+) -> CatalogView:
+    """Gate da página de produto: acesso à vitrine, ou loja fechada com a home aberta — e aí a
+    rota só abre produto exposto, levantando `refusal` para os outros. Bloqueado não vê nada."""
+    if not tenant.feature("catalog"):
+        raise NotFoundError("Recurso não encontrado.")
+    refusal = catalog_access_error(tenant, viewer, has_pass)
+    blocked = viewer is not None and viewer.access_status == AccessStatus.BLOCKED
+    if refusal is not None and (blocked or not home_open(tenant)):
+        raise refusal
+    return CatalogView(tenant, refusal)
+
+
+setattr(require_catalog_or_exposed, CATALOG_ACCESS_GUARD_ATTR, True)
+ExposedCatalogReader = Annotated[CatalogView, Depends(require_catalog_or_exposed)]
+
+
 # --------------------------------------------------------------------------- checkout
 @dataclass(frozen=True, slots=True)
 class Shopper:
     tenant: TenantContext
     viewer: Viewer
+    #: None = compra qualquer produto. Senão, só os de compra direta na home (`open`) — e esta
+    #: é a recusa para os outros (docs/14-pedidos-lunares.md §3).
+    refusal: DomainError | None = None
 
 
-async def require_checkout(tenant: StorefrontTenant, viewer: CurrentCustomer) -> Shopper:
+async def require_checkout(
+    tenant: StorefrontTenant, viewer: CurrentCustomer, has_pass: StorePass
+) -> Shopper:
     """Gate for cart, checkout and the customer's addresses (ADR 0011).
 
     - `catalog` or `checkout` off → 404, as if the store did not sell online;
     - a session of this store is required in every access mode (401 `login_required`);
-    - the catalog access rules apply (whitelist needs approval), and a blocked customer never
-      buys, not even in a public store (403 `access_blocked`).
+    - the catalog access rules apply (whitelist needs approval or the store's password), and a
+      blocked customer never buys, not even in a public store (403 `access_blocked`);
+    - a store closed with its home open lets a signed-in customer without access buy only the
+      products it sells straight from the home (`Shopper.refusal` carries the refusal for the
+      others, and the cart and the order check each line).
     """
     if not tenant.feature("catalog"):
         raise NotFoundError("Recurso não encontrado.")
     if not tenant.feature("checkout"):
         raise NotFoundError("Recurso não encontrado.")
-    check_catalog_access(storefront_access_mode(tenant), viewer)
     if viewer.access_status == AccessStatus.BLOCKED:
         raise AccessBlockedError()
-    return Shopper(tenant, viewer)
+    refusal = catalog_access_error(tenant, viewer, has_pass)
+    if refusal is not None and not home_open(tenant):
+        raise refusal
+    return Shopper(tenant, viewer, refusal)
 
 
 setattr(require_checkout, CHECKOUT_GUARD_ATTR, True)

@@ -8,13 +8,18 @@ aquilo. O admin do site lê esta mesma lista e usa `owner` para saber o que é d
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
+from app.core.exceptions import ValidationError
 from app.core.scopes import Scope
+from app.customers.store_pass import STORE_PASSWORD_KEY, STORE_PASSWORD_PROVIDER
+from app.integrations.credentials import CredentialStore
+from app.models.base import utcnow
 from app.tenancy import modules
 from app.tenancy.context import TenantContext
 from app.tenancy.models import DEFAULT_FEATURE_FLAGS
@@ -56,6 +61,27 @@ class ModulesUpdate(BaseModel):
 
 class AccessModeUpdate(BaseModel):
     access_mode: AccessMode
+    #: Loja fechada: nem a página inicial aparece antes de entrar. Omitido = mantém como está.
+    landing_locked: bool | None = None
+
+
+class AccessRead(BaseModel):
+    access_mode: str
+    landing_locked: bool
+    password_set: bool
+
+
+class StorePasswordIn(BaseModel):
+    #: É senha de porta, que o lojista passa a quem quiser: curta e digitável no celular.
+    password: Annotated[str, Field(min_length=4, max_length=64)]
+
+
+class StorePasswordRead(BaseModel):
+    set: bool
+    masked: str | None = None
+    changed_at: datetime | None = None
+    #: Só com `?ver=1`: o lojista copia para mandar a quem quiser.
+    password: str | None = None
 
 
 def _view(enabled: dict[str, bool]) -> list[ModuleRead]:
@@ -108,20 +134,107 @@ async def update_modules(
     return _view(await _enabled(session, tenant.id))
 
 
-@router.put(
-    "/storefront/access", response_model=dict[str, str], summary="Quem vê a vitrine da loja"
-)
+async def _storefront_now(service: TenantService, tenant_id: str) -> dict[str, Any]:
+    """A configuração da vitrine lida do banco, não do contexto: o contexto vem do cache de 60 s,
+    e regravar a partir dele poderia devolver a versão de uma senha já trocada, reabrindo a loja
+    para quem o lojista acabou de trancar."""
+    return dict((await service.repo.settings(tenant_id)).get("storefront") or {})
+
+
+def _access_read(storefront: dict[str, Any]) -> AccessRead:
+    return AccessRead(
+        access_mode=str(storefront.get("access_mode", "whitelist")),
+        landing_locked=bool(storefront.get("landing_locked")),
+        password_set=bool(storefront.get("password_set")),
+    )
+
+
+@router.get("/storefront/access", response_model=AccessRead, summary="Quem vê a vitrine da loja")
+async def read_access_mode(session: DbSession, user: CurrentAdmin, tenant: ModulesReader) -> Any:
+    return _access_read(await _storefront_now(TenantService(session), tenant.id))
+
+
+@router.put("/storefront/access", response_model=AccessRead, summary="Quem vê a vitrine da loja")
 async def update_access_mode(
     request: Request,
     session: DbSession,
     user: CurrentAdmin,
     tenant: ModulesWriter,
     body: AccessModeUpdate,
-) -> dict[str, str]:
+) -> Any:
     service = TenantService(session)
     row = await service.get_or_404(tenant.id)
-    atual = dict(tenant.settings.get("storefront") or {})
-    await service.set_setting(
-        row, "storefront", atual | {"access_mode": body.access_mode}, admin_actor(request, user)
+    novo = await _storefront_now(service, tenant.id) | {"access_mode": body.access_mode}
+    if body.landing_locked is not None:
+        novo["landing_locked"] = body.landing_locked
+    await service.set_setting(row, "storefront", novo, admin_actor(request, user))
+    return _access_read(novo)
+
+
+@router.get(
+    "/storefront/password", response_model=StorePasswordRead, summary="A senha da loja fechada"
+)
+async def read_store_password(
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: ModulesWriter,
+    ver: Annotated[bool, Query()] = False,
+) -> Any:
+    store = CredentialStore(session, tenant.id)
+    status = (await store.status(STORE_PASSWORD_PROVIDER)).get(STORE_PASSWORD_KEY)
+    if status is None:
+        return StorePasswordRead(set=False)
+    return StorePasswordRead(
+        set=True,
+        masked=status[0],
+        changed_at=status[1],
+        password=await store.get(STORE_PASSWORD_PROVIDER, STORE_PASSWORD_KEY) if ver else None,
     )
-    return {"access_mode": body.access_mode}
+
+
+@router.put(
+    "/storefront/password", response_model=StorePasswordRead, summary="Define ou troca a senha"
+)
+async def set_store_password(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: ModulesWriter,
+    body: StorePasswordIn,
+) -> Any:
+    senha = body.password.strip()
+    if len(senha) < 4:
+        raise ValidationError("A senha precisa de pelo menos 4 caracteres.", reason="too_short")
+    service = TenantService(session)
+    row = await service.get_or_404(tenant.id)
+    masked = await CredentialStore(session, tenant.id).put(
+        STORE_PASSWORD_PROVIDER, STORE_PASSWORD_KEY, senha
+    )
+    await _bump_password(service, row, tenant.id, admin_actor(request, user), enabled=True)
+    return StorePasswordRead(set=True, masked=masked, changed_at=utcnow())
+
+
+@router.delete("/storefront/password", status_code=204, summary="Tira a senha da loja")
+async def delete_store_password(
+    request: Request, session: DbSession, user: CurrentAdmin, tenant: ModulesWriter
+) -> Response:
+    service = TenantService(session)
+    row = await service.get_or_404(tenant.id)
+    await CredentialStore(session, tenant.id).delete(STORE_PASSWORD_PROVIDER, STORE_PASSWORD_KEY)
+    await _bump_password(service, row, tenant.id, admin_actor(request, user), enabled=False)
+    return Response(status_code=204)
+
+
+async def _bump_password(
+    service: TenantService, row: Any, tenant_id: str, actor: Any, *, enabled: bool
+) -> None:
+    """Toda troca (ou retirada) sobe a versão: os passes emitidos com a senha anterior param de
+    valer na hora. A senha em si nunca passa por aqui nem pelo audit, só o fato da troca."""
+    atual = await _storefront_now(service, tenant_id)
+    versao = int(atual.get("password_version") or 0) + 1
+    await service.set_setting(
+        row,
+        "storefront",
+        atual | {"password_set": enabled, "password_version": versao},
+        actor,
+    )

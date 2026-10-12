@@ -496,6 +496,16 @@ async def seed() -> None:
         )
         await session.commit()
         await _publish_products(session, closed_id)
+        # A visibilidade (senha da loja, modos) é decisão de quem é da loja: o admin da suíte
+        # também é dono da Loja Fechada, senão a tela de módulos abre só para leitura.
+        dono = (
+            await session.execute(
+                select(AdminUser).where(AdminUser.email == "e2e-admin@muhbianco.test")
+            )
+        ).scalar_one()
+        session.add(
+            TenantMembership(tenant_id=closed_id, admin_user_id=dono.id, role=TenantRole.OWNER)
+        )
         await session.commit()
 
     async with factory() as session:  # a suspended store answers 503

@@ -17,10 +17,16 @@ from app.api.deps import (
     CatalogReader,
     DbSession,
     EventsReader,
+    ExposedCatalogReader,
     OptionalCustomer,
     StorefrontTenant,
+    StorePass,
     check_storefront_catalog,
+    home_open,
+    landing_locked,
+    storefront_access_mode,
 )
+from app.catalog.models import EXPOSED, HomeExposure
 from app.catalog.pricing import EffectivePrice, parse_tiers
 from app.catalog.schemas import LotState
 from app.catalog.storefront import (
@@ -43,7 +49,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.pagination import Page, decode_cursor, encode_cursor
-from app.customers.access import Viewer
+from app.customers.access import Viewer, check_catalog_access
 from app.landing.resolver import resolve_landing
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
@@ -142,6 +148,12 @@ class PriceTier(BaseModel):
 
 class ProductDetail(ProductCard):
     sku: str
+    #: Loja fechada com a home aberta: o visitante vê este produto exposto, mas comprar pede a
+    #: senha da loja ou aprovação (o botão vira "entrar para comprar").
+    buy_requires_access: bool = False
+    #: Quem vê ainda não tem acesso à vitrine (veio pela home): a página esconde o que pede acesso,
+    #: como o cálculo de frete por CEP.
+    exposed_view: bool = False
     #: Desconto por quantidade ("a partir de 10 un, R$ 9,00"), vazio quando não há.
     price_tiers: list[PriceTier] = []
     options: list[OptionRef]
@@ -356,11 +368,18 @@ async def storefront_products(
     response_model=ProductDetail,
     summary="Página de produto (variantes, imagens, categorias, SEO)",
 )
-async def storefront_product(session: DbSession, tenant: CatalogReader, slug: str) -> ProductDetail:
+async def storefront_product(
+    session: DbSession, view: ExposedCatalogReader, slug: str
+) -> ProductDetail:
+    tenant = view.tenant
     data = await StorefrontCatalog(session, utcnow()).product_by_slug(slug[:160])
     if data is None:
+        if view.refusal is not None:
+            raise view.refusal  # sem acesso, "não existe" e "não exposto" respondem igual
         raise NotFoundError("Produto não encontrado.")
     product = data.card.product
+    if view.refusal is not None and product.home_exposure not in EXPOSED:
+        raise view.refusal
     card = _card(data.card, tenant.currency)
     seo = product.seo or {}
     return ProductDetail(
@@ -392,6 +411,8 @@ async def storefront_product(session: DbSession, tenant: CatalogReader, slug: st
         tags=[TagRef(slug=t.slug, name=t.name) for t in data.tags],
         seo=ProductSeo(title=seo.get("title"), description=seo.get("description")),
         updated_at=product.updated_at,
+        buy_requires_access=view.refusal is not None and product.home_exposure != HomeExposure.OPEN,
+        exposed_view=view.refusal is not None,
     )
 
 
@@ -481,9 +502,9 @@ async def storefront_event(session: DbSession, tenant: EventsReader, slug: str) 
 
 
 # ----------------------------------------------------------------------------- landing
-def _catalog_accessible(tenant: TenantContext, viewer: Viewer | None) -> bool:
+def _catalog_accessible(tenant: TenantContext, viewer: Viewer | None, has_pass: bool) -> bool:
     try:
-        check_storefront_catalog(tenant, viewer)
+        check_storefront_catalog(tenant, viewer, has_pass=has_pass)
     except (NotFoundError, AuthenticationError, PermissionDeniedError):
         return False
     return True
@@ -495,12 +516,17 @@ def _catalog_accessible(tenant: TenantContext, viewer: Viewer | None) -> bool:
     summary="Blocos da página inicial, com produtos/categorias/imagens resolvidos",
 )
 async def storefront_landing(
-    session: DbSession, tenant: StorefrontTenant, viewer: OptionalCustomer
+    session: DbSession, tenant: StorefrontTenant, viewer: OptionalCustomer, has_pass: StorePass
 ) -> list[dict[str, Any]]:
+    accessible = _catalog_accessible(tenant, viewer, has_pass)
+    if landing_locked(tenant) and not accessible:
+        # Loja toda fechada: nem a página inicial sai antes de entrar (com senha ou aprovação).
+        check_catalog_access(storefront_access_mode(tenant), viewer, store_pass=has_pass)
     return await resolve_landing(
         session,
         tenant,
-        show_catalog=_catalog_accessible(tenant, viewer),
+        show_catalog=accessible,
+        exposed=home_open(tenant) and not accessible,
         card_payload=lambda card, currency: _card(card, currency).model_dump(mode="json"),
         category_payload=lambda category: _category(category).model_dump(),
         image_payload=image_payload,

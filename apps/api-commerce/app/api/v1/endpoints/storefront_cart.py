@@ -33,6 +33,7 @@ from app.cart.schemas import (
     SlotRead,
 )
 from app.cart.service import CartService, CartView
+from app.catalog.exposure import ensure_open_to_buy
 from app.core.rate_limit import rate_limit
 from app.customers.addresses import AddressService
 from app.fulfillment.service import public_fulfillment
@@ -174,6 +175,8 @@ async def get_cart(session: DbSession, shopper: CheckoutShopper) -> CartRead:
     dependencies=_WRITE,
 )
 async def add_item(session: DbSession, shopper: CheckoutShopper, body: CartItemAdd) -> CartRead:
+    if shopper.refusal is not None:
+        await ensure_open_to_buy(session, [body.variant_id], shopper.refusal)
     view = await _service(session, shopper).add(
         body.variant_id, _milli(body.quantity), body.modifier_ids
     )

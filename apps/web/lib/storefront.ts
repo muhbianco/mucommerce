@@ -81,6 +81,10 @@ export interface StoreVariant {
 
 export interface ProductDetail extends ProductCard {
   sku: string;
+  /** Loja fechada, produto exposto na home: comprar pede a senha da loja ou aprovação. */
+  buy_requires_access?: boolean;
+  /** Quem vê ainda não tem acesso à vitrine (veio pela home). */
+  exposed_view?: boolean;
   options: ProductOption[];
   modifier_groups: StoreModifierGroup[];
   description_md: string | null;

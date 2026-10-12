@@ -281,6 +281,11 @@ export default async function ProductPage({
     unit_price_cents: number;
   }[];
   const zone = context.timezone;
+  const storefront = context.settings.storefront as
+    Record<string, unknown> | undefined;
+  const homeOpen =
+    String(storefront?.access_mode ?? "whitelist") !== "public" &&
+    !storefront?.landing_locked;
   const hidden = (
     <>
       <input type="hidden" name="tenant_id" value={context.tenant_id} />
@@ -838,6 +843,30 @@ export default async function ProductPage({
               </Section>
 
               <Section id="organizacao" title="Organização na loja">
+                <div className={styles.fields}>
+                  <label className={`${styles.field} ${styles.fieldWide}`}>
+                    Na página inicial da loja fechada
+                    <select
+                      name="home_exposure"
+                      defaultValue={product.home_exposure ?? "hidden"}
+                    >
+                      <option value="hidden">
+                        Não aparece (só para quem entrou)
+                      </option>
+                      <option value="preview">
+                        Aparece; comprar pede a senha ou aprovação
+                      </option>
+                      <option value="open">
+                        Aparece e vai direto ao carrinho
+                      </option>
+                    </select>
+                    <span className={styles.fieldHint}>
+                      {homeOpen
+                        ? "Sua loja está fechada com a página inicial aberta: os produtos marcados aparecem nela para quem ainda não entrou. O login continua no carrinho."
+                        : "Só vale quando a loja está fechada com a página inicial aberta (Módulos → Quem vê a sua vitrine)."}
+                    </span>
+                  </label>
+                </div>
                 <fieldset className={local.plain}>
                   <legend className={local.legend}>Categorias</legend>
                   {tree.length ? (

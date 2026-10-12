@@ -31,6 +31,10 @@ export interface StorefrontContext {
   host: string | null;
   primary_host: string | null;
   access_mode: "public" | "login_required" | "whitelist";
+  /** Loja "toda fechada": nem a página inicial aparece antes de entrar. */
+  landing_locked?: boolean;
+  /** A loja fechada tem senha: a porta oferece "tenho a senha" ao lado do login. */
+  password_gate?: boolean;
   features: Record<string, boolean>;
   branding: Record<string, unknown>;
   seo: Record<string, unknown>;
@@ -132,11 +136,32 @@ export function isStoreApiPath(pathname: string): boolean {
 }
 
 export function requiresSession(pathname: string, accessMode: StorefrontContext["access_mode"]): boolean {
-  if (accessMode === "public") return false;
+  return needsEntry(pathname, { access_mode: accessMode });
+}
+
+/** Na loja toda fechada, só a porta (e o que ela usa) abre sem entrar. */
+const ENTRY_PREFIXES = ["/entrar", "/acesso-pendente", "/auth", "/politicas", "/healthz"];
+
+/**
+ * O caminho pede que o visitante tenha entrado — com a sessão de cliente ou com o passe da senha
+ * da loja (docs/14-pedidos-lunares.md §3). O middleware só olha se um dos cookies existe; quem
+ * decide de verdade é a API, e a página manda para a porta quando ela recusa.
+ */
+export function needsEntry(
+  pathname: string,
+  context: Pick<StorefrontContext, "access_mode" | "landing_locked">,
+): boolean {
+  if (context.access_mode === "public") return false;
   // Mandar `fetch` para a tela de login devolve HTML onde o navegador espera JSON. Estas rotas
   // fazem o próprio controle e respondem 401/403 — nunca um resultado parcial, que é o que
   // transformaria loja fechada em porta de raspagem.
   if (isStoreApiPath(pathname)) return false;
+  if (context.landing_locked) {
+    return !ENTRY_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(prefix + "/"));
+  }
+  // Home aberta: produto exposto na home abre a própria página; a API recusa os outros e a
+  // página manda para a porta.
+  if (pathname.startsWith("/loja/produto/")) return false;
   return !isPublicStorefrontPath(pathname);
 }
 

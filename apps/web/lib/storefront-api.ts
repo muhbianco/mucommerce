@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 
-import { CUSTOMER_SESSION_COOKIE } from "./customer-cookies";
+import { CUSTOMER_SESSION_COOKIE, STORE_PASS_COOKIE } from "./customer-cookies";
 import type { StorefrontContext } from "./tenant";
 
 /** Why a signed-in customer cannot see the catalog yet (403 codes of the API). */
@@ -55,8 +55,12 @@ export async function storefrontApi<T>(
     Accept: "application/json",
   };
   if (context.access_mode !== "public" && !options.anonymous) {
-    const session = (await cookies()).get(CUSTOMER_SESSION_COOKIE)?.value;
+    const jar = await cookies();
+    const session = jar.get(CUSTOMER_SESSION_COOKIE)?.value;
     if (session) requestHeaders["X-Customer-Session"] = session;
+    // Quem entrou pela senha da loja: o passe vale como acesso à vitrine (a API confere).
+    const pass = jar.get(STORE_PASS_COOKIE)?.value;
+    if (pass) requestHeaders["X-Store-Pass"] = pass;
   }
   const response = await fetch(`${base}/api/v1/storefront${path}?${query.toString()}`, {
     headers: requestHeaders,

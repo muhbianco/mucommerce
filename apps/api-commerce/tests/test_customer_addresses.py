@@ -86,11 +86,23 @@ async def test_another_customer_or_store_never_sees_the_address(
 async def test_the_checkout_gate(
     client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    closed = await selling_store(session_factory, "fechada", mode="whitelist")
+    # Loja toda fechada: sem aprovação (nem senha), nada de carrinho, endereço ou pedido.
+    closed = await selling_store(
+        session_factory,
+        "fechada",
+        mode="whitelist",
+        settings={"storefront": {"access_mode": "whitelist", "landing_locked": True}},
+    )
     pending = as_shopper(
         closed, await signed_in(session_factory, closed, access=AccessStatus.PENDING)
     )
     assert (await client.get(URL, headers=pending)).json()["error"]["code"] == "access_pending"
+
+    # Fechada com a home aberta: o pendente chega ao endereço, porque pode comprar o que a loja
+    # vende direto da home (o carrinho e o pedido conferem item a item).
+    home = await selling_store(session_factory, "home", mode="whitelist")
+    waiting = as_shopper(home, await signed_in(session_factory, home, access=AccessStatus.PENDING))
+    assert (await client.get(URL, headers=waiting)).status_code == 200
 
     public = await selling_store(session_factory, "aberta")
     blocked = as_shopper(

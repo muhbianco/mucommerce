@@ -273,6 +273,11 @@ class InvalidCredentialsError(AuthenticationError):
     message = "E-mail ou senha incorretos."
 
 
+class InvalidStorePasswordError(AuthenticationError):
+    error_code = "invalid_store_password"
+    message = "Senha da loja incorreta."
+
+
 class CustomerUnavailableError(PermissionDeniedError):
     error_code = "customer_unavailable"
     message = "Esta conta não pode entrar na loja."

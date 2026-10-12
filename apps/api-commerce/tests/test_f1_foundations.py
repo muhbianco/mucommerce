@@ -120,7 +120,13 @@ async def test_setting_write_is_validated_versioned_and_emitted(
                 .execution_options(**CROSS)
             )
         ).scalar_one()
-        assert row.value == {"access_mode": "public", "currency": "BRL"}  # defaults filled in
+        assert row.value == {  # defaults filled in
+            "access_mode": "public",
+            "currency": "BRL",
+            "landing_locked": False,
+            "password_set": False,
+            "password_version": 0,
+        }
         assert row.schema_version == 1
         events = (
             await session.execute(
@@ -152,17 +158,17 @@ def _context(**overrides: Any) -> TenantContext:
 
 async def test_catalog_access_gate() -> None:
     public = _context()
-    assert await require_catalog_access(public, None) is public
+    assert await require_catalog_access(public, None, False) is public
 
     whitelist = _context(settings={"storefront": {"access_mode": "whitelist"}})
     with pytest.raises(LoginRequiredError):
-        await require_catalog_access(whitelist, None)
+        await require_catalog_access(whitelist, None, False)
     with pytest.raises(LoginRequiredError):
-        await require_catalog_access(_context(settings={}), None)  # missing = whitelist
+        await require_catalog_access(_context(settings={}), None, False)  # missing = whitelist
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={}), None)
+        await require_catalog_access(_context(features={}), None, False)
     with pytest.raises(NotFoundError):
-        await require_catalog_access(_context(features={"catalog": False}), None)
+        await require_catalog_access(_context(features={"catalog": False}), None, False)
 
 
 @pytest.mark.parametrize(

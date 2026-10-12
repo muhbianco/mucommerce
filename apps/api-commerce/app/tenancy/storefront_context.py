@@ -62,6 +62,10 @@ async def build_storefront_context(
         host=tenant.host,
         primary_host=primary.hostname if primary else None,
         access_mode=str(storefront.get("access_mode", "whitelist")),
+        landing_locked=storefront.get("access_mode", "whitelist") != "public"
+        and bool(storefront.get("landing_locked")),
+        password_gate=storefront.get("access_mode", "whitelist") != "public"
+        and bool(storefront.get("password_set")),
         features=features,
         branding=branding,
         seo=seo,

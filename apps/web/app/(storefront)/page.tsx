@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { getStorefrontContext } from "@/lib/server-context";
+import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
 import { isIndexable, jsonLd, type LandingBlock, storeOrigin } from "@/lib/storefront";
 
@@ -38,6 +39,8 @@ export default async function Home() {
   const context = await getStorefrontContext();
   if (!context) notFound();
   const landing = await storefrontApi<LandingBlock[]>(context, "/landing");
+  // Loja toda fechada: sem entrar, nem a página inicial — a porta resolve.
+  if (landing.kind !== "ok" && landing.kind !== "not_found") requireCatalog(landing, "/");
   const blocks = landing.kind === "ok" ? landing.data : [];
   const catalogOn = Boolean(context.features.catalog);
   const branding = context.branding as { logo?: { url: string } | null };

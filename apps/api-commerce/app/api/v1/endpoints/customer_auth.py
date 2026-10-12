@@ -9,6 +9,7 @@ host) or the web's forwarded session; cookie POSTs must come from the store's ow
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime
 from typing import Annotated
 
@@ -25,16 +26,23 @@ from app.api.deps import (
     require_same_origin,
 )
 from app.core.config import settings
-from app.core.exceptions import InvalidLoginStateError, NotFoundError
+from app.core.exceptions import (
+    InvalidLoginStateError,
+    InvalidStorePasswordError,
+    NotFoundError,
+    RateLimitedError,
+)
 from app.core.hosts import InvalidHostnameError, normalize_hostname
 from app.core.phone import mask_phone
-from app.core.rate_limit import rate_limit
+from app.core.rate_limit import rate_limit, rate_limiter
+from app.customers import store_pass
 from app.customers.access_service import CustomerAccessService
 from app.customers.auth_service import Completed, CustomerAuthService, mask_email
 from app.customers.password_auth import PasswordAuthService
 from app.customers.phone import PhoneVerificationService
 from app.customers.repository import CustomerSessionRepository
 from app.identity.models import Customer
+from app.integrations.credentials import CredentialStore
 from app.models.base import utcnow
 from app.orders.contact import known_phone
 from app.schemas.common import StrictModel
@@ -109,6 +117,15 @@ class ForgotBody(StrictModel):
 
 class ResetBody(LinkBody):
     password: PasswordIn
+
+
+class StorePasswordTry(StrictModel):
+    password: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class StorePassRead(BaseModel):
+    pass_token: str
+    expires_at: datetime
 
 
 class Accepted(BaseModel):
@@ -363,6 +380,46 @@ async def password_reset(
         user_agent=user_agent,
     )
     return _signed_in(done)
+
+
+# ------------------------------------------------------------------ senha da loja (web → API)
+#: Tentativas de senha por loja por hora, somando todos os IPs: chutar a senha de uma loja de
+#: muitos endereços esbarra aqui, além do limite por IP da rota.
+STORE_PASSWORD_TRIES_PER_HOUR = 300
+
+
+@router.post(
+    "/internal/storefront/password",
+    response_model=StorePassRead,
+    summary="Confere a senha da loja fechada e devolve o passe (chamado pelo web da loja)",
+    dependencies=[
+        Depends(require_internal("web")),
+        Depends(rate_limit("store_password", limit=10, window_seconds=600)),
+    ],
+)
+async def enter_with_store_password(
+    session: DbSession, tenant: StorefrontTenant, body: StorePasswordTry
+) -> StorePassRead:
+    storefront = tenant.settings.get("storefront") or {}
+    if storefront.get("access_mode", "whitelist") == "public" or not store_pass.password_enabled(
+        storefront
+    ):
+        raise NotFoundError("Esta loja não tem senha.")
+    tries = await rate_limiter.hit(
+        f"store_password_tenant:{tenant.id}", STORE_PASSWORD_TRIES_PER_HOUR, 3600
+    )
+    if not tries.allowed:
+        raise RateLimitedError(retry_after_seconds=tries.retry_after_seconds)
+    stored = await CredentialStore(session, tenant.id).get(
+        store_pass.STORE_PASSWORD_PROVIDER, store_pass.STORE_PASSWORD_KEY
+    )
+    typed = body.password.strip()
+    if stored is None or not hmac.compare_digest(typed.encode(), stored.encode()):
+        raise InvalidStorePasswordError()
+    token, expires_at = store_pass.issue(
+        tenant.id, store_pass.password_version(storefront), utcnow()
+    )
+    return StorePassRead(pass_token=token, expires_at=expires_at)
 
 
 _EXPIRED_PAGE = """<!doctype html><html lang="pt-BR"><meta charset="utf-8">

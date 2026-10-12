@@ -9,7 +9,7 @@ import { storefrontApi } from "@/lib/storefront-api";
 import styles from "../_store/store.module.css";
 import { StoreShell } from "../_store/store-shell";
 import { Notice, PageHead } from "../_store/ui";
-import { loginWithPassword } from "./actions";
+import { enterWithStorePassword, loginWithPassword } from "./actions";
 
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
@@ -26,6 +26,7 @@ const ERRORS: Record<string, string> = {
   senha_errada: "E-mail ou senha incorretos.",
   link_invalido: "Este link expirou ou já foi usado. Entre com a sua senha ou peça outro.",
   dados_invalidos: "Confira o e-mail e a senha.",
+  senha_loja: "Senha da loja incorreta.",
 };
 
 interface Policies {
@@ -53,9 +54,26 @@ export default async function LoginPage({
     <StoreShell context={context}>
       <PageHead title={`Entrar em ${context.tenant.name}`} />
       {erro ? <Notice kind="error">{ERRORS[erro] ?? "Não foi possível entrar."}</Notice> : null}
+      {context.password_gate ? (
+        <form action={enterWithStorePassword} className={styles.checkoutForm} aria-label="Senha da loja">
+          <input type="hidden" name="next" value={target} />
+          <label className={styles.field}>
+            Tenho a senha da loja
+            <input name="store_password" type="password" autoComplete="off" required maxLength={64} />
+            <span className={styles.fieldHint}>Quem tem a senha vê a loja na hora. O login só é pedido no carrinho.</span>
+          </label>
+          <button type="submit" className="button">
+            Entrar na loja
+          </button>
+        </form>
+      ) : null}
       {enabled ? (
         <>
-          <p>Entre para comprar e acompanhar seus pedidos.</p>
+          <p>
+            {context.password_gate
+              ? "Ou entre com a sua conta. No Google, a loja aprova o seu acesso."
+              : "Entre para comprar e acompanhar seus pedidos."}
+          </p>
           <p>
             <a className="button" href={`/auth/google/start?${start.toString()}`}>
               Entrar com Google

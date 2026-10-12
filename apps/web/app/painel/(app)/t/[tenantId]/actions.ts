@@ -84,6 +84,9 @@ export async function updateProduct(form: FormData): Promise<void> {
         // junto, em vez de a lojista tropeçar num erro por uma caixinha esquecida marcada.
         promo_ends_on_sellout:
           promoPrice !== null && form.get("promo_ends_on_sellout") === "on",
+        ...(HOME_EXPOSURE.has(text(form, "home_exposure"))
+          ? { home_exposure: text(form, "home_exposure") }
+          : {}),
         cost_cents_estimate: money(form, "cost"),
         price_tiers: priceTiers(form),
         kind: text(form, "kind") || undefined,
@@ -106,6 +109,8 @@ export async function updateProduct(form: FormData): Promise<void> {
 }
 
 const PACKING_MODES = new Set(["auto", "restricted", "own_container"]);
+/** Loja fechada com a home aberta: oculto, aparece (comprar pede acesso), ou compra direta. */
+const HOME_EXPOSURE = new Set(["hidden", "preview", "open"]);
 
 /** Peso na unidade escolhida (g ou kg) → gramas; vazio → null (sem medida, a cotação recusa). */
 function weightField(

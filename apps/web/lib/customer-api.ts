@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies, headers } from "next/headers";
 
-import { CUSTOMER_SESSION_COOKIE } from "./customer-cookies";
+import { CUSTOMER_SESSION_COOKIE, STORE_PASS_COOKIE } from "./customer-cookies";
 
 /** An error envelope from api-commerce: `{"error": {"code", "message"}}`. */
 export class CustomerApiError extends Error {
@@ -43,6 +43,9 @@ export async function customerApi<T>(path: string, init: CustomerApiInit = {}): 
     "X-Tenant-Host": incoming.get("x-tenant-host") ?? "",
   };
   if (session) requestHeaders["X-Customer-Session"] = session;
+  // O carrinho de quem entrou pela senha da loja depende do passe (docs/14 §3).
+  const pass = (await cookies()).get(STORE_PASS_COOKIE)?.value;
+  if (pass) requestHeaders["X-Store-Pass"] = pass;
   Object.assign(requestHeaders, init.headers ?? {});
   const forwardedFor = incoming.get("x-forwarded-for");
   if (forwardedFor) requestHeaders["X-Forwarded-For"] = forwardedFor;

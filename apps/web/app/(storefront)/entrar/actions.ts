@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
-import { CUSTOMER_SESSION_COOKIE, safeStorePath } from "@/lib/customer-cookies";
+import { CUSTOMER_SESSION_COOKIE, customerCookie, safeStorePath, STORE_PASS_COOKIE } from "@/lib/customer-cookies";
 import { destinationAfterSignIn, keepSession, type SignedIn } from "@/lib/customer-signin";
 import { getStorefrontContext } from "@/lib/server-context";
 
@@ -43,7 +43,27 @@ async function previousSession(): Promise<string | null> {
 
 async function signedIn(done: SignedIn): Promise<never> {
   await keepSession(done);
-  redirect(destinationAfterSignIn(await getStorefrontContext(), done));
+  const hasPass = Boolean((await cookies()).get(STORE_PASS_COOKIE));
+  redirect(destinationAfterSignIn(await getStorefrontContext(), done, hasPass));
+}
+
+/** "Tenho a senha da loja": a API confere e devolve o passe, que vira cookie desta loja. */
+export async function enterWithStorePassword(form: FormData): Promise<void> {
+  const next = safeStorePath(field(form, "next", 512) || "/loja");
+  let entered: { pass_token: string; expires_at: string };
+  try {
+    entered = await customerApi("/internal/storefront/password", {
+      json: { password: field(form, "store_password", 64) },
+      session: null,
+    });
+  } catch (error) {
+    const code =
+      error instanceof CustomerApiError && error.code === "invalid_store_password" ? "senha_loja" : errorCode(error);
+    redirect(`/entrar?${new URLSearchParams({ erro: code, next }).toString()}`);
+  }
+  const maxAge = Math.max(0, Math.floor((Date.parse(entered.expires_at) - Date.now()) / 1000));
+  (await cookies()).set(STORE_PASS_COOKIE, entered.pass_token, customerCookie(maxAge));
+  redirect(next);
 }
 
 export async function loginWithPassword(form: FormData): Promise<void> {

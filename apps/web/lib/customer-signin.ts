@@ -22,9 +22,14 @@ export function sessionMaxAge(done: SignedIn): number {
  * Para onde a pessoa vai depois de entrar. Loja que só mostra o catálogo a cliente aprovado manda
  * quem ainda não foi aprovado para a tela de pedir acesso, em vez de um 403.
  */
-export function destinationAfterSignIn(context: StorefrontContext | null, done: SignedIn): string {
+export function destinationAfterSignIn(
+  context: StorefrontContext | null,
+  done: SignedIn,
+  hasPass = false,
+): string {
   const target = safeStorePath(done.return_to);
-  const needsAccess = context?.access_mode === "whitelist" && done.access_status !== "approved";
+  // Quem já entrou pela senha da loja não precisa de aprovação para ver a vitrine.
+  const needsAccess = context?.access_mode === "whitelist" && done.access_status !== "approved" && !hasPass;
   return needsAccess ? `/acesso-pendente?next=${encodeURIComponent(target)}` : target;
 }
 

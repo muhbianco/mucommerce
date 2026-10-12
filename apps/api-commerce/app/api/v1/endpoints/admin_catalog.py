@@ -91,6 +91,7 @@ def _product_read(view: ProductView) -> ProductRead:
         promo_ends_at=product.promo_ends_at,
         promo_ends_on_sellout=product.promo_ends_on_sellout,
         promo_sold_out_at=product.promo_sold_out_at,
+        home_exposure=product.home_exposure,
         cost_cents_estimate=product.cost_cents_estimate,
         stock_policy=product.stock_policy,
         sold_by=product.sold_by,

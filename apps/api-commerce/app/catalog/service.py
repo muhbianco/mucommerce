@@ -117,6 +117,7 @@ _PRODUCT_AUDITED = (
     "promo_ends_at",
     "promo_ends_on_sellout",
     "promo_sold_out_at",
+    "home_exposure",
     "stock_policy",
     "kind",
 )

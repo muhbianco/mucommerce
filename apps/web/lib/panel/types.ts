@@ -152,6 +152,8 @@ export interface Product extends ProductSummary {
   promo_ends_at: string | null;
   promo_ends_on_sellout: boolean;
   promo_sold_out_at: string | null;
+  /** Loja fechada com a home aberta: se o produto aparece para quem ainda não entrou. */
+  home_exposure?: "hidden" | "preview" | "open";
   cost_cents_estimate: number | null;
   stock_policy: string;
   sold_by: string;

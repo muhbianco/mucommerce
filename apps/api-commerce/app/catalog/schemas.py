@@ -34,6 +34,7 @@ RotationIn = Literal["any", "upright"]
 #: Medida própria da variação: positiva, ou null para herdar do produto.
 VariantMeasure = Annotated[int, Field(ge=1, le=1_000_000)]
 StockPolicyIn = Literal["tracked", "untracked", "made_to_order", "unlimited"]
+HomeExposureIn = Literal["hidden", "preview", "open"]
 ProductStatusFilter = Literal["draft", "active", "paused", "inactive", "archived"]
 
 MAX_CATEGORIES_PER_PRODUCT = 20
@@ -72,6 +73,8 @@ class _ProductFields(StrictModel):
     promo_ends_at: AwareDatetime | None = None
     #: Encerrar a promoção quando o estoque zerar (vale o que vier primeiro: data ou estoque).
     promo_ends_on_sellout: bool = False
+    #: Loja fechada com a home aberta: oculto, aparece (comprar pede acesso) ou aparece e compra.
+    home_exposure: HomeExposureIn = "hidden"
     cost_cents_estimate: Money | None = None
     stock_policy: StockPolicyIn = "tracked"
     sold_by: Literal["unit", "weight"] = "unit"
@@ -135,6 +138,7 @@ class ProductUpdate(StrictModel):
     promo_starts_at: AwareDatetime | None = None
     promo_ends_at: AwareDatetime | None = None
     promo_ends_on_sellout: bool | None = None
+    home_exposure: HomeExposureIn | None = None
     cost_cents_estimate: Money | None = None
     stock_policy: StockPolicyIn | None = None
     sold_by: Literal["unit", "weight"] | None = None
@@ -177,6 +181,7 @@ PRODUCT_REQUIRED_FIELDS = frozenset(
         "packing_flexible",
         "packing_ship_alone",
         "promo_ends_on_sellout",
+        "home_exposure",
     }
 )
 
@@ -323,6 +328,7 @@ class ProductRead(ProductSummary):
     promo_ends_on_sellout: bool
     #: Quando o estoque zerou e encerrou a promoção; nulo enquanto não aconteceu.
     promo_sold_out_at: datetime | None
+    home_exposure: str
     cost_cents_estimate: int | None
     stock_policy: str
     sold_by: str

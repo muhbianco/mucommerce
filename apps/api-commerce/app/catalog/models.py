@@ -147,6 +147,19 @@ class EventStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class HomeExposure(StrEnum):
+    """O produto na página inicial de uma loja fechada com a home aberta
+    (docs/14-pedidos-lunares.md §3). Na loja aberta tudo aparece; na toda fechada, nada."""
+
+    HIDDEN = "hidden"  # como antes: só quem tem acesso vê
+    PREVIEW = "preview"  # aparece na home e abre a página; comprar pede senha ou aprovação
+    OPEN = "open"  # aparece e vai direto ao carrinho (o login continua no carrinho)
+
+
+#: Expostos a quem ainda não tem acesso à vitrine.
+EXPOSED = frozenset({HomeExposure.PREVIEW, HomeExposure.OPEN})
+
+
 class StockPolicy(StrEnum):
     TRACKED = "tracked"
     UNTRACKED = "untracked"
@@ -237,6 +250,10 @@ class Product(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped
     #: Quando o estoque físico de todas as variações em promoção chegou a zero. Carimbo e não
     #: cálculo: repor o estoque não ressuscita a promoção; mexer nela rearma (limpa o carimbo).
     promo_sold_out_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    #: Loja fechada com a home aberta: se este produto aparece para quem ainda não entrou.
+    home_exposure: Mapped[str] = mapped_column(
+        String(8), nullable=False, default=HomeExposure.HIDDEN, server_default=text("'hidden'")
+    )
     cost_cents_estimate: Mapped[int | None] = mapped_column(BigInteger)
     stock_policy: Mapped[str] = mapped_column(
         String(16), nullable=False, default=StockPolicy.TRACKED
