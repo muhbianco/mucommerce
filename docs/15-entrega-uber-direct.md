@@ -102,4 +102,22 @@ Total da versão útil (F0–F3): **~7–8 dias de trabalho**, depois que houver
 
 ## Fatos verificados da Uber Direct
 
-_A preencher pela sonda, com data, chamada e resposta saneada._
+Sonda `apps/api-commerce/scripts/uber_direct_probe.py`, 13/10/2026, conta self-service criada pelo
+dono em Osasco/SP (saída em `probe-uber.json`, fora do git).
+
+| Pergunta | Resposta medida |
+|---|---|
+| Token | `POST auth.uber.com/oauth/v2/token` 200; `scope=eats.deliveries`, `expires_in=2592000` (30 dias). |
+| **Teste ou produção?** | As credenciais que o painel mostrou **são de produção**: criar com `test_specifications` dá 400 `invalid_params` "test_specifications not allowed for production requests". **E o `live_mode` da resposta veio `false` mesmo assim** — não serve para saber o modo. |
+| Cotação | 200; `fee` em **centavos** (1240 = R$ 12,40), `currency: "brl"`, `expires` = criação + **15 min**, `pickup_duration` (min), `duration` (min), `dropoff_eta`, `dropoff_deadline`, `external_store_id` ecoado. |
+| Endereço | Estruturado (JSON em texto, `street_address[]`, `city`, `state`, `zip_code`, `country: "BR"`) e texto livre dão o **mesmo preço**. A Uber normaliza (`detailed_address`) e geocodifica (`location.lat/lng`). |
+| Lat/long | **Mudam o preço** (coordenadas aproximadas deram R$ 18,10 contra R$ 12,40): ou exatas, ou não mandar. |
+| **Raio** | 400 `address_undeliverable`: "Max Radius: **3.11 miles**" (~5 km) entre coleta e entrega nesta conta. As zonas com Uber têm de caber nisso. |
+| Criação | 200 (produção, agendada para +2 dias); `id` `del_…`, `quote_id` gerado sozinho quando não vem, `status: "pending"`, `external_id` e `manifest.reference` ecoados, **`tracking_url`** (`direct-order.uber.com/br/orders/…`), `pickup_ready/deadline`, `dropoff_ready/deadline`, `pickup_eta`/`dropoff_eta`, `courier: null` até designar, `return` (volta para a coleta). Itens ganham dimensões e peso padrão. |
+| Agendamento | `pickup_ready_dt`/`pickup_deadline_dt`/`dropoff_*_dt` aceitos para +2 dias. |
+| Cancelamento | `POST …/deliveries/{id}/cancel` 200, `status: "canceled"`. Cobrança de cancelamento: **a conferir no painel** (a entrega foi cancelada antes de qualquer entregador). |
+| Listagem | `GET …/deliveries?limit=2` 200, `{"total_count": -1, "data": [...]}`. |
+| Nome do cliente | A Uber abrevia o sobrenome na resposta ("Cliente T."). |
+
+**Ainda em aberto:** a sequência real de estados e os webhooks (assinatura, campos). Sem credencial de
+teste, isso só sai com uma entrega real (~R$ 12) ou com o ambiente de teste liberado pela Uber.
