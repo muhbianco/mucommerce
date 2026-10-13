@@ -693,7 +693,8 @@ async def set_customer_access(session: DbSession, store: Store, body: AccessIn) 
     from app.customers.release import release_by_phone
 
     store.require(Scope.CUSTOMERS_APPROVE, "libera clientes")
-    actor = Actor(id=f"chatwoot:{body.quem}"[:120]) if body.quem else _actor(store)
+    # O Chatwoot não diz quem marcou o contato; sem `quem`, fica "chatwoot" (não "assistente").
+    actor = Actor(id=f"chatwoot:{body.quem}"[:120] if body.quem else "chatwoot")
     result = await release_by_phone(
         session,
         store.context,
