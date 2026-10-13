@@ -658,6 +658,64 @@ async def advance_order(
     return ActionRead(acao=acao, aplicado=True, resumo=resumo, avisos=avisos)
 
 
+# ------------------------------------------------------------ liberar pelo Chatwoot
+
+
+class AccessIn(StrictModel):
+    """O lojista marcou (ou desmarcou) "Liberado na loja" num contato do Chatwoot."""
+
+    telefone: Annotated[str, Field(min_length=8, max_length=30)]
+    liberar: bool
+    nome: Annotated[str, Field(max_length=200)] | None = None
+    #: Id do contato no Chatwoot, guardado na linha de acesso para os dois lados se acharem.
+    chatwoot_contato_id: Annotated[int, Field(ge=1)] | None = None
+    #: Quem mexeu (e-mail do agente no Chatwoot), para o histórico dizer quem liberou.
+    quem: Annotated[str, Field(max_length=120)] | None = None
+
+
+class AccessRead(BaseModel):
+    cliente_id: str
+    situacao: str
+    mudou: bool
+
+
+@router.post(
+    "/customers/access",
+    response_model=AccessRead,
+    summary="Libera ou tira a liberação de uma pessoa pelo telefone (Chatwoot da loja)",
+)
+async def set_customer_access(session: DbSession, store: Store, body: AccessIn) -> AccessRead:
+    """Sem resumo-e-confirmação: quem decide é uma pessoa da loja, na tela do Chatwoot dela.
+
+    A permissão é a de liberar clientes (`customers:approve`) — o dono e quem ele deu esse papel
+    têm; a credencial do robô de vendas não tem, então um modelo de linguagem não chega aqui.
+    """
+    from app.customers.release import release_by_phone
+
+    store.require(Scope.CUSTOMERS_APPROVE, "libera clientes")
+    actor = Actor(id=f"chatwoot:{body.quem}"[:120]) if body.quem else _actor(store)
+    result = await release_by_phone(
+        session,
+        store.context,
+        phone=body.telefone,
+        release=body.liberar,
+        name=body.nome,
+        actor=actor,
+        chatwoot_contact_id=body.chatwoot_contato_id,
+    )
+    await session.commit()
+    logger.info(
+        "liberação pelo Chatwoot",
+        extra={
+            "tenant_id": store.context.id,
+            "liberar": body.liberar,
+            "situacao": result.status,
+            "mudou": result.changed,
+        },
+    )
+    return AccessRead(cliente_id=result.customer_id, situacao=result.status, mudou=result.changed)
+
+
 # ---------------------------------------------------------------------- mexer no estoque
 
 #: `entrada` é reposição (compra/produção); `ajuste` corrige o saldo; `perda` é quebra/vencido.

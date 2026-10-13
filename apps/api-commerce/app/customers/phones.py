@@ -26,7 +26,7 @@ from app.customers.models import CustomerPhone
 from app.models.base import utcnow
 from app.tenancy.context import CROSS_TENANT_OPTION
 
-SOURCES = frozenset({"checkout", "account", "whatsapp", "panel"})
+SOURCES = frozenset({"checkout", "account", "whatsapp", "panel", "chatwoot"})
 #: Um número com mais clientes que isso é ruído (número de loja digitado como de cliente).
 MAX_CUSTOMERS_PER_PHONE = 20
 
