@@ -67,8 +67,9 @@ test.describe("vitrine pública (loja modelo)", () => {
     await page.getByRole("link", { name: /Oficina de Brownie/ }).click();
     await expect(page).toHaveURL(/\/eventos\/oficina-de-brownie$/);
     await expect(page.getByRole("heading", { name: "Oficina de Brownie" })).toBeVisible();
-    await expect(page.getByRole("row", { name: /1º lote/ })).toContainText("À venda");
-    await expect(page.getByRole("row", { name: /2º lote/ })).toContainText("Em breve");
+    // Cada lote é um cartão (552a0e2), não mais uma linha de tabela.
+    await expect(page.getByRole("listitem").filter({ hasText: "1º lote" })).toContainText("À venda");
+    await expect(page.getByRole("listitem").filter({ hasText: "2º lote" })).toContainText("Em breve");
 
     const scripts = await page.locator('script[type="application/ld+json"]').allTextContents();
     const types = scripts.map((text) => (JSON.parse(text) as { "@type"?: string })["@type"]);
