@@ -265,6 +265,38 @@ export interface UberStatus {
   missing: ("chaves" | "coleta" | "zona")[];
 }
 
+/** Uma corrida da Uber do pedido (`courier_deliveries`). */
+export interface CourierDelivery {
+  id: string;
+  status: "requested" | "creating" | "awaiting_confirmation" | "active" | "cancelling" | "delivered" | "failed" | "cancelled";
+  provider_status: string | null;
+  environment: "test" | "production";
+  fee_cents: number | null;
+  quoted_fee_cents: number | null;
+  max_fee_cents: number | null;
+  tracking_url: string | null;
+  courier_name: string | null;
+  courier_vehicle: string | null;
+  pickup_eta: string | null;
+  dropoff_eta: string | null;
+  last_error: string | null;
+  attempts: number;
+  requested_by_actor: string;
+  created_at: string;
+  dispatched_at: string | null;
+  picked_up_at: string | null;
+  delivered_at: string | null;
+  closed_at: string | null;
+}
+
+/** `GET /admin/tenants/{id}/orders/{order}/courier`. */
+export interface CourierRead {
+  open: CourierDelivery | null;
+  history: CourierDelivery[];
+  missing: ("pronto" | "chaves" | "coleta")[];
+  uber_zone: boolean;
+}
+
 export interface DeliveryWindow {
   weekday: number;
   start: string;

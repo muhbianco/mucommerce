@@ -152,3 +152,25 @@ export async function dispatchShipment(form: FormData): Promise<void> {
     });
   });
 }
+
+const COURIER_ACTIONS = new Set(["request", "confirm", "cancel", "own", "refresh"]);
+
+/**
+ * A corrida da Uber do pedido (docs/15): chamar (ou chamar de novo), "chamar mesmo assim" acima
+ * do teto, cancelar, "levar eu mesmo" e atualizar. Chamar gasta na conta Uber da loja: a API só
+ * aceita de quem movimenta pedido.
+ */
+export async function courierAction(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const orderId = id(text(form, "order_id"));
+  const acao = text(form, "courier_action");
+  if (!COURIER_ACTIONS.has(acao)) throw new FormError("id_invalido");
+  await run(`${page}/pedidos/${orderId}`, `uber_${acao}`, async () => {
+    const base = `${path}/orders/${orderId}/courier`;
+    if (acao === "cancel" || acao === "own") {
+      await api(`${base}/cancel`, { method: "POST", json: { own: acao === "own" } });
+      return;
+    }
+    await api(`${base}/${acao}`, { method: "POST", json: {} });
+  });
+}

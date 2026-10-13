@@ -79,6 +79,11 @@ const OK: Record<string, string> = {
   uber_config: "Coleta e chamada da Uber salvas.",
   uber_conectada: "Chaves da Uber guardadas. O resultado da conferência está na seção Entrega pela Uber.",
   uber_testada: "Teste feito: o resultado está na seção Entrega pela Uber.",
+  uber_request: "Uber chamada. O resultado está no quadro Entrega pela Uber.",
+  uber_confirm: "Corrida confirmada com o valor cotado.",
+  uber_cancel: "Corrida da Uber cancelada.",
+  uber_own: "Corrida da Uber cancelada: a sua equipe leva. Marque \"Saiu para entrega\" quando sair.",
+  uber_refresh: "Situação da corrida atualizada.",
   uber_desconectada: "Conta da Uber desconectada. As zonas da Uber continuam no checkout, mas ninguém é chamado.",
 };
 
@@ -203,6 +208,10 @@ const ERRORS: Record<string, string> = {
   "validation_error.uber_refused_customer":
     "As chaves valem, mas o Customer ID não é da mesma conta. Copie o Customer ID da aba Developer dessa conta.",
   "validation_error.uber_not_connected": "Conecte a conta da Uber antes de testar.",
+  courier_in_progress: "Este pedido já tem uma corrida da Uber em andamento.",
+  "validation_error.courier_not_ready": "Marque o pedido como Pronto antes de chamar a Uber.",
+  "validation_error.courier_not_delivery": "Só pedido de entrega chama a Uber.",
+  "validation_error.uber_unavailable": "A Uber não respondeu agora. Tente de novo em instantes.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 

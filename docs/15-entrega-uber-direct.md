@@ -90,9 +90,9 @@ Total da versão útil (F0–F3): **~7–8 dias de trabalho**, depois que houver
 
 ### F1 feita (13/10/2026, branch `feat/uber-direct-f1`)
 
-Só configuração: **nada chama a Uber ainda** além da conferência das chaves. Não vai para produção
-sozinha — uma loja marcaria zona da Uber, o checkout pediria o telefone e ninguém seria chamado.
-Sobe junto com a F2.
+Só configuração: nada chamava a Uber além da conferência das chaves. Não ia para produção sozinha
+— uma loja marcaria zona da Uber, o checkout pediria o telefone e ninguém seria chamado. Sobe com a
+F2 (abaixo).
 
 - `DeliveryZone.courier` (`own` | `uber`), copiado para o retrato do pedido (`fulfillment.courier`).
 - `delivery.origin` (coleta com telefone obrigatório) e `delivery.uber` (`auto_dispatch`,
@@ -111,6 +111,33 @@ Sobe junto com a F2.
 - Painel: "Quem entrega" por zona e a seção "Entrega pela Uber" em Entrega e checkout.
 - Testes: `tests/test_delivery_uber.py`, `apps/web/e2e/uber.spec.ts` (Uber de mentira em
   `tests/e2e/server.py`, `/__e2e/uber`).
+
+### F2 feita (13/10/2026, mesma branch)
+
+O "Pronto" chama de verdade. Sem webhook ainda: a situação da corrida só muda quando alguém clica
+"Atualizar" no pedido, e o pedido não anda sozinho para "Saiu"/"Entregue" — isso é a F3.
+
+- `courier_deliveries` (migration 0050): uma linha por tentativa, `active_marker` único por
+  pedido (dois entregadores para o mesmo pedido o banco recusa). O id da linha é a
+  `idempotency_key` e o `external_id` na Uber.
+- `app/courier/uber.py`: cotar, criar, consultar, cancelar (`cancel_delivery`, porque a regra de
+  arquitetura só deixa `.cancel(` no cancelamento de pedido). Token guardado no cofre da loja com
+  a validade, renovado com um dia de folga ou quando a Uber responde 401 (uma vez).
+- `app/courier/service.py`: reservar → reivindicar (commit) → Uber sem transação aberta →
+  registrar só se a reivindicação ainda é dele. A cotação é gravada **antes** de criar; tentativa
+  seguinte procura `del_X` da cotação antes de cotar de novo (resposta perdida não vira duas
+  corridas). Acima do teto: `awaiting_confirmation`, nada criado. Falha definitiva ou 5 tentativas
+  sem resposta: `failed` com o motivo, e a loja chama de novo ou leva.
+- Outbox (`courier`): `order.status_changed` para `ready_for_pickup` reserva (zona da Uber e
+  chamada automática ligada); `order.cancelled` pede o cancelamento. Só banco; quem chama a Uber é
+  o varredor `app.workers.courier.run_couriers` (beat a cada 10 s, fila padrão).
+- Painel: `/admin/tenants/{id}/orders/{order}/courier` (`orders:transition`) — ler, chamar,
+  "chamar mesmo assim", cancelar, "levar eu mesmo", atualizar — e o quadro "Entrega pela Uber" no
+  pedido de entrega.
+- Testes: `tests/test_courier_uber.py` (Uber de mentira com memória: `dqt_X` → `del_X`, 409 na
+  chave repetida, resposta perdida, 401) e o quadro no `e2e/uber.spec.ts`
+  (`/__e2e/orders/uber-sample`). A Uber de mentira do E2E recusa corrida sem entregador simulado.
+- Deploy: só a migration 0050 (expand) e o agendamento novo no beat; nenhuma variável nova.
 
 ## O que precisa do dono
 
@@ -143,5 +170,20 @@ dono em Osasco/SP (saída em `probe-uber.json`, fora do git).
 | Listagem | `GET …/deliveries?limit=2` 200, `{"total_count": -1, "data": [...]}`. |
 | Nome do cliente | A Uber abrevia o sobrenome na resposta ("Cliente T."). |
 
-**Ainda em aberto:** a sequência real de estados e os webhooks (assinatura, campos). Sem credencial de
-teste, isso só sai com uma entrega real (~R$ 12) ou com o ambiente de teste liberado pela Uber.
+**Custo da sonda de produção:** o "canário" da F0 (entrega agendada sem entregador simulado, cancelada
+no mesmo segundo) **foi cobrado: R$ 12,40**, o valor da cotação. A sonda não tem mais canário; toda
+criação leva `test_specifications`, e com chave de produção isso dá 400 sem criar nada.
+
+### Sandbox (chaves de teste, 13/10/2026, `--sandbox`, saída em `probe-uber-sandbox.json`)
+
+| Pergunta | Resposta medida |
+|---|---|
+| Chaves de teste | Aceitam `test_specifications.robo_courier_specification` (`mode: auto`); mesma URL de token e de API. `tracking_url` traz `tenancyOverride=uber/testing/...`. |
+| Estados do entregador simulado | `pending` → `pickup` → `dropoff` → `delivered` em ~5 min (consulta a cada 15 s; `pickup_complete` não apareceu nesse intervalo). `complete: true` no fim. |
+| Entregador | `courier: null` até designar; depois `name`, `phone_number`, `vehicle_make/model/color`, `public_phone_info.pin_code` (ligação mascarada). Guardamos nome e veículo, nunca o telefone. |
+| **Id da entrega** | `del_` + o sufixo da cotação: `dqt_X` vira `del_X` (também na criação sem `quote_id`, F0). É por aí que se acha a entrega quando a resposta da criação se perde. |
+| Idempotência | Mesma `idempotency_key` de novo → **409 `duplicate_delivery`** ("An active delivery like this already exists"), mesmo depois de cancelada. Não devolve a entrega: quem repete tem de consultar pelo id. |
+| Cancelamento | 200, `status: canceled`, `undeliverable_reason: cancelled_by_merchant_api`; ETAs voltam `1970-01-01` (ignorar). |
+| Fora de alcance | 400 `address_undeliverable` também no teste. |
+
+**Ainda em aberto:** os webhooks (assinatura, campos) — ficam para a F3, com o endereço por loja.

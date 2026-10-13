@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.notifications",
         "app.workers.shipping",
         "app.workers.landing",
+        "app.workers.courier",
     ],
 )
 
@@ -56,6 +57,8 @@ celery_app.conf.update(
         # O `task_time_limit` de 300 s já limita o estrago de uma que trave.
         "app.workers.landing.generate_landing_draft": {"queue": QUEUE_DEFAULT},
         "app.workers.landing.sweep_landing_drafts": {"queue": QUEUE_DEFAULT},
+        # Espera a Uber responder (até ~20 s por corrida): espera não é trabalho, fila padrão.
+        "app.workers.courier.run_couriers": {"queue": QUEUE_DEFAULT},
     },
     task_acks_late=True,
     task_reject_on_worker_lost=True,
@@ -121,6 +124,9 @@ celery_app.conf.update(
             "task": "app.workers.landing.sweep_landing_drafts",
             "schedule": 300.0,
         },
+        # O "Pronto" reserva a corrida; esta volta é quem chama a Uber. Dez segundos é o que a
+        # loja espera, no máximo, entre marcar pronto e a Uber procurar entregador.
+        "run-couriers": {"task": "app.workers.courier.run_couriers", "schedule": 10.0},
     },
 )
 

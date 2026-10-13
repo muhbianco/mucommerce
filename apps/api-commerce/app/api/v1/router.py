@@ -180,6 +180,7 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     admin_shipping.router,
     admin_shipping.orders_router,
     admin_delivery.router,
+    admin_delivery.orders_router,
     admin_shipping_packages.router,
     admin_shipping_packages.planning_router,
     admin_refunds.router,

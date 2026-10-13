@@ -7,9 +7,15 @@ acompanhamento, a referência do nosso pedido (`external_id`/`manifest_reference
 estados do entregador simulado, a consulta e o cancelamento.
 
 **Sem `--entrega-teste` nada é criado:** só token e cotações (de graça, sem efeito). Com a flag,
-cria entregas **com o entregador simulado** (`test_specifications.robo_courier_specification`),
-que só existe no modo de teste; se a resposta disser que a entrega é real (`live_mode` verdadeiro),
-a sonda cancela na hora e para.
+cria entregas **com o entregador simulado** (`test_specifications.robo_courier_specification`), e
+só com `--sandbox` (as chaves de teste).
+
+Toda criação leva o entregador simulado — `_post` recusa, antes da rede, qualquer `/deliveries`
+sem ele. É isso que protege: com chave de produção a Uber responde 400 ("test_specifications not
+allowed for production requests") e **não cria nada**. A F0 tinha um "canário" que tirava o
+entregador simulado para descobrir o modo pelo `live_mode`; o `live_mode` mentiu (veio `false` em
+produção), a entrega era real, e criar e cancelar no mesmo segundo custou R$ 12,40 ao dono. O
+canário não existe mais.
 
 As credenciais vêm de arquivos e só vão no corpo da requisição de token; o token só vai no
 cabeçalho. Nada disso aparece no terminal nem no arquivo de saída. Telefones, nomes de entregador e
@@ -20,8 +26,12 @@ Uso, dentro de apps/api-commerce:
     .venv\\Scripts\\python -m scripts.uber_direct_probe --out probe-uber.json
     .venv\\Scripts\\python -m scripts.uber_direct_probe --out probe-uber.json --entrega-teste
 
+    .venv\\Scripts\\python -m scripts.uber_direct_probe --sandbox --entrega-teste \\
+        --out probe-uber-sandbox.json
+
 Lê `~/.secrets/uber-direct-customer-id`, `-client-id` e `-client-secret` (ou os caminhos em
-`UBER_DIRECT_CUSTOMER_ID_FILE`, `UBER_DIRECT_CLIENT_ID_FILE`, `UBER_DIRECT_CLIENT_SECRET_FILE`).
+`UBER_DIRECT_CUSTOMER_ID_FILE`, `UBER_DIRECT_CLIENT_ID_FILE`, `UBER_DIRECT_CLIENT_SECRET_FILE`);
+com `--sandbox`, os mesmos nomes terminados em `-sandbox`.
 """
 
 from __future__ import annotations
@@ -151,6 +161,9 @@ class Sonda:
         return {"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"}
 
     def _post(self, passo: str, sufixo: str, corpo: dict[str, Any]) -> tuple[int, Any]:
+        if sufixo == "/deliveries" and "test_specifications" not in corpo:
+            # A trava que faltou na F0: criação sem entregador simulado é entrega de verdade.
+            sys.exit(f"Recusado antes da rede: '{passo}' criaria entrega sem entregador simulado.")
         resp = self._http.post(self._url(sufixo), json=corpo, headers=self._headers())
         return resp.status_code, self._anota(passo, "POST", "{customer}" + sufixo, corpo, resp)
 
@@ -249,46 +262,8 @@ class Sonda:
     def _real(self, dados: Any) -> bool:
         return isinstance(dados, dict) and dados.get("live_mode") is True
 
-    def canario(self) -> bool:
-        """Descobre se as credenciais são de teste sem chamar entregador nenhum.
-
-        Cria uma entrega com coleta só daqui a 2 dias (ninguém é designado antes disso, nem no
-        modo real), lê `live_mode` e cancela. Só devolve True com `live_mode` **explicitamente**
-        falso; ausente ou verdadeiro para a sonda.
-        """
-        from datetime import timedelta
-
-        daqui = datetime.now(UTC) + timedelta(days=2)
-        corpo = self._corpo_entrega(None, f"sonda-canario-{int(time.time())}")
-        corpo.pop("test_specifications")
-        corpo.update(
-            {
-                "pickup_ready_dt": daqui.isoformat(timespec="seconds").replace("+00:00", "Z"),
-                "pickup_deadline_dt": (daqui + timedelta(hours=1))
-                .isoformat(timespec="seconds")
-                .replace("+00:00", "Z"),
-                "dropoff_ready_dt": daqui.isoformat(timespec="seconds").replace("+00:00", "Z"),
-                "dropoff_deadline_dt": (daqui + timedelta(hours=3))
-                .isoformat(timespec="seconds")
-                .replace("+00:00", "Z"),
-            }
-        )
-        status, dados = self._post(
-            "canário: entrega agendada para daqui a 2 dias", "/deliveries", corpo
-        )
-        if status not in (200, 201) or not isinstance(dados, dict) or not dados.get("id"):
-            print("Canário não criado; sem como saber se é teste. Sonda para aqui.")
-            return False
-        self._post("canário: cancelar", f"/deliveries/{dados['id']}/cancel", {})
-        modo = dados.get("live_mode")
-        self.registro.append({"passo": "canário: live_mode", "live_mode": modo})
-        if modo is False:
-            print("Credenciais de TESTE confirmadas (live_mode=false).")
-            return True
-        print(f"live_mode={modo!r}: não é teste comprovado. Sonda para aqui.")
-        return False
-
-    def entrega_completa(self, quote_id: str | None) -> None:
+    def entrega_completa(self, quote_id: str | None) -> bool:
+        """Devolve False quando a Uber disse que as chaves são de produção (nada foi criado)."""
         referencia = f"sonda-{int(time.time())}"
         status, dados = self._post(
             "criar entrega (entregador simulado)",
@@ -296,7 +271,10 @@ class Sonda:
             self._corpo_entrega(quote_id, referencia),
         )
         if status not in (200, 201) or not isinstance(dados, dict) or not dados.get("id"):
-            return
+            if "production" in json.dumps(dados).lower():
+                print("A Uber diz que estas chaves são de PRODUÇÃO: nada foi criado. Sonda para.")
+                return False
+            return True
         entrega = str(dados["id"])
         if self._real(dados):
             self._post("CANCELAR: veio em modo real", f"/deliveries/{entrega}/cancel", {})
@@ -313,6 +291,7 @@ class Sonda:
             if situacao in {"delivered", "canceled", "returned"}:
                 break
         self.registro.append({"passo": "sequência de estados", "estados": vistos})
+        return True
 
     def entrega_cancelada(self, quote_id: str | None) -> None:
         referencia = f"sonda-cancel-{int(time.time())}"
@@ -346,20 +325,23 @@ def main() -> None:
     parser.add_argument(
         "--entrega-teste", action="store_true", help="cria entregas com o entregador simulado"
     )
+    parser.add_argument("--sandbox", action="store_true", help="usa as chaves de teste (-sandbox)")
     args = parser.parse_args()
+    if args.entrega_teste and not args.sandbox:
+        sys.exit("--entrega-teste só com --sandbox: com chave de produção a sonda não cria nada.")
 
+    fim = "-sandbox" if args.sandbox else ""
     sonda = Sonda(
-        _secret("UBER_DIRECT_CUSTOMER_ID_FILE", "uber-direct-customer-id"),
-        _secret("UBER_DIRECT_CLIENT_ID_FILE", "uber-direct-client-id"),
-        _secret("UBER_DIRECT_CLIENT_SECRET_FILE", "uber-direct-client-secret"),
+        _secret("UBER_DIRECT_CUSTOMER_ID_FILE", f"uber-direct-customer-id{fim}"),
+        _secret("UBER_DIRECT_CLIENT_ID_FILE", f"uber-direct-client-id{fim}"),
+        _secret("UBER_DIRECT_CLIENT_SECRET_FILE", f"uber-direct-client-secret{fim}"),
     )
     try:
         if not sonda.token():
             print("Token recusado; veja o arquivo de saída.")
         else:
             quote_id = sonda.cotacoes()
-            if args.entrega_teste and sonda.canario():
-                sonda.entrega_completa(quote_id)
+            if args.entrega_teste and sonda.entrega_completa(quote_id):
                 sonda.entrega_cancelada(quote_id)
                 sonda.lista()
     finally:

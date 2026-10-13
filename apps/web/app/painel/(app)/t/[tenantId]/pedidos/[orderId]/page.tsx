@@ -22,6 +22,7 @@ import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   DELIVERY_STATUS_LABEL,
   orderStatusLabel,
+  type CourierRead,
   type OrderDetail,
   PAYMENT_METHOD_LABEL,
   PAYMENT_PROVIDERS,
@@ -39,6 +40,7 @@ import styles from "../../../../../panel.module.css";
 import { Flash } from "../../flash";
 import { KeyValues, PageHeader, Pill, Section, TableWrap } from "../../ui";
 import { approveCustomer, decideRefund, dispatchShipment, moveOrder, requestRefund } from "../actions";
+import { CourierCard } from "./courier-card";
 import local from "./order.module.css";
 import { PackingList } from "./packing-list";
 
@@ -109,6 +111,17 @@ export default async function OrderPage({
   const semDocumento =
     porTransportadora && !(order.fulfillment?.address as { document_masked?: string } | undefined)?.document_masked;
   const plano = porTransportadora ? frozenPlanOf(order.fulfillment) : null;
+  // A corrida da Uber só existe em pedido de entrega, e só quem movimenta pedido a vê (a API
+  // pede o mesmo escopo de chamar: ver e chamar estão no mesmo quadro).
+  const podeMover = scopes.can("orders:transition");
+  const courier =
+    order.fulfillment_type === "delivery" && podeMover
+      ? await api<CourierRead>(`/admin/tenants/${tenantId}/orders/${orderId}/courier`).catch(() => null)
+      : null;
+  // Zona da equipe sem nada da Uber: o quadro não aparece (a loja que não usa Uber não o vê).
+  const mostraUber =
+    courier !== null &&
+    (courier.uber_zone || courier.open !== null || courier.history.length > 0 || !courier.missing.includes("chaves"));
   const volumes = shipment?.parcels ?? [];
   // Uma etiqueta por volume (Correios): cada volume tem a sua. Multivolume tem uma só, no topo.
   const porVolume = volumes.length > 1 && volumes.some((v) => v.label_url);
@@ -731,6 +744,16 @@ export default async function OrderPage({
               </form>
             ) : null}
           </Section>
+
+          {mostraUber && courier ? (
+            <CourierCard
+              tenantId={tenantId}
+              orderId={orderId}
+              courier={courier}
+              canMove={podeMover}
+              timezone={context.timezone}
+            />
+          ) : null}
 
           <Section title="Cliente">
             <KeyValues items={person} />

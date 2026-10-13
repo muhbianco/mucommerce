@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import itertools
 import json
 import os
 import sys
@@ -130,6 +131,7 @@ from app.cli import _seed_platform_in_session  # noqa: E402
 from app.core.database import SessionFactory, create_app_engine  # noqa: E402
 from app.core.scopes import TenantRole  # noqa: E402
 from app.coupons.service import CouponService  # noqa: E402
+from app.courier.service import run_couriers  # noqa: E402
 from app.identity.models import AdminUser, TenantMembership  # noqa: E402
 from app.integrations.credentials import CredentialStore  # noqa: E402
 from app.landing.gateway import FakeGateway  # noqa: E402
@@ -842,6 +844,142 @@ async def fake_uber_deliveries(customer_id: str) -> Response:
     return Response('{"data":[]}', 200, media_type="application/json")
 
 
+#: As corridas da Uber de mentira, como o sandbox respondeu: `dqt_X` vira `del_X`.
+UBER_CORRIDAS: dict[str, dict[str, Any]] = {}
+UBER_COTACOES = itertools.count(1)
+
+
+def _uber_json(status: int, body: dict[str, Any]) -> Response:
+    return Response(json.dumps(body), status, media_type="application/json")
+
+
+def _uber_corrida(did: str) -> dict[str, Any]:
+    c = UBER_CORRIDAS[did]
+    return {
+        "id": did,
+        "kind": "delivery",
+        "status": c["status"],
+        "fee": 1240,
+        "currency": "brl",
+        "tracking_url": f"https://direct-order.uber.com/br/orders/{did}",
+        "external_id": c["external_id"],
+        "courier": None,
+        "complete": c["status"] in ("delivered", "canceled"),
+        "undeliverable_reason": c.get("reason", ""),
+        "live_mode": False,
+    }
+
+
+@e2e.post("/uber/v1/customers/{customer_id}/delivery_quotes")
+async def fake_uber_quote(customer_id: str) -> Response:
+    return _uber_json(200, {"id": f"dqt_e2e{next(UBER_COTACOES)}", "fee": 1240, "currency": "brl"})
+
+
+@e2e.post("/uber/v1/customers/{customer_id}/deliveries")
+async def fake_uber_create(customer_id: str, request: Request) -> Response:
+    corpo = json.loads(await request.body())
+    # A suíte conecta com as chaves "de teste": corrida sem entregador simulado seria de verdade.
+    if "test_specifications" not in corpo:
+        return _uber_json(400, {"code": "invalid_params", "message": "e2e: sem simulado"})
+    did = "del_" + str(corpo["quote_id"])[4:]
+    UBER_CORRIDAS[did] = {"status": "pending", "external_id": corpo["external_id"]}
+    return _uber_json(200, _uber_corrida(did))
+
+
+@e2e.get("/uber/v1/customers/{customer_id}/deliveries/{delivery_id}")
+async def fake_uber_get(customer_id: str, delivery_id: str) -> Response:
+    if delivery_id not in UBER_CORRIDAS:
+        return _uber_json(404, {"code": "delivery_not_found"})
+    return _uber_json(200, _uber_corrida(delivery_id))
+
+
+@e2e.post("/uber/v1/customers/{customer_id}/deliveries/{delivery_id}/cancel")
+async def fake_uber_cancel(customer_id: str, delivery_id: str) -> Response:
+    if delivery_id not in UBER_CORRIDAS:
+        return _uber_json(404, {"code": "delivery_not_found"})
+    UBER_CORRIDAS[delivery_id] |= {"status": "canceled", "reason": "cancelled_by_merchant_api"}
+    return _uber_json(200, _uber_corrida(delivery_id))
+
+
+class UberSampleIn(BaseModel):
+    tenant: str = "muhbianco"
+
+
+@e2e.post("/orders/uber-sample")
+async def uber_sample(body: UberSampleIn) -> dict[str, str]:
+    """Um pedido de entrega pago e "Pronto", numa zona da Uber, copiado do último pedido da loja.
+    O checkout de entrega com endereço tem os testes dele; aqui se testa o quadro da corrida."""
+    async with SessionFactory() as session:
+        tenant = await TenantService(session).repo.get_by_slug(body.tenant)
+        assert tenant is not None
+        bind_session_tenant(session, tenant.id)
+        modelo = await session.scalar(select(Order).order_by(Order.placed_at.desc()).limit(1))
+        assert modelo is not None, "rode depois de checkout.spec: precisa de um pedido"
+        itens = list(
+            (
+                await session.execute(
+                    select(OrderItem).where(OrderItem.order_id == modelo.id).limit(20)
+                )
+            ).scalars()
+        )
+        numero = int(await session.scalar(select(func.max(Order.number))) or 0) + 1
+        agora = utcnow()
+        colunas = {
+            c.key: getattr(modelo, c.key)
+            for c in Order.__table__.columns
+            if c.key not in ("id", "created_at", "updated_at")
+        }
+        pedido = Order(
+            **colunas
+            | {
+                # Id baixo: as listas ordenam por id decrescente (ver shipping-sample).
+                "id": f"00000000-0000-4000-9000-{numero:012d}",
+                "number": numero,
+                "status": "ready_for_pickup",
+                "cart_id": None,
+                "idempotency_hash": f"e2e-uber-{numero}",
+                "fulfillment_type": "delivery",
+                "delivery_fee_cents": 800,
+                "fulfillment": {
+                    "name": "Centro de São Paulo",
+                    "fee_cents": 800,
+                    "courier": "uber",
+                    "address": {
+                        "recipient_name": "Bia E2E",
+                        "postal_code": "01310100",
+                        "street": "Av. Paulista",
+                        "number": "1000",
+                        "district": "Bela Vista",
+                        "city": "São Paulo",
+                        "state": "SP",
+                    },
+                },
+                "customer_snapshot": dict(modelo.customer_snapshot or {})
+                | {"phone": "5511988887777"},
+                "paid_at": agora,
+                "accepted_at": agora,
+                "shipped_at": None,
+                "expires_at": None,
+                "cancelled_at": None,
+                "refund_status": "none",
+                "refunded_cents": 0,
+                "risk_flags": None,
+                "version": 1,
+            }
+        )
+        session.add(pedido)
+        await session.flush()
+        for item in itens:
+            copia = {
+                c.key: getattr(item, c.key)
+                for c in OrderItem.__table__.columns
+                if c.key not in ("id", "order_id", "created_at", "updated_at")
+            }
+            session.add(OrderItem(**copia | {"order_id": pedido.id}))
+        await session.commit()
+        return {"order_id": pedido.id, "number": str(numero)}
+
+
 @e2e.post("/tick")
 async def tick(body: TickIn) -> dict[str, int]:
     """The beat, on demand: webhooks, reconciliation, deadlines, refunds, outbox and e-mails."""
@@ -860,6 +998,8 @@ async def tick(body: TickIn) -> dict[str, int]:
             await outbox.deliver(session, event_id, consumer)
             await session.commit()
     counts["events"] = len(dispatch)
+    # Depois do outbox: o "Pronto" reserva a corrida, e esta volta é quem chama a Uber.
+    counts["couriers"] = await run_couriers(SessionFactory, now)
     counts["emails"] = await run_send_notifications(SessionFactory, utcnow())
     return counts
 

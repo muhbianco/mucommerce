@@ -38,6 +38,8 @@ async function conectar(page: Page, secret: string, customer = "cliente-da-loja-
   await uber.getByLabel("Customer ID", { exact: true }).fill(customer);
   await uber.getByLabel("Client ID", { exact: true }).fill("client-da-loja-e2e");
   await uber.getByLabel("Client Secret", { exact: true }).fill(secret);
+  // Chaves "de teste": a Uber de mentira recusa corrida sem entregador simulado.
+  await uber.getByLabel("Ambiente das chaves").selectOption("test");
   await uber.getByRole("button", { name: /Conectar conta|Trocar chaves/ }).click();
 }
 
@@ -92,6 +94,30 @@ test("a loja conecta a Uber, marca a zona e informa a coleta", async ({ page }) 
 
   await uber.getByRole("button", { name: "Testar agora" }).click();
   await expect(page).toHaveURL(/ok=uber_testada/);
+  await expect(uber.getByText(/chaves de teste/)).toBeVisible();
+
+  // F2: o pedido pronto da zona da Uber chama o entregador pelo quadro do pedido.
+  const amostra = await page.request.post(`${API}/__e2e/orders/uber-sample`, { data: {} });
+  expect(amostra.ok()).toBeTruthy();
+  const { order_id: orderId } = (await amostra.json()) as { order_id: string };
+  await page.goto(`${PANEL}/t/${tenantId}/pedidos/${orderId}`);
+  const corrida = page.locator("section", { has: page.getByRole("heading", { name: "Entrega pela Uber" }) });
+  await expect(corrida.getByText(/A zona deste pedido é entregue pela Uber/)).toBeVisible();
+  await corrida.getByRole("button", { name: "Chamar a Uber" }).click();
+  await expect(page).toHaveURL(/ok=uber_request/);
+  await expect(corrida.getByText("Procurando entregador")).toBeVisible();
+  await expect(corrida.getByText("Teste", { exact: true })).toBeVisible();
+  await expect(corrida.getByText(/R\$\s?12,40 \(na sua conta Uber\)/)).toBeVisible();
+  await expect(corrida.getByRole("link", { name: "Abrir na Uber" })).toBeVisible();
+
+  await corrida.getByRole("button", { name: "Atualizar" }).click();
+  await expect(page).toHaveURL(/ok=uber_refresh/);
+  await corrida.getByRole("button", { name: "Levar eu mesmo" }).click();
+  await expect(page).toHaveURL(/ok=uber_own/);
+  await expect(corrida.getByText(/Última corrida:/)).toContainText("Cancelada");
+  await expect(corrida.getByRole("button", { name: "Chamar a Uber de novo" })).toBeVisible();
+
+  await page.goto(`${PANEL}/t/${tenantId}/entrega`);
 
   await uber.getByRole("button", { name: "Desconectar" }).click();
   await expect(page).toHaveURL(/ok=uber_desconectada/);

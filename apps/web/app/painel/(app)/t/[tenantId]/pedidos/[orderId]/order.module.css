@@ -293,3 +293,15 @@
     order: -1;
   }
 }
+
+/* Corridas anteriores da Uber: discretas, abrem sob demanda. */
+.courierHistory {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.courierHistory ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}

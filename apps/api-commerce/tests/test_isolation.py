@@ -95,6 +95,9 @@ COVERED_TENANT_SCOPED_TABLES = {
     # Telefone → cliente: o mapa é por loja (`test_lead_gate.py`), e o portão do robô só olha
     # a loja do vínculo.
     "customer_phones",
+    # Corrida da Uber: o pedido de outra loja não tem corrida aqui, nem para chamar —
+    # `test_courier_uber.py::test_corrida_de_outra_loja_nao_existe_aqui`.
+    "courier_deliveries",
 }
 
 

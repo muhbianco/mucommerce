@@ -8,23 +8,28 @@ Entrega e vai pelas configurações da loja.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.audit.writer import audit
-from app.core.exceptions import ValidationError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope
 from app.courier import uber
+from app.courier.models import CourierDelivery, CourierStatus
+from app.courier.service import CourierService, get_order
 from app.integrations.credentials import CredentialStore
 from app.models.base import utcnow
+from app.orders.models import Order
+from app.orders.state_machine import OrderStatus
 from app.schemas.common import StrictModel
 from app.tenancy.context import TenantContext
-from app.tenancy.service import TenantService
+from app.tenancy.service import Actor, TenantService
 from app.tenancy.settings_schemas import AccountCheck, fulfillment_settings
 
 router = APIRouter(prefix="/admin/tenants/{tenant_id}/delivery/uber", tags=["Painel — Envio"])
@@ -82,7 +87,8 @@ async def _status(session: AsyncSession, tenant_id: str) -> UberStatusRead:
     ]
     return UberStatusRead(
         connected=conectado,
-        masked={chave: valor[0] for chave, valor in guardado.items()},
+        # Só as três chaves da loja; o token guardado não é coisa que a tela mostre.
+        masked={c: v[0] for c, v in guardado.items() if c in uber.SECRET_KEYS},
         environment=cfg.uber.environment,
         auto_dispatch=cfg.uber.auto_dispatch,
         max_fee_cents=cfg.uber.max_fee_cents,
@@ -216,3 +222,181 @@ async def forget_uber_credentials(
     )
     await session.commit()
     return await _status(session, tenant.id)
+
+
+# ------------------------------------------------------------------ a corrida do pedido
+
+orders_router = APIRouter(
+    prefix="/admin/tenants/{tenant_id}/orders/{order_id}/courier", tags=["Painel — Envio"]
+)
+
+#: Chamar a Uber gasta na conta da loja, como comprar etiqueta: é de quem movimenta o pedido.
+CourierOperator = Annotated[TenantContext, Depends(require_tenant_scopes(Scope.ORDERS_TRANSITION))]
+OrderId = Annotated[str, Path(min_length=36, max_length=36)]
+
+
+class CourierDeliveryRead(BaseModel):
+    id: str
+    status: str
+    provider_status: str | None
+    environment: str
+    fee_cents: int | None
+    quoted_fee_cents: int | None
+    max_fee_cents: int | None
+    tracking_url: str | None
+    courier_name: str | None
+    courier_vehicle: str | None
+    pickup_eta: datetime | None
+    dropoff_eta: datetime | None
+    last_error: str | None
+    attempts: int
+    requested_by_actor: str
+    created_at: datetime
+    dispatched_at: datetime | None
+    picked_up_at: datetime | None
+    delivered_at: datetime | None
+    closed_at: datetime | None
+
+
+class CourierRead(BaseModel):
+    open: CourierDeliveryRead | None
+    history: list[CourierDeliveryRead]
+    #: O que impede chamar agora: `pronto` (o pedido não está Pronto), `chaves`, `coleta`.
+    missing: list[str]
+    #: A zona do pedido é da Uber (o "Pronto" chama sozinho quando a loja deixou).
+    uber_zone: bool
+
+
+class CourierCancelIn(StrictModel):
+    #: "Levar eu mesmo": cancela a corrida e a equipe da loja leva.
+    own: bool = False
+
+
+def _row_read(row: CourierDelivery) -> CourierDeliveryRead:
+    return CourierDeliveryRead.model_validate(row, from_attributes=True)
+
+
+async def _courier_read(session: AsyncSession, tenant_id: str, order: Order) -> CourierRead:
+    service = CourierService(session, tenant_id, Actor.system("panel"))
+    historico = await service.history(order.id)
+    aberta = next((r for r in historico if r.active_marker == 1), None)
+    cfg = await service.delivery_settings()
+    guardado = await CredentialStore(session, tenant_id).status(uber.PROVIDER)
+    faltando = [
+        nome
+        for nome, ok in (
+            ("pronto", order.status == OrderStatus.READY_FOR_PICKUP),
+            ("chaves", all(c in guardado for c in uber.SECRET_KEYS)),
+            ("coleta", cfg.origin is not None),
+        )
+        if not ok
+    ]
+    return CourierRead(
+        open=_row_read(aberta) if aberta is not None else None,
+        history=[_row_read(r) for r in historico if r is not aberta],
+        missing=faltando,
+        uber_zone=(order.fulfillment or {}).get("courier") == "uber",
+    )
+
+
+async def _delivery_order(session: AsyncSession, order_id: str, *, lock: bool = False) -> Order:
+    order = await get_order(session, order_id, lock=lock)
+    if order.fulfillment_type != "delivery":
+        raise NotFoundError("Este pedido não é de entrega.")
+    return order
+
+
+@orders_router.get("", response_model=CourierRead, summary="A corrida da Uber do pedido")
+async def read_courier(
+    session: DbSession, user: CurrentAdmin, tenant: CourierOperator, order_id: OrderId
+) -> CourierRead:
+    return await _courier_read(session, tenant.id, await _delivery_order(session, order_id))
+
+
+@orders_router.post(
+    "/request",
+    response_model=CourierRead,
+    summary="Chama a Uber para o pedido pronto (ou chama de novo)",
+    dependencies=[Depends(rate_limit("courier_request", 10, 60))],
+)
+async def request_courier(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CourierOperator,
+    order_id: OrderId,
+) -> CourierRead:
+    """Reserva a corrida e já chama: o operador vê o resultado na hora. Se a Uber não
+    responder, a corrida fica para o varredor tentar de novo."""
+    service = CourierService(session, tenant.id, admin_actor(request, user))
+    order = await _delivery_order(session, order_id, lock=True)
+    row = await service.reserve(order, auto=False)
+    assert row is not None
+    await session.commit()
+    await service.process(row.id)
+    return await _courier_read(session, tenant.id, await _delivery_order(session, order_id))
+
+
+@orders_router.post(
+    "/confirm",
+    response_model=CourierRead,
+    summary='"Chamar mesmo assim": aceita a cotação acima do teto',
+    dependencies=[Depends(rate_limit("courier_request", 10, 60))],
+)
+async def confirm_courier(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CourierOperator,
+    order_id: OrderId,
+) -> CourierRead:
+    service = CourierService(session, tenant.id, admin_actor(request, user))
+    order = await _delivery_order(session, order_id, lock=True)
+    row = await service.confirm_fee(order)
+    await session.commit()
+    await service.process(row.id)
+    return await _courier_read(session, tenant.id, await _delivery_order(session, order_id))
+
+
+@orders_router.post(
+    "/cancel",
+    response_model=CourierRead,
+    summary="Cancela a corrida da Uber (ou: a loja leva)",
+    dependencies=[Depends(rate_limit("courier_request", 10, 60))],
+)
+async def cancel_courier(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CourierOperator,
+    order_id: OrderId,
+    body: CourierCancelIn,
+) -> CourierRead:
+    service = CourierService(session, tenant.id, admin_actor(request, user))
+    await _delivery_order(session, order_id, lock=True)
+    motivo = "a loja vai levar" if body.own else "cancelada pela loja"
+    row = await service.request_cancel(order_id, reason=motivo)
+    if row is None:
+        raise ConflictError("Não há corrida aberta neste pedido.")
+    await session.commit()
+    if row.status == CourierStatus.CANCELLING:
+        await service.process(row.id)
+    return await _courier_read(session, tenant.id, await _delivery_order(session, order_id))
+
+
+@orders_router.post(
+    "/refresh",
+    response_model=CourierRead,
+    summary="Pergunta à Uber como está a corrida",
+    dependencies=[Depends(rate_limit("courier_refresh", 30, 60))],
+)
+async def refresh_courier(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: CourierOperator,
+    order_id: OrderId,
+) -> CourierRead:
+    await _delivery_order(session, order_id)
+    await CourierService(session, tenant.id, admin_actor(request, user)).refresh(order_id)
+    return await _courier_read(session, tenant.id, await _delivery_order(session, order_id))
