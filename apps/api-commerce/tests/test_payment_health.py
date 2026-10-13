@@ -166,3 +166,67 @@ async def test_only_platform_staff_read_the_health_page(
     page = await client.get(HEALTH, headers=operator_headers)
     assert page.status_code == 200
     assert page.json()["anomalies"]["paid_not_handled"] == 0 and page.json()["checked_at"]
+
+
+async def test_a_failed_refund_stops_counting_once_the_store_refunds_again(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    shop: Shop,  # noqa: F811
+) -> None:
+    """O estorno que falhou é dinheiro devido até a loja devolver de novo — depois, não é mais.
+
+    Antes, a falha alertava para sempre: o pedido #9 da SG Pipas disparava a cada cinco minutos
+    mesmo que a loja já tivesse devolvido pelo painel.
+    """
+    tenant, owner, me = shop
+    await client.put(
+        f"/api/v1/admin/tenants/{tenant.id}/payments/providers/fake",
+        json={"enabled": True},
+        headers=owner,
+    )
+    order, _ = await placed_order(client, session_factory, shop)
+    paid = await client.post(
+        f"/api/v1/checkout/orders/{order['id']}/payments",
+        json={
+            "provider": "fake",
+            "method": "card",
+            "card": {"token": fake.APPROVE_TOKEN, "payment_method_id": "visa", "installments": 1},
+        },
+        headers=me | {"Idempotency-Key": "01a0ca00-0000-4000-8000-00000000f00d"},
+    )
+    payment_id = paid.json()["id"]
+    then = utcnow() - timedelta(days=6)
+
+    def refund(status: str, at: Any) -> Refund:
+        return Refund(
+            tenant_id=tenant.id,
+            order_id=order["id"],
+            payment_id=payment_id,
+            amount_cents=100,
+            reason="teste",
+            kind="operator",
+            method="provider",
+            status=status,
+            requested_by_actor="admin:1",
+            requested_at=at,
+            created_at=at,
+        )
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        session.add(refund(RefundStatus.FAILED, then))
+        await session.commit()
+    assert (await _anomalies(session_factory))["refunds_failed"] == 1
+
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        session.add(refund(RefundStatus.COMPLETED, then + timedelta(days=1)))
+        await session.commit()
+    assert (await _anomalies(session_factory))["refunds_failed"] == 0
+
+    # Uma falha *nova*, depois da devolução que deu certo, volta a contar.
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        session.add(refund(RefundStatus.FAILED, then + timedelta(days=2)))
+        await session.commit()
+    assert (await _anomalies(session_factory))["refunds_failed"] == 1

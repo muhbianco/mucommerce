@@ -1,5 +1,7 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
+
 import { api } from "@/lib/panel/api";
 
 import { FormError, id, money, optional, run, tenantBase, text } from "../form-kit";
@@ -71,6 +73,9 @@ export async function requestRefund(form: FormData): Promise<void> {
       json: lines.length
         ? { lines, reason, restock: form.get("restock") === "on" }
         : { amount_cents: money(form, "amount"), reason },
+      // A API exige a chave: é ela que impede um clique duplo de devolver o dinheiro duas vezes.
+      // Gerada uma vez por formulário; reenviar o mesmo formulário repete, não devolve de novo.
+      idempotencyKey: text(form, "idempotency_key") || randomUUID(),
     });
   });
 }

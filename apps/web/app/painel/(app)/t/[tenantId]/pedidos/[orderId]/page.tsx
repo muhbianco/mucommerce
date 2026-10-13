@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -346,6 +348,7 @@ export default async function OrderPage({
                   <summary>Devolver dinheiro ao cliente</summary>
                   <form action={requestRefund}>
                     {hidden}
+                    <input type="hidden" name="idempotency_key" value={randomUUID()} />
                     <fieldset className={local.plain}>
                       <legend className={styles.hint}>
                         Marque o que volta. O valor de cada item é calculado do que o cliente

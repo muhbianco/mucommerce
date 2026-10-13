@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.inventory.service import reserved_mismatches
 from app.notifications.models import DeliveryStatus, NotificationDelivery
@@ -21,6 +22,7 @@ from app.orders.models import Order
 from app.orders.state_machine import OrderStatus
 from app.payments.models import (
     ACTIVE_PAYMENT_STATUSES,
+    COUNTED_REFUND_STATUSES,
     InboxStatus,
     Payment,
     PaymentStatus,
@@ -82,7 +84,24 @@ async def payment_anomalies(session: AsyncSession, now: datetime) -> dict[str, i
         .where(Refund.updated_at < now - REFUND_STUCK)
         .limit(500)
     )
-    refunds_failed = select(Refund.id).where(Refund.status == RefundStatus.FAILED).limit(500)
+    # Falha que a loja já resolveu (devolveu de novo, ou registrou a devolução feita à mão) não é
+    # dinheiro devido: o que conta é a falha sem nenhuma devolução depois dela no mesmo pagamento.
+    # Sem isso, o estorno que falhou uma vez alertava para sempre (pedido #9 da SG Pipas).
+    later = aliased(Refund)
+    refunds_failed = (
+        select(Refund.id)
+        .where(Refund.status == RefundStatus.FAILED)
+        .where(
+            ~exists(
+                select(later.id)
+                .where(later.tenant_id == Refund.tenant_id)
+                .where(later.payment_id == Refund.payment_id)
+                .where(later.status.in_(COUNTED_REFUND_STATUSES))
+                .where(later.created_at > Refund.created_at)
+            )
+        )
+        .limit(500)
+    )
     emails_failed = (
         select(NotificationDelivery.id)
         .where(NotificationDelivery.status == DeliveryStatus.FAILED)

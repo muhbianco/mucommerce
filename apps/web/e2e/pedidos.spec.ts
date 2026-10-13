@@ -55,6 +55,27 @@ test("cliente: vê o pedido pronto para retirar e o aviso por e-mail", async ({ 
   expect(subjects.some((s: string) => s.includes("pronto para retirar"))).toBe(true);
 });
 
+test("painel: devolver parte do dinheiro pelo formulário do pedido", async ({ page }) => {
+  // O formulário "Devolver dinheiro ao cliente" não mandava a Idempotency-Key que a API exige, e
+  // toda devolução feita por ele morria em `idempotency_key_required` (SG Pipas, 13/10/2026).
+  await signInToPanel(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Pedidos" }).click();
+  await page.getByRole("row", { name: /Bia E2E/ }).first().getByRole("link").click();
+
+  await page.getByText("Devolver dinheiro ao cliente").click();
+  await page.getByRole("textbox", { name: /^Ou um valor/ }).fill("1,00");
+  await page.getByRole("textbox", { name: "Motivo da devolução" }).fill("brinde de teste");
+  await page.getByRole("button", { name: "Devolver dinheiro", exact: true }).click();
+  await expect(page).toHaveURL(/ok=devolucao/);
+
+  await page.request.post(`${API}/__e2e/tick`, { data: {} });
+  await page.reload();
+  const refund = page.getByRole("listitem").filter({ hasText: "brinde de teste" });
+  await expect(refund).toContainText("R$ 1,00");
+  await expect(refund).toContainText("Concluída");
+});
+
 test("painel: cancelar um pedido pago devolve o dinheiro e o estoque", async ({ page }) => {
   // A fresh order, paid and then cancelled by the store.
   await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
