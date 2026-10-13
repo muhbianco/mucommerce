@@ -18,7 +18,7 @@ Em 12/10 a Lunares ainda **não tem loja em produção**: ela compra pelo catál
 | Produto na home (fechado com home aberta) | Por produto: não aparece / aparece, mas comprar exige senha ou login / aparece e vai direto ao carrinho. |
 | Conta com e-mail e senha | **Por loja**: a senha criada na Lunares só vale na Lunares. A conta só nasce depois de confirmar o e-mail por link. |
 | Promoção | Nova opção "encerrar a promoção quando o estoque zerar": vale o que vier primeiro, data ou estoque. |
-| Frenet | Mesma estrutura do Melhor Envio (módulo, cotação, etiqueta, rastreio), atrás de um portão de fatos verificados. O dono já tem token de parceiro e de cliente. |
+| Frenet | Mesma estrutura do Melhor Envio (módulo, cotação, etiqueta, rastreio), atrás de um portão de fatos verificados. Em 13/10: o painel da Frenet do lojista só tem chave, senha e token ("Chaves de acesso"); o token de parceiro (`x-partner-token`) a Frenet só dá a plataforma parceira, por parceiros@frenet.com.br. Sem ele, a loja alcança cotação por itens e rastreio, e a etiqueta é gerada no painel da Frenet. |
 | Robô de vendas em loja fechada | **Cliente liberado** é o interruptor único. Lead novo do WhatsApp cai para humano e o robô só responde depois de o lojista liberar. A liberação é **pelo telefone**: o WhatsApp do checkout, o lead criado pelo próprio WhatsApp e, depois, o contato na caixa de pedidos do Chatwoot. Instagram e Facebook ficam para depois da aprovação da Meta. |
 
 ## 1. Promoção que acaba quando o estoque zera

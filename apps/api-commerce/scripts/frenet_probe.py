@@ -13,9 +13,11 @@ Uso (PowerShell ou bash), dentro de apps/api-commerce:
 
     .venv\\Scripts\\python -m scripts.frenet_probe --out probe-frenet.json
 
-Por padrão lê `~/.secrets/frenet-token` (token do cliente, o `token` da Frenet) e
-`~/.secrets/frenet-partner-token` (token de parceiro, o `x-partner-token`); dá para apontar outros
-com `FRENET_TOKEN_FILE` e `FRENET_PARTNER_TOKEN_FILE`.
+Por padrão lê `~/.secrets/frenet-token` (o token do painel da loja na Frenet, em "Chaves de
+acesso") e, se existir, `~/.secrets/frenet-partner-token` (o `x-partner-token`, que a Frenet só dá
+a plataforma parceira — não aparece no painel do lojista). Sem o de parceiro, a sonda pula tudo
+que é `whitelabel` e fica no que a loja sozinha alcança: serviços, cotação por itens e rastreio.
+Dá para apontar outros arquivos com `FRENET_TOKEN_FILE` e `FRENET_PARTNER_TOKEN_FILE`.
 
 O que cada teste responde:
   1. serviços: `GET api.frenet.com.br/shipping/info` — códigos, transportadoras, formato;
@@ -23,9 +25,10 @@ O que cada teste responde:
      2 volumes diferentes, e o mesmo pedido em camelCase (a doc mistura as grafias); unidades
      (kg/cm), seguro (`ShipmentItemValue`, `Services.DeclaredValue`), `SessionId`, preço em número
      ou texto, prazo;
-  3. cotação pública com **itens**: `POST api.frenet.com.br/shipping/quote` — 1 item x 2 itens,
-     para ver se a Frenet junta os itens numa caixa (o motor de embalagem é nosso: a Frenet não
-     pode reempacotar);
+  3. cotação pública com **itens**: `POST api.frenet.com.br/shipping/quote` — 1 item, 2 itens
+     diferentes e 1 item com quantidade 2, para ver se a Frenet junta os itens numa caixa (o motor
+     de embalagem é nosso: cada volume planejado iria como um item) e se o preço de 2 é a soma;
+     e os limites (105 cm, 31 kg, CEP inválido) também por itens;
   4. limites: lado de 105 cm, 31 kg, CEP inválido;
   5. tokens de parceiro aceitos: `GET whitelabel.frenet.com.br/v1/shipments?page=1&per_page=1`;
   6. rastreio de um código inventado: formato do erro.
@@ -56,9 +59,11 @@ DESTINO = "20040020"
 TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 
 
-def _secret(env: str, default: str) -> str:
+def _secret(env: str, default: str, *, required: bool = True) -> str | None:
     caminho = Path(os.environ.get(env) or default).expanduser()
     if not caminho.exists():
+        if not required:
+            return None
         sys.exit(f"Arquivo do token não encontrado ({env} ou {default}).")
     valor = caminho.read_text(encoding="utf-8").strip()
     if not valor:
@@ -67,19 +72,28 @@ def _secret(env: str, default: str) -> str:
 
 
 class Sonda:
-    def __init__(self, token: str, partner: str) -> None:
+    def __init__(self, token: str, partner: str | None) -> None:
         comum = {"Accept": "application/json", "Content-Type": "application/json"}
         self._api = httpx.Client(base_url=API, timeout=TIMEOUT, headers=comum | {"token": token})
-        self._wl = httpx.Client(
-            base_url=WHITELABEL,
-            timeout=TIMEOUT,
-            headers=comum | {"token": token, "x-partner-token": partner},
+        self._wl = (
+            httpx.Client(
+                base_url=WHITELABEL,
+                timeout=TIMEOUT,
+                headers=comum | {"token": token, "x-partner-token": partner},
+            )
+            if partner
+            else None
         )
         self.registro: list[dict[str, Any]] = []
 
+    @property
+    def parceiro(self) -> bool:
+        return self._wl is not None
+
     def close(self) -> None:
         self._api.close()
-        self._wl.close()
+        if self._wl is not None:
+            self._wl.close()
 
     def chama(
         self,
@@ -92,6 +106,8 @@ class Sonda:
         pessoal: bool = False,
     ) -> tuple[int, Any]:
         cliente = self._wl if onde == "whitelabel" else self._api
+        if cliente is None:
+            raise RuntimeError("chamada whitelabel sem token de parceiro")
         try:
             resposta = cliente.request(metodo, caminho, json=corpo)
             status, texto = resposta.status_code, resposta.text
@@ -176,48 +192,68 @@ def _camel(dados: Any) -> Any:
     return dados
 
 
-def _itens(*itens: dict[str, Any]) -> dict[str, Any]:
+def _itens(*itens: dict[str, Any], quantidade: int = 1, destino: str = DESTINO) -> dict[str, Any]:
     return {
         "SellerCEP": ORIGEM,
-        "RecipientCEP": DESTINO,
+        "RecipientCEP": destino,
         "ShipmentInvoiceValue": 150.0,
         "RecipientCountry": "BR",
-        "ShippingItemArray": [dict(item, Quantity=1) for item in itens],
+        "ShippingItemArray": [dict(item, Quantity=quantidade) for item in itens],
     }
 
 
 def rodar(sonda: Sonda) -> dict[str, Any]:
-    resultado: dict[str, Any] = {}
+    resultado: dict[str, Any] = {"parceiro": sonda.parceiro}
     status, _ = sonda.chama("1.servicos", "api", "GET", "/shipping/info")
     resultado["servicos_status"] = status
 
-    s1, um = sonda.chama(
-        "2.cotacao-1-volume", "whitelabel", "POST", "/v1/quotes", _cotacao([VOLUME_A])
-    )
-    s2, _ = sonda.chama(
-        "2.cotacao-2-volumes", "whitelabel", "POST", "/v1/quotes", _cotacao([VOLUME_A, VOLUME_B])
-    )
-    s3, _ = sonda.chama(
-        "2.cotacao-1-volume-camelCase",
-        "whitelabel",
-        "POST",
-        "/v1/quotes",
-        _camel(_cotacao([VOLUME_A])),
-    )
-    resultado["cotacao_volumes_status"] = [s1, s2, s3]
-
-    sonda.chama("3.itens-1", "api", "POST", "/shipping/quote", _itens(VOLUME_A))
-    sonda.chama("3.itens-2", "api", "POST", "/shipping/quote", _itens(VOLUME_A, VOLUME_B))
-
     grande = {"Weight": 5.0, "Length": 105, "Height": 20, "Width": 20}
     pesado = {"Weight": 31.0, "Length": 40, "Height": 30, "Width": 30}
-    sonda.chama("4.lado-105cm", "whitelabel", "POST", "/v1/quotes", _cotacao([grande]))
-    sonda.chama("4.peso-31kg", "whitelabel", "POST", "/v1/quotes", _cotacao([pesado]))
-    invalido = _cotacao([VOLUME_A]) | {"RecipientZipCode": "00000000"}
-    sonda.chama("4.cep-invalido", "whitelabel", "POST", "/v1/quotes", invalido)
 
-    status, _ = sonda.chama("5.envios", "whitelabel", "GET", "/v1/shipments?page=1&per_page=1")
-    resultado["parceiro_status"] = status
+    # O que a loja alcança sozinha: cotação por itens.
+    sonda.chama("3.itens-1", "api", "POST", "/shipping/quote", _itens(VOLUME_A))
+    sonda.chama(
+        "3.itens-2-diferentes", "api", "POST", "/shipping/quote", _itens(VOLUME_A, VOLUME_B)
+    )
+    sonda.chama(
+        "3.itens-1-quantidade-2", "api", "POST", "/shipping/quote", _itens(VOLUME_A, quantidade=2)
+    )
+    sonda.chama("3.itens-lado-105cm", "api", "POST", "/shipping/quote", _itens(grande))
+    sonda.chama("3.itens-peso-31kg", "api", "POST", "/shipping/quote", _itens(pesado))
+    sonda.chama(
+        "3.itens-cep-invalido",
+        "api",
+        "POST",
+        "/shipping/quote",
+        _itens(VOLUME_A, destino="00000000"),
+    )
+
+    um: Any = None
+    if sonda.parceiro:
+        s1, um = sonda.chama(
+            "2.cotacao-1-volume", "whitelabel", "POST", "/v1/quotes", _cotacao([VOLUME_A])
+        )
+        s2, _ = sonda.chama(
+            "2.cotacao-2-volumes",
+            "whitelabel",
+            "POST",
+            "/v1/quotes",
+            _cotacao([VOLUME_A, VOLUME_B]),
+        )
+        s3, _ = sonda.chama(
+            "2.cotacao-1-volume-camelCase",
+            "whitelabel",
+            "POST",
+            "/v1/quotes",
+            _camel(_cotacao([VOLUME_A])),
+        )
+        resultado["cotacao_volumes_status"] = [s1, s2, s3]
+        sonda.chama("4.lado-105cm", "whitelabel", "POST", "/v1/quotes", _cotacao([grande]))
+        sonda.chama("4.peso-31kg", "whitelabel", "POST", "/v1/quotes", _cotacao([pesado]))
+        invalido = _cotacao([VOLUME_A]) | {"RecipientZipCode": "00000000"}
+        sonda.chama("4.cep-invalido", "whitelabel", "POST", "/v1/quotes", invalido)
+        status, _ = sonda.chama("5.envios", "whitelabel", "GET", "/v1/shipments?page=1&per_page=1")
+        resultado["parceiro_status"] = status
 
     sonda.chama(
         "6.rastreio-inventado",
@@ -292,11 +328,13 @@ def main() -> None:
 
     sonda = Sonda(
         _secret("FRENET_TOKEN_FILE", "~/.secrets/frenet-token"),
-        _secret("FRENET_PARTNER_TOKEN_FILE", "~/.secrets/frenet-partner-token"),
+        _secret("FRENET_PARTNER_TOKEN_FILE", "~/.secrets/frenet-partner-token", required=False),
     )
     try:
         resultado = rodar(sonda)
         cotacao = resultado.pop("_cotacao_1_volume", None)
+        if args.etiqueta and not sonda.parceiro:
+            sys.exit("--etiqueta precisa do token de parceiro (a etiqueta é da API whitelabel).")
         if args.etiqueta:
             partes = json.loads(Path(args.etiqueta).read_text(encoding="utf-8"))
             resultado |= etiqueta(sonda, partes, cotacao)
