@@ -193,3 +193,32 @@ async def test_o_mapa_de_telefones_e_por_loja(
         await session.commit()
         linhas = (await session.execute(select(CustomerPhone))).scalars().all()
     assert len(linhas) == 1 and linhas[0].first_seen_at <= linhas[0].last_seen_at
+
+
+async def test_aprovado_com_o_telefone_na_conta_ja_e_atendido(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Any
+) -> None:
+    """O número está na conta de quem a loja já aprovou, mas ainda não no mapa da loja: a
+    primeira mensagem já cai no robô (antes, saía como lead novo e ficava calada)."""
+    tenant, _, _ = shop
+    await fechar(session_factory, tenant)
+    dono = await account_of(session_factory, tenant)
+    async with session_factory() as session:
+        pessoa = Customer(phone_e164=f"55{FONE}", full_name="Lia", status="active")
+        session.add(pessoa)
+        await session.flush()
+        bind_session_tenant(session, tenant.id)
+        session.add(
+            CustomerTenantAccess(
+                tenant_id=tenant.id,
+                customer_id=pessoa.id,
+                status=AccessStatus.APPROVED,
+                source="panel",
+            )
+        )
+        await session.commit()
+    assert await gate(client, dono) == {
+        "responder": True,
+        "motivo": "approved",
+        "cliente_id": pessoa.id,
+    }

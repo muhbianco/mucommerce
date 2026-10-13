@@ -179,3 +179,56 @@ async def test_the_list_filters_and_never_shows_another_stores_order(
     assert (
         await client.get(orders_url(other, order["id"]), headers=other_owner)
     ).status_code == 404
+
+
+async def test_os_ingressos_aparecem_no_pedido_do_comprador_e_no_painel(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    """Sem e-mail configurado, o pedido é o único lugar onde o comprador acha o ingresso."""
+    from sqlalchemy import select
+
+    from app.orders.models import OrderItem
+    from app.tenancy.context import bind_session_tenant
+    from app.tickets.models import Ticket
+
+    tenant, owner, me = shop
+    order, _ = await _paid_order(client, session_factory, shop)
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        item_id = await session.scalar(
+            select(OrderItem.id).where(OrderItem.order_id == order["id"])
+        )
+        assert item_id is not None
+        for seq, code in ((2, "ING-BBBBBBBBBB"), (1, "ING-AAAAAAAAAA")):
+            session.add(
+                Ticket(
+                    tenant_id=tenant.id,
+                    order_id=order["id"],
+                    order_item_id=item_id,
+                    seq=seq,
+                    code=code,
+                    event_id=item_id,
+                    lot_id=item_id,
+                    event_name="Show de Natal",
+                    lot_name="1º lote",
+                )
+            )
+        await session.commit()
+
+    comprador = (await client.get(f"/api/v1/me/orders/{order['id']}", headers=me)).json()
+    assert [t["code"] for t in comprador["tickets"]] == ["ING-AAAAAAAAAA", "ING-BBBBBBBBBB"]
+    assert comprador["tickets"][0] == {
+        "code": "ING-AAAAAAAAAA",
+        "status": "issued",
+        "event_name": "Show de Natal",
+        "lot_name": "1º lote",
+        "used_at": None,
+    }
+    painel = (await client.get(orders_url(tenant, order["id"]), headers=owner)).json()
+    assert [t["code"] for t in painel["order"]["tickets"]] == ["ING-AAAAAAAAAA", "ING-BBBBBBBBBB"]
+
+    # Pedido sem ingresso continua com a lista vazia, não sem o campo.
+    outro, _ = await placed_order(client, session_factory, shop)
+    assert (await client.get(f"/api/v1/me/orders/{outro['id']}", headers=me)).json()[
+        "tickets"
+    ] == []

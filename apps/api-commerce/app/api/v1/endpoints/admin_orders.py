@@ -24,7 +24,7 @@ from app.identity.models import CustomerTenantAccess
 from app.identity.repository import AdminUserRepository
 from app.notifications.models import NotificationDelivery
 from app.orders.models import Order
-from app.orders.schemas import OrderRead, order_read
+from app.orders.schemas import OrderRead, order_read, ticket_read
 from app.orders.service import OrderService
 from app.orders.state_machine import ActorKind, OrderStatus
 from app.payments.cancellation import cancel_order, dispatch_refunds
@@ -32,6 +32,7 @@ from app.payments.models import Payment, Refund
 from app.payments.schemas import PaymentRead, payment_read
 from app.schemas.common import StrictModel
 from app.tenancy.context import TenantContext
+from app.tickets.service import order_tickets
 
 router = APIRouter(prefix="/admin/tenants/{tenant_id}/orders", tags=["Painel — Pedidos"])
 
@@ -216,13 +217,15 @@ async def _detail(
             )
         ).scalars()
     )
+    lido = order_read(
+        order,
+        await service.items(order_id),
+        await service.history(order_id),
+        for_store=True,
+    )
+    lido.tickets = [ticket_read(t) for t in await order_tickets(session, order_id)]
     return OrderDetailRead(
-        order=order_read(
-            order,
-            await service.items(order_id),
-            await service.history(order_id),
-            for_store=True,
-        ),
+        order=lido,
         customer=dict(order.customer_snapshot or {}),
         customer_id=order.customer_id,
         customer_access=await session.scalar(

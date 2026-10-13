@@ -12,7 +12,10 @@ import {
   tenantPanelGate,
 } from "./tenant";
 
-const rules = { panelHost: "painel.muhbianco.com.br", platformBaseDomain: "loja.muhbianco.com.br" };
+const rules = {
+  panelHost: "painel.muhbianco.com.br",
+  platformBaseDomain: "loja.muhbianco.com.br",
+};
 
 describe("normalizeHost", () => {
   it("lowercases, strips port and trailing dot", () => {
@@ -97,6 +100,10 @@ describe("access gating", () => {
     expect(needsEntry("/entrar", locked)).toBe(false);
     expect(needsEntry("/entrar/criar", locked)).toBe(false);
     expect(needsEntry("/politicas/termos", locked)).toBe(false);
+    // Ingresso e portaria são links de capacidade: abrem com a loja fechada.
+    expect(needsEntry("/ingresso/ING-ABCDEF1234", locked)).toBe(false);
+    expect(needsEntry("/validar/ING-ABCDEF1234", locked)).toBe(false);
+    expect(requiresSession("/ingresso/ING-ABCDEF1234", "whitelist")).toBe(false);
     const open = { access_mode: "whitelist" as const, landing_locked: false };
     expect(needsEntry("/", open)).toBe(false);
     expect(needsEntry("/loja/produto/brownie", open)).toBe(false);

@@ -88,7 +88,17 @@ async def lead_gate(
             tenant_id=tenant.id,
             after={"source": "whatsapp"},
         )
-    return GateDecision(False, "new", customer.id)
+        return GateDecision(False, "new", customer.id)
+    # A pessoa já tinha linha nesta loja (aprovada pelo painel, por exemplo) com o telefone na
+    # conta, mas o número ainda não estava no mapa: vale a decisão que já existe.
+    status = await session.scalar(
+        select(CustomerTenantAccess.status).where(CustomerTenantAccess.customer_id == customer.id)
+    )
+    if status == AccessStatus.APPROVED:
+        return GateDecision(True, "approved", customer.id)
+    if status == AccessStatus.BLOCKED:
+        return GateDecision(False, "blocked", customer.id)
+    return GateDecision(False, "pending", customer.id)
 
 
 async def _customer_for(session: AsyncSession, phone: str, name: str | None) -> Customer:

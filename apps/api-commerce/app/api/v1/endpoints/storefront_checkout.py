@@ -19,7 +19,7 @@ from app.core.rate_limit import client_ip, rate_limit
 from app.identity.models import Customer
 from app.orders.commands import CartSource, Contact, PlaceOrder
 from app.orders.models import Order, OrderStatusHistory
-from app.orders.schemas import OrderRead, PlaceOrderIn, order_read
+from app.orders.schemas import OrderRead, PlaceOrderIn, order_read, ticket_read
 from app.orders.service import OrderService
 from app.orders.state_machine import OrderStatus
 from app.payments.models import ACTIVE_PAYMENT_STATUSES
@@ -34,6 +34,7 @@ from app.payments.schemas import (
 from app.payments.service import GAVE_UP, PaymentService
 from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import payments_settings
+from app.tickets.service import order_tickets
 
 router = APIRouter(tags=["Carrinho e checkout"])
 
@@ -63,7 +64,9 @@ async def customer_order_read(session: DbSession, service: OrderService, order: 
             )
         ).scalars()
     )
-    return order_read(order, await service.items(order.id), history)
+    lido = order_read(order, await service.items(order.id), history)
+    lido.tickets = [ticket_read(t) for t in await order_tickets(session, order.id)]
+    return lido
 
 
 @router.post(

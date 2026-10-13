@@ -12,6 +12,7 @@ from app.core.br_document import mask_document
 from app.orders.models import Order, OrderItem, OrderStatusHistory
 from app.pricing.quote import MILLI
 from app.schemas.common import StrictModel
+from app.tickets.models import Ticket
 
 EntityId = Annotated[str, Field(min_length=36, max_length=36)]
 
@@ -63,6 +64,26 @@ class OrderEventRead(BaseModel):
     reason: str | None
 
 
+class OrderTicketRead(BaseModel):
+    """Um ingresso do pedido. O código é o próprio ingresso: abre a página com o QR."""
+
+    code: str
+    status: str
+    event_name: str
+    lot_name: str
+    used_at: datetime | None
+
+
+def ticket_read(ticket: Ticket) -> OrderTicketRead:
+    return OrderTicketRead(
+        code=ticket.code,
+        status=ticket.status,
+        event_name=ticket.event_name,
+        lot_name=ticket.lot_name,
+        used_at=ticket.used_at,
+    )
+
+
 class OrderRead(BaseModel):
     id: str
     number: int
@@ -86,6 +107,9 @@ class OrderRead(BaseModel):
     refund_status: str
     items: list[OrderItemRead]
     timeline: list[OrderEventRead]
+    #: Ingressos emitidos pela plataforma (MuTickets). Antes só existiam no e-mail: sem e-mail,
+    #: o comprador não tinha como abrir o ingresso, nem a loja como imprimir.
+    tickets: list[OrderTicketRead] = []
 
 
 #: Chaves de `fulfillment` que são da loja, não do cliente: o plano de volumes congelado traz

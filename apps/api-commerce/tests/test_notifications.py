@@ -254,6 +254,12 @@ async def test_without_a_transport_the_email_is_recorded_as_skipped(
     tenant = await create_tenant(session_factory, "alpha")
     _, order_id = await _order_with_email(session_factory, tenant)
     await _run_notifier(session_factory, tenant, "order.placed", order_id)
+    # Na fila sempre: a loja pode ter o próprio SMTP, e quem sabe disso é o envio.
+    [row] = await _deliveries(session_factory)
+    assert row.status == DeliveryStatus.QUEUED
+    from app.notifications.jobs import run_send_notifications
+
+    await run_send_notifications(session_factory, utcnow())
     [row] = await _deliveries(session_factory)
     assert (row.status, row.next_attempt_at) == (DeliveryStatus.SKIPPED, None)
 

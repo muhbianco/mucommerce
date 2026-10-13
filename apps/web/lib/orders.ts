@@ -10,8 +10,28 @@ export interface OrderItem {
   modifiers: { name: string; price_cents: number }[];
   unit_price_cents: number;
   total_cents: number;
-  event: { lot_name?: string; starts_at?: string; venue_name?: string | null } | null;
+  event: {
+    lot_name?: string;
+    starts_at?: string;
+    venue_name?: string | null;
+  } | null;
 }
+
+/** Um ingresso emitido pela plataforma. O código abre a página com o QR (`/ingresso/<código>`). */
+export interface OrderTicket {
+  code: string;
+  status: "issued" | "used" | "refunded" | "void";
+  event_name: string;
+  lot_name: string;
+  used_at: string | null;
+}
+
+export const TICKET_STATUS_LABEL: Record<OrderTicket["status"], string> = {
+  issued: "Válido",
+  used: "Já utilizado",
+  refunded: "Estornado",
+  void: "Cancelado",
+};
 
 export interface Order {
   id: string;
@@ -34,6 +54,8 @@ export interface Order {
   refund_status: string;
   items: OrderItem[];
   timeline: { status: string; at: string; reason: string | null }[];
+  /** Ingressos do MuTickets. Vazio em pedido sem ingresso (ou com entrega própria da loja). */
+  tickets?: OrderTicket[];
 }
 
 export const ORDER_STATUS_LABEL: Record<string, string> = {

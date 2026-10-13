@@ -135,6 +135,21 @@ class TicketService:
         raise RuntimeError("Não foi possível gerar código de ingresso livre.")
 
 
+#: Teto de ingressos listados num pedido (o carrinho já limita as quantidades).
+MAX_ORDER_TICKETS = 500
+
+
+async def order_tickets(session: AsyncSession, order_id: str) -> list[Ticket]:
+    """Os ingressos de um pedido, na ordem das linhas. A sessão já está presa à loja."""
+    rows = await session.execute(
+        select(Ticket)
+        .where(Ticket.order_id == order_id)
+        .order_by(Ticket.order_item_id, Ticket.seq)
+        .limit(MAX_ORDER_TICKETS)
+    )
+    return list(rows.scalars())
+
+
 def ticket_view(ticket: Ticket) -> dict[str, Any]:
     return {
         "code": ticket.code,

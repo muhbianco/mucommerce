@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { api, requireMe } from "@/lib/panel/api";
 import { weightLabel } from "@/lib/panel/measure";
 import { frozenPlanOf } from "@/lib/panel/packaging";
+import { TICKET_STATUS_LABEL } from "@/lib/orders";
 import { tenantScopes } from "@/lib/panel/scopes";
 import {
   ORDER_STATE,
@@ -568,6 +569,38 @@ export default async function OrderPage({
                     : "Aceite o pedido antes de despachar."}
                 </p>
               ) : null}
+            </Section>
+          ) : null}
+
+          {order.tickets?.length ? (
+            // Só o código, sem link: o leitor de QR do painel (`/validar/<código>`) dá entrada
+            // ao abrir, e um clique aqui queimaria o ingresso do cliente.
+            <Section title="Ingressos" description="Emitidos pela plataforma para este pedido">
+              <TableWrap>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th scope="col">Código</th>
+                      <th scope="col">Lote</th>
+                      <th scope="col">Situação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {order.tickets.map((ticket) => (
+                      <tr key={ticket.code}>
+                        <td>
+                          <code>{ticket.code}</code>
+                        </td>
+                        <td>{ticket.lot_name}</td>
+                        <td>
+                          {TICKET_STATUS_LABEL[ticket.status] ?? ticket.status}
+                          {ticket.used_at ? <span className="muted"> — {when(ticket.used_at)}</span> : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
             </Section>
           ) : null}
 

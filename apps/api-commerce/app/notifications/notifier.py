@@ -88,7 +88,10 @@ async def notifier(session: AsyncSession, event: OutboxEvent) -> None:
     if event.event_type == "payment.requires_action" and not await _is_pix(session, event):
         return
     context = await _context(session, tenant, order, event)
-    queued = DeliveryStatus.QUEUED if settings.notify_n8n_url else DeliveryStatus.SKIPPED
+    # Sempre na fila: quem decide por onde sai é o envio (SMTP da loja, senão o n8n da
+    # plataforma, senão "pulada"). Decidir aqui pelo n8n jogava fora o e-mail da loja que
+    # configurou o próprio SMTP — em produção, todos os pedidos e ingressos saíam "pulados".
+    queued = DeliveryStatus.QUEUED
     builder = CUSTOMER_BUILDERS.get(event.event_type)
     if builder is not None:
         address = await _customer_email(session, order)

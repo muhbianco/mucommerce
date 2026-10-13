@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { CustomerApiError, customerApi } from "@/lib/customer-api";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
-import { type Order, orderStatusLabel } from "@/lib/orders";
+import { type Order, orderStatusLabel, TICKET_STATUS_LABEL } from "@/lib/orders";
 import { isPaymentErrorCode, type OrderPayment, paymentError } from "@/lib/payments";
 import { getStorefrontContext } from "@/lib/server-context";
 import { formatPrice } from "@/lib/storefront";
@@ -145,6 +145,26 @@ export default async function OrderPage({
         }
       >
         {payment ? <PaymentSection state={payment} when={when} /> : null}
+
+        {order.tickets?.length ? (
+          <Section title="Seus ingressos" variant="card">
+            <p className="muted">Abra cada ingresso para mostrar o QR code na entrada.</p>
+            <ul className={styles.reviewItems}>
+              {order.tickets.map((ticket) => (
+                <li key={ticket.code}>
+                  <span>
+                    <a href={`/ingresso/${encodeURIComponent(ticket.code)}`}>{ticket.code}</a>
+                    <span className="muted">
+                      {" "}
+                      · {ticket.event_name} ({ticket.lot_name})
+                    </span>
+                  </span>
+                  <span>{TICKET_STATUS_LABEL[ticket.status] ?? ticket.status}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        ) : null}
 
         <Section title="Andamento" variant="card">
           <ol className={styles.timeline}>

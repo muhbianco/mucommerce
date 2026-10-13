@@ -117,8 +117,24 @@ export function tenantPanelGate(pathname: string, tenantId: string): "ok" | "hom
   return "not_found";
 }
 
-/** Paths that render without login even when the store is `whitelist`/`login_required`. */
-const PUBLIC_PREFIXES = ["/", "/eventos", "/politicas", "/entrar", "/acesso-pendente", "/auth", "/healthz"];
+/**
+ * Paths that render without login even when the store is `whitelist`/`login_required`.
+ *
+ * `/ingresso/<código>` e `/validar/<código>` são links de capacidade: quem tem o código é quem
+ * comprou (ou a portaria, que ainda passa pelo login do painel). Pedir login de cliente da loja
+ * fechada para abri-los mandava o amigo que recebeu o ingresso, e a porta, para "Entrar".
+ */
+const PUBLIC_PREFIXES = [
+  "/",
+  "/eventos",
+  "/politicas",
+  "/entrar",
+  "/acesso-pendente",
+  "/auth",
+  "/healthz",
+  "/ingresso",
+  "/validar",
+];
 
 export function isPublicStorefrontPath(pathname: string): boolean {
   if (pathname === "/") return true;
@@ -140,7 +156,7 @@ export function requiresSession(pathname: string, accessMode: StorefrontContext[
 }
 
 /** Na loja toda fechada, só a porta (e o que ela usa) abre sem entrar. */
-const ENTRY_PREFIXES = ["/entrar", "/acesso-pendente", "/auth", "/politicas", "/healthz"];
+const ENTRY_PREFIXES = ["/entrar", "/acesso-pendente", "/auth", "/politicas", "/healthz", "/ingresso", "/validar"];
 
 /**
  * O caminho pede que o visitante tenha entrado — com a sessão de cliente ou com o passe da senha

@@ -1,5 +1,7 @@
 /** Shapes returned by api-commerce (v1) that the panel renders. */
 
+import type { OrderTicket } from "@/lib/orders";
+
 export interface Membership {
   tenant_id: string;
   tenant_slug: string;
@@ -498,6 +500,7 @@ export interface OrderDetail {
       event: { lot_name?: string } | null;
     }[];
     timeline: { status: string; at: string; reason: string | null }[];
+    tickets?: OrderTicket[];
   };
   customer: { name?: string; phone?: string; email?: string };
   customer_id?: string | null;
