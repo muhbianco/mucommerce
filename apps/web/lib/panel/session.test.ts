@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearRefreshCache, refreshOnce, type RefreshResult } from "./refresh";
 import {
   cookieOptions,
+  loginPath,
   needsRenewal,
   safeReturnPath,
   secondsUntilExpiry,
@@ -99,5 +100,21 @@ describe("logout", () => {
   it("expires session cookies with the attributes a __Host- cookie requires", async () => {
     const { EXPIRED_COOKIE } = await import("./token");
     expect(EXPIRED_COOKIE).toMatchObject({ secure: true, path: "/", maxAge: 0 });
+  });
+});
+
+describe("loginPath", () => {
+  it("volta para a página que pediu o login, inclusive a do leitor de ingresso", () => {
+    expect(loginPath("/t/abc/validar/ING-AAAAAAAAAA")).toBe("/entrar?next=%2Ft%2Fabc%2Fvalidar%2FING-AAAAAAAAAA");
+    expect(loginPath("/t/abc/pedidos?status=paid")).toBe("/entrar?next=%2Ft%2Fabc%2Fpedidos%3Fstatus%3Dpaid");
+  });
+
+  it("não aponta para fora nem para o próprio login", () => {
+    expect(loginPath(null)).toBe("/entrar");
+    expect(loginPath("/")).toBe("/entrar");
+    expect(loginPath("//evil.test/x")).toBe("/entrar");
+    expect(loginPath("https://evil.test")).toBe("/entrar");
+    expect(loginPath("/entrar?erro=x")).toBe("/entrar");
+    expect(loginPath("/sso/callback?code=x")).toBe("/entrar");
   });
 });

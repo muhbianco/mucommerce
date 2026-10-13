@@ -75,3 +75,16 @@ export function safeReturnPath(next: string | null | undefined): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/\\")) return "/";
   return next;
 }
+
+/** Header the middleware writes with the path the browser asked for (never trusted from outside). */
+export const PANEL_PATH_HEADER = "x-panel-path";
+
+/**
+ * The login page, coming back to `path` afterwards. A porta que lê o QR (`/validar/<código>`)
+ * caía no início do painel depois de entrar, e o ingresso tinha de ser lido de novo.
+ */
+export function loginPath(path: string | null | undefined): string {
+  const next = safeReturnPath(path);
+  if (next === "/" || next.startsWith("/entrar") || next.startsWith("/sso/")) return "/entrar";
+  return `/entrar?next=${encodeURIComponent(next)}`;
+}

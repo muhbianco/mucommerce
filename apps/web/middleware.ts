@@ -8,6 +8,7 @@ import {
   cookieOptions,
   EXPIRED_COOKIE,
   needsRenewal,
+  PANEL_PATH_HEADER,
   REFRESH_COOKIE,
   REFRESH_TTL_SECONDS,
   type TokenPair,
@@ -30,6 +31,7 @@ const TENANT_HEADERS = [
   "x-host-kind",
   "x-panel-tenant-id",
   "x-panel-tenant-slug",
+  PANEL_PATH_HEADER,
 ];
 
 export const config = {
@@ -63,6 +65,8 @@ function isPrefetch(request: NextRequest): boolean {
  */
 async function panel(request: NextRequest, headers: Headers, store: PanelHost | null = null): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
+  // Para o login voltar aonde a pessoa ia (a página não sabe o próprio endereço público).
+  headers.set(PANEL_PATH_HEADER, `${pathname}${request.nextUrl.search}`);
   if (store) {
     // Painel de uma loja: só aquela loja existe neste endereço.
     headers.set("x-host-kind", "tenant_panel");

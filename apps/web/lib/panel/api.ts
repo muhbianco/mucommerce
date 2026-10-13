@@ -3,7 +3,7 @@ import "server-only";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { ACCESS_COOKIE } from "./token";
+import { ACCESS_COOKIE, loginPath, PANEL_PATH_HEADER } from "./token";
 import type { Me } from "./types";
 
 /** An error envelope from api-commerce: `{"error": {"code", "message", "details"}}`. */
@@ -82,7 +82,9 @@ export async function requireMe(): Promise<Me> {
   try {
     return await api<Me>("/auth/me");
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) redirect("/entrar");
+    if (error instanceof ApiError && error.status === 401) {
+      redirect(loginPath((await headers()).get(PANEL_PATH_HEADER)));
+    }
     throw error;
   }
 }

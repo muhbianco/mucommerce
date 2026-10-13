@@ -32,6 +32,21 @@ test("código de login falso volta para a tela de entrar, no mesmo endereço", a
   await expect(page.getByRole("link", { name: "Entrar com Google" })).toBeVisible();
 });
 
+test("sem sessão, o login volta para a página que foi aberta", async ({ page, context }) => {
+  // A portaria abre /validar/<código> pelo QR; sem isso, depois de entrar caía no início do
+  // painel e o ingresso tinha de ser lido de novo.
+  await signIn(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Pedidos" }).click();
+  const pedidos = page.url();
+  await context.clearCookies();
+
+  await page.goto(pedidos);
+  await expect(page).toHaveURL(/\/entrar\?next=%2Ft%2F/);
+  await page.getByRole("link", { name: "Entrar com Google" }).click();
+  await expect(page).toHaveURL(pedidos);
+});
+
 test("criar produto; publicar sem imagem é recusado; vitrine não mostra", async ({ page }) => {
   await signIn(page);
   await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
