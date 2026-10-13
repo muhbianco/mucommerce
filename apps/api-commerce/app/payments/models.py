@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
@@ -272,6 +273,11 @@ class Refund(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
     order_id: Mapped[str] = mapped_column(String(36), nullable=False)
     payment_id: Mapped[str] = mapped_column(String(36), nullable=False)
     amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: Quanto de `amount_cents` é frete (a loja marcou "devolver também o frete"). É o que
+    #: impede o mesmo frete de voltar duas vezes.
+    shipping_cents: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     reason: Mapped[str] = mapped_column(String(200), nullable=False)
     kind: Mapped[str] = mapped_column(String(24), nullable=False)
     method: Mapped[str] = mapped_column(String(16), nullable=False)

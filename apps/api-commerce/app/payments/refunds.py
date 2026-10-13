@@ -39,7 +39,7 @@ from app.core.metrics import REFUNDS_COMPLETED
 from app.inventory.reservations import ReservationService
 from app.models.base import utcnow
 from app.orders.models import Order, OrderItem
-from app.orders.refund_lines import LineMoney, refund_cents
+from app.orders.refund_lines import LineMoney, LineRefund, refund_plan
 from app.orders.state_machine import RefundStatus as OrderRefundStatus
 from app.payments import registry
 from app.payments.config_service import PaymentConfigService
@@ -84,6 +84,18 @@ class NothingToRefundError(ConflictError):
     message = "Não há pagamento aprovado para devolver neste pedido."
 
 
+class AlreadyRefundedError(ConflictError):
+    """Os itens escolhidos já voltaram inteiros em devoluções anteriores."""
+
+    error_code = "already_refunded"
+    message = "Esses itens já foram devolvidos neste pedido."
+
+
+class ShippingAlreadyRefundedError(ConflictError):
+    error_code = "shipping_already_refunded"
+    message = "O frete deste pedido já foi devolvido (ou o pedido não tem frete)."
+
+
 class RefundStateError(ConflictError):
     error_code = "refund_state"
     message = "Esta devolução não está na situação que permite essa ação."
@@ -111,6 +123,7 @@ class RefundService:
         payment_id: str | None = None,
         lines: Mapping[int, int] | None = None,
         restock: bool = True,
+        include_shipping: bool = False,
     ) -> Refund:
         """Ask to give money back. The caller holds the order lock. `amount_cents=None`: all
         that can still be refunded. `payment_id`: which payment (default: the one that paid).
@@ -122,23 +135,39 @@ class RefundService:
         deixar a tela decidir quanto sai do caixa.
 
         Com `restock`, o que foi devolvido volta para a prateleira — só aquelas quantidades.
+
+        O que devoluções anteriores já cobriram de cada linha sai da conta: a mesma unidade não
+        volta duas vezes. `include_shipping` soma o frete que ainda não foi devolvido; sem
+        `lines`, devolve só o frete.
         """
         payment = await self.refundable_payment(order, payment_id)
         assert payment is not None  # required=True raises instead of returning None
         remaining = await self.remaining(payment)
-        por_linha: dict[int, int] = {}
+        plano: dict[int, LineRefund] = {}
         itens: list[OrderItem] = []
+        frete = 0
+        if include_shipping:
+            frete = max(
+                int(order.delivery_fee_cents or 0) - await self._shipping_refunded(order), 0
+            )
+            if frete <= 0:
+                raise ShippingAlreadyRefundedError()
         if lines:
             itens = await self._order_items(order.id)
-            calculado, por_linha = refund_cents(
+            plano = refund_plan(
                 [LineMoney(i.line_no, i.total_cents, i.quantity_milli) for i in itens],
                 lines,
                 subtotal_cents=order.subtotal_cents,
                 discount_cents=order.discount_cents,
+                already=await self._lines_refunded(order),
             )
-            if calculado <= 0:
-                raise NothingToRefundError()
-            amount = calculado
+            if not plano:
+                # Marcou só itens que já voltaram: dizer isso, em vez de devolver só o frete
+                # em silêncio ou um "nada a devolver" que não explica nada.
+                raise AlreadyRefundedError()
+            amount = sum(parte.cents for parte in plano.values()) + frete
+        elif include_shipping:
+            amount = frete
         else:
             amount = remaining if amount_cents is None else amount_cents
         if amount <= 0 or remaining <= 0:
@@ -158,6 +187,7 @@ class RefundService:
             order_id=order.id,
             payment_id=payment.id,
             amount_cents=amount,
+            shipping_cents=frete,
             reason=(reason or kind)[:200],
             kind=kind,
             method=method,
@@ -170,23 +200,21 @@ class RefundService:
         )
         self.session.add(refund)
         await self.session.flush()
-        if por_linha:
+        if plano:
             variantes = {i.line_no: i.variant_id for i in itens}
-            quantidades = {i.line_no: i.quantity_milli for i in itens}
             devolver: dict[str, int] = {}
-            for line_no, valor in sorted(por_linha.items()):
-                pedida = min(lines[line_no], quantidades.get(line_no, 0)) if lines else 0
+            for line_no, parte in sorted(plano.items()):
                 self.session.add(
                     RefundLine(
                         refund_id=refund.id,
                         line_no=line_no,
                         variant_id=variantes[line_no],
-                        quantity_milli=pedida,
-                        amount_cents=valor,
+                        quantity_milli=parte.quantity_milli,
+                        amount_cents=parte.cents,
                     )
                 )
                 variant_id = variantes[line_no]
-                devolver[variant_id] = devolver.get(variant_id, 0) + pedida
+                devolver[variant_id] = devolver.get(variant_id, 0) + parte.quantity_milli
             await self.session.flush()
             if restock:
                 await ReservationService(self.session, self.tenant, self.actor).return_some(
@@ -201,6 +229,12 @@ class RefundService:
     async def _order_items(self, order_id: str) -> list[OrderItem]:
         stmt = select(OrderItem).where(OrderItem.order_id == order_id).order_by(OrderItem.line_no)
         return list((await self.session.execute(stmt)).scalars())
+
+    async def _lines_refunded(self, order: Order) -> dict[int, LineRefund]:
+        return await lines_refunded(self.session, order.id)
+
+    async def _shipping_refunded(self, order: Order) -> int:
+        return await shipping_refunded(self.session, order.id)
 
     async def remaining(self, payment: Payment) -> int:
         counted = await self.session.scalar(
@@ -531,6 +565,36 @@ class RefundService:
 
 # ---------------------------------------------------------------------------------- jobs
 ACTOR = Actor.system("refunds")
+
+
+async def lines_refunded(session: AsyncSession, order_id: str) -> dict[int, LineRefund]:
+    """O que devoluções que contam (pedidas, aprovadas, em curso, feitas) já cobriram de cada
+    linha do pedido. A que falhou ou foi recusada não conta: o dinheiro não saiu."""
+    rows = await session.execute(
+        select(
+            RefundLine.line_no,
+            func.coalesce(func.sum(RefundLine.quantity_milli), 0),
+            func.coalesce(func.sum(RefundLine.amount_cents), 0),
+        )
+        .join(Refund, Refund.id == RefundLine.refund_id)
+        .where(Refund.order_id == order_id)
+        .where(Refund.status.in_(COUNTED_REFUND_STATUSES))
+        .group_by(RefundLine.line_no)
+    )
+    return {
+        int(line_no): LineRefund(quantity_milli=int(qty), cents=int(cents))
+        for line_no, qty, cents in rows.tuples()
+    }
+
+
+async def shipping_refunded(session: AsyncSession, order_id: str) -> int:
+    """Quanto do frete deste pedido já voltou (devoluções que contam)."""
+    total = await session.scalar(
+        select(func.coalesce(func.sum(Refund.shipping_cents), 0))
+        .where(Refund.order_id == order_id)
+        .where(Refund.status.in_(COUNTED_REFUND_STATUSES))
+    )
+    return int(total or 0)
 
 
 async def due_refunds(session: AsyncSession, now: datetime) -> list[tuple[str, str]]:

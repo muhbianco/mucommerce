@@ -29,6 +29,7 @@ from app.orders.service import OrderService
 from app.orders.state_machine import ActorKind, OrderStatus
 from app.payments.cancellation import cancel_order, dispatch_refunds
 from app.payments.models import Payment, Refund
+from app.payments.refunds import lines_refunded, shipping_refunded
 from app.payments.schemas import PaymentRead, payment_read
 from app.schemas.common import StrictModel
 from app.tenancy.context import TenantContext
@@ -98,6 +99,11 @@ class OrderDetailRead(BaseModel):
     customer_access: str | None = None
     payments: list[PaymentRead]
     refunds: list[RefundSummaryRead]
+    #: Quanto de cada linha (`line_no` → milésimos) já voltou em devoluções que contam. A tela
+    #: trava o item que voltou inteiro e oferece só o que sobra.
+    refunded_lines: dict[int, int] = {}
+    #: Quanto do frete já voltou. Igual ao frete do pedido: não há mais frete a devolver.
+    shipping_refunded_cents: int = 0
     emails: list[EmailRead]
     allowed_transitions: list[str]
     version: int
@@ -246,6 +252,11 @@ async def _detail(
             )
             for r in refunds
         ],
+        refunded_lines={
+            line_no: parte.quantity_milli
+            for line_no, parte in (await lines_refunded(session, order_id)).items()
+        },
+        shipping_refunded_cents=await shipping_refunded(session, order_id),
         emails=[
             EmailRead(
                 id=e.id,

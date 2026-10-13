@@ -593,3 +593,104 @@ async def test_item_e_valor_juntos_sao_recusados(
         lines=[{"line_no": 1, "quantity_milli": 1000}],
     )
     assert recusado.status_code == 422
+
+
+# ------------------------------------------------------------------ item duas vezes e frete
+
+
+async def _com_frete(
+    session_factory: async_sessionmaker[AsyncSession], order: dict[str, Any], frete: int
+) -> None:
+    """O pedido de teste é retirada; aqui ele passa a ter frete, pago junto."""
+    async with session_factory() as session:
+        await session.execute(
+            update(Order)
+            .where(Order.id == order["id"])
+            .values(delivery_fee_cents=frete, total_cents=Order.total_cents + frete)
+            .execution_options(**CROSS)
+        )
+        await session.execute(
+            update(Payment)
+            .where(Payment.order_id == order["id"])
+            .values(paid_amount_cents=Payment.paid_amount_cents + frete)
+            .execution_options(**CROSS)
+        )
+        await session.commit()
+
+
+async def test_o_mesmo_item_nao_volta_duas_vezes(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    """Pedido #9 da SG Pipas (13/10): o mesmo par de itens foi devolvido duas vezes."""
+    tenant, owner, _ = shop
+    order, _, _ = await paid_order(client, session_factory, shop)
+    # Como lá: sobra dinheiro no pagamento (o frete), então o total pago não segura nada.
+    await _com_frete(session_factory, order, 2549)
+    tudo = [{"line_no": 1, "quantity_milli": 2000}]
+
+    primeira = await ask_refund(client, tenant, owner, order["id"], lines=tudo)
+    assert primeira.status_code == 201, primeira.text
+    assert primeira.json()["amount_cents"] == 3000
+    de_novo = await ask_refund(client, tenant, owner, order["id"], lines=tudo)
+    assert de_novo.status_code == 409
+    assert de_novo.json()["error"]["code"] == "already_refunded"
+
+    detalhe = (
+        await client.get(f"/api/v1/admin/tenants/{tenant.id}/orders/{order['id']}", headers=owner)
+    ).json()
+    assert detalhe["refunded_lines"] == {"1": 2000}
+
+
+async def test_o_frete_volta_junto_dos_itens_uma_vez_so(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    tenant, owner, _ = shop
+    order, _, _ = await paid_order(client, session_factory, shop)
+    await _com_frete(session_factory, order, 500)
+
+    junto = await ask_refund(
+        client,
+        tenant,
+        owner,
+        order["id"],
+        lines=[{"line_no": 1, "quantity_milli": 1000}],
+        include_shipping=True,
+    )
+    assert junto.status_code == 201, junto.text
+    assert junto.json()["amount_cents"] == 1500 + 500
+    assert (await row(session_factory, Refund, junto.json()["id"])).shipping_cents == 500
+
+    so_frete = await ask_refund(client, tenant, owner, order["id"], include_shipping=True)
+    assert so_frete.status_code == 409
+    assert so_frete.json()["error"]["code"] == "shipping_already_refunded"
+    # A outra unidade continua devolvível; com ela, o pedido inteiro voltou.
+    resto = await ask_refund(
+        client, tenant, owner, order["id"], lines=[{"line_no": 1, "quantity_milli": 1000}]
+    )
+    assert resto.json()["amount_cents"] == 1500
+    nada = await ask_refund(client, tenant, owner, order["id"])
+    assert nada.status_code == 409
+
+    detalhe = (
+        await client.get(f"/api/v1/admin/tenants/{tenant.id}/orders/{order['id']}", headers=owner)
+    ).json()
+    assert detalhe["shipping_refunded_cents"] == 500
+
+
+async def test_so_o_frete_e_frete_com_valor(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], shop: Shop
+) -> None:
+    tenant, owner, _ = shop
+    order, _, _ = await paid_order(client, session_factory, shop)
+
+    sem_frete = await ask_refund(client, tenant, owner, order["id"], include_shipping=True)
+    assert sem_frete.status_code == 409  # pedido de retirada: não há frete
+
+    await _com_frete(session_factory, order, 700)
+    com_valor = await ask_refund(
+        client, tenant, owner, order["id"], include_shipping=True, amount_cents=100
+    )
+    assert com_valor.status_code == 422
+    so = await ask_refund(client, tenant, owner, order["id"], include_shipping=True)
+    assert so.status_code == 201, so.text
+    assert so.json()["amount_cents"] == 700

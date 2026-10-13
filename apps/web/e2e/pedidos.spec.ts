@@ -15,6 +15,32 @@ async function signInToPanel(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: /Olá, Admin E2E/ })).toBeVisible();
 }
 
+/** Bia compra uma camiseta G, retira na loja, e o Pix é pago: um pedido novo, só do teste. */
+async function camisetaPaga(page: Page): Promise<void> {
+  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
+  const product = `${STORE}/loja/produto/camiseta-muhbianco`;
+  await page.goto(`${STORE}/entrar?next=${encodeURIComponent("/loja/produto/camiseta-muhbianco")}`);
+  await page.getByRole("link", { name: "Entrar com Google" }).click();
+  await expect(page).toHaveURL(product);
+  const buy = page.getByRole("button", { name: "Comprar", exact: true });
+  await expect(buy).toBeEnabled();
+  await page.getByRole("radio", { name: "G" }).check();
+  await buy.click();
+  await page.getByLabel(/Retirar em Loja MuhBianco/).check();
+  await page.getByRole("button", { name: "Usar esta opção" }).click();
+  await page.getByRole("link", { name: "Finalizar compra" }).click();
+  const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
+  if (await accept.count()) await accept.check();
+  await page.getByRole("button", { name: "Fazer pedido" }).click();
+  // O pagamento dispara sozinho quando a loja oferece um jeito só.
+  await expect(page.getByLabel("Pix copia e cola")).toBeVisible(); // the payment exists now
+  const settled = await page.request.post(`${API}/__e2e/payments/settle`, {
+    data: { tenant: "muhbianco" },
+  });
+  expect((await settled.json()).webhook).toBe(200);
+  await expect(page.getByText("Pagamento aprovado")).toBeVisible({ timeout: 20_000 });
+}
+
 test("painel: a loja acompanha o pedido pago e marca como pronto", async ({ page }) => {
   await signInToPanel(page);
   await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
@@ -76,30 +102,43 @@ test("painel: devolver parte do dinheiro pelo formulário do pedido", async ({ p
   await expect(refund).toContainText("Concluída");
 });
 
+test("painel: o que já voltou de um item sai da conta e ele não volta duas vezes", async ({ page }) => {
+  // Pedido #9 da SG Pipas (13/10): o mesmo par de itens foi devolvido duas vezes. Pedido novo:
+  // o anterior já teve devolução por valor, e o item inteiro passaria do que resta.
+  await camisetaPaga(page);
+  await signInToPanel(page);
+  await page.getByRole("link", { name: "MuhBianco", exact: true }).click();
+  await page.getByRole("link", { name: "Pedidos" }).click();
+  await page.getByRole("row", { name: /Bia E2E/ }).first().getByRole("link").click();
+  const pedido = page.url();
+
+  const devolver = async (motivo: string, quantidade?: string) => {
+    await page.getByText("Devolver dinheiro ao cliente").click();
+    await page.locator('input[name="refund_line"]').first().check();
+    if (quantidade) await page.getByRole("spinbutton", { name: /Quantidade a devolver/ }).fill(quantidade);
+    await page.getByRole("textbox", { name: "Motivo da devolução" }).fill(motivo);
+    await page.getByRole("button", { name: "Devolver dinheiro", exact: true }).click();
+    await expect(page).toHaveURL(/ok=devolucao/);
+    await page.goto(pedido);
+  };
+
+  await devolver("metade voltou", "0.5");
+  await page.getByText("Devolver dinheiro ao cliente").click();
+  await expect(page.getByText(/0\.5 já devolvido/)).toBeVisible();
+  await expect(page.getByRole("spinbutton", { name: /Quantidade a devolver/ })).toHaveValue("0.5");
+  await page.getByText("Devolver dinheiro ao cliente").click(); // fecha
+
+  // O resto fecha o pedido: nada mais a devolver, o formulário some.
+  await devolver("o resto voltou");
+  await expect(page.getByText("Devolver dinheiro ao cliente")).toHaveCount(0);
+  await expect(page.getByRole("listitem").filter({ hasText: "o resto voltou" })).toContainText(
+    "Concluída",
+  );
+});
+
 test("painel: cancelar um pedido pago devolve o dinheiro e o estoque", async ({ page }) => {
   // A fresh order, paid and then cancelled by the store.
-  await page.request.post(`${FAKE_GOOGLE}/__e2e/identity`, { data: BIA });
-  const product = `${STORE}/loja/produto/camiseta-muhbianco`;
-  await page.goto(`${STORE}/entrar?next=${encodeURIComponent("/loja/produto/camiseta-muhbianco")}`);
-  await page.getByRole("link", { name: "Entrar com Google" }).click();
-  await expect(page).toHaveURL(product);
-  const buy = page.getByRole("button", { name: "Comprar", exact: true });
-  await expect(buy).toBeEnabled();
-  await page.getByRole("radio", { name: "G" }).check();
-  await buy.click();
-  await page.getByLabel(/Retirar em Loja MuhBianco/).check();
-  await page.getByRole("button", { name: "Usar esta opção" }).click();
-  await page.getByRole("link", { name: "Finalizar compra" }).click();
-  const accept = page.getByRole("checkbox", { name: /Li e aceito/ });
-  if (await accept.count()) await accept.check();
-  await page.getByRole("button", { name: "Fazer pedido" }).click();
-  // O pagamento dispara sozinho quando a loja oferece um jeito só.
-  await expect(page.getByLabel("Pix copia e cola")).toBeVisible(); // the payment exists now
-  const settled = await page.request.post(`${API}/__e2e/payments/settle`, {
-    data: { tenant: "muhbianco" },
-  });
-  expect((await settled.json()).webhook).toBe(200);
-  await expect(page.getByText("Pagamento aprovado")).toBeVisible({ timeout: 20_000 });
+  await camisetaPaga(page);
 
   await signInToPanel(page);
   await page.getByRole("link", { name: "MuhBianco", exact: true }).click();

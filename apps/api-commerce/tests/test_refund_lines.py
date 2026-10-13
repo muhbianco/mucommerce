@@ -94,3 +94,55 @@ def test_um_centavo_para_muitas_linhas_nao_vira_dinheiro_do_nada() -> None:
     linhas = [LineMoney(i, 1000, 1000) for i in range(1, 6)]
     por_linha = full_line_cents(linhas, pot=1)
     assert sum(por_linha.values()) == 1
+
+
+# ------------------------------------------------------------------ o que já foi devolvido
+
+
+def test_a_mesma_unidade_nao_volta_duas_vezes() -> None:
+    """Pedido #9 da SG Pipas (13/10): os dois itens foram devolvidos duas vezes."""
+    from app.orders.refund_lines import LineRefund, refund_plan
+
+    feito = {line.line_no: LineRefund(line.quantity_milli, 0) for line in PEDIDO_8}
+    tudo = {line.line_no: line.quantity_milli for line in PEDIDO_8}
+    assert (
+        refund_plan(
+            PEDIDO_8, tudo, subtotal_cents=SUBTOTAL_8, discount_cents=DESCONTO_8, already=feito
+        )
+        == {}
+    )
+
+
+def test_o_ultimo_pedaco_leva_o_que_sobrou_da_linha() -> None:
+    """Três unidades devolvidas uma a uma fecham o valor da linha, sem centavo preso."""
+    from app.orders.refund_lines import LineRefund, refund_plan
+
+    linhas = [LineMoney(1, 1000, 3000)]  # R$ 10,00 por três unidades
+    feito: dict[int, LineRefund] = {}
+    pagos = []
+    for _ in range(3):
+        plano = refund_plan(linhas, {1: 1000}, subtotal_cents=1000, discount_cents=0, already=feito)
+        pagos.append(plano[1].cents)
+        anterior = feito.get(1, LineRefund(0, 0))
+        feito[1] = LineRefund(
+            anterior.quantity_milli + plano[1].quantity_milli, anterior.cents + plano[1].cents
+        )
+    assert pagos == [333, 333, 334]
+    assert sum(pagos) == 1000
+    assert (
+        refund_plan(linhas, {1: 1000}, subtotal_cents=1000, discount_cents=0, already=feito) == {}
+    )
+
+
+def test_pedir_mais_do_que_sobra_devolve_so_o_que_sobra() -> None:
+    from app.orders.refund_lines import LineRefund, refund_plan
+
+    linhas = [LineMoney(1, 4000, 2000)]
+    plano = refund_plan(
+        linhas,
+        {1: 2000},
+        subtotal_cents=4000,
+        discount_cents=0,
+        already={1: LineRefund(1000, 2000)},
+    )
+    assert plano == {1: LineRefund(quantity_milli=1000, cents=2000)}

@@ -67,6 +67,8 @@ class RefundIn(StrictModel):
     lines: Annotated[list[RefundLineIn], Field(max_length=100)] | None = None
     #: Devolver ao estoque o que foi devolvido. Só vale com `lines`.
     restock: bool = True
+    #: Devolver também o frete que ainda não voltou. Sem `lines`, devolve só o frete.
+    include_shipping: bool = False
 
 
 class RejectIn(StrictModel):
@@ -160,6 +162,11 @@ async def request_refund(
         raise ValidationError(
             "Escolha itens ou um valor, não os dois.", fields=["lines", "amount_cents"]
         )
+    if body.include_shipping and body.amount_cents is not None:
+        raise ValidationError(
+            "O frete vai junto dos itens (ou sozinho), não de um valor digitado.",
+            fields=["include_shipping", "amount_cents"],
+        )
     refund = await RefundService(session, tenant, admin_actor(request, user)).request(
         order,
         kind=RefundKind.OPERATOR,
@@ -167,6 +174,7 @@ async def request_refund(
         amount_cents=body.amount_cents,
         lines={line.line_no: line.quantity_milli for line in body.lines} if body.lines else None,
         restock=body.restock,
+        include_shipping=body.include_shipping,
     )
     return await _sent(session, tenant, refund)
 

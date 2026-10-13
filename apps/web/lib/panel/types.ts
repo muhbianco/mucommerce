@@ -526,6 +526,10 @@ export interface OrderDetail {
     reason: string;
     requested_at: string;
   }[];
+  /** Quanto de cada linha já voltou (`line_no` → milésimos), em devoluções que contam. */
+  refunded_lines?: Record<string, number>;
+  /** Quanto do frete já voltou. */
+  shipping_refunded_cents?: number;
   emails: {
     id: string;
     template_key: string;

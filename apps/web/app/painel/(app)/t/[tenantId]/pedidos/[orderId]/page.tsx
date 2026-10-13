@@ -125,7 +125,14 @@ export default async function OrderPage({
   const lojaFechada = String(storefront?.access_mode ?? "whitelist") !== "public";
   const podeLiberar = scopes.can("customers:approve");
   const canDecide = scopes.can("payments:refund_approve");
-  const refundable = order.paid_at && detail.payments.some((p) => p.status === "approved");
+  // Mesmas situações que a API aceita (REFUNDABLE): depois da primeira devolução parcial o
+  // pagamento fica "partially_refunded", e o formulário sumia com dinheiro ainda a devolver.
+  const refundable =
+    order.paid_at &&
+    detail.payments.some((p) => p.status === "approved" || p.status === "partially_refunded");
+  // O que já voltou: o item inteiro devolvido trava, e o frete devolvido some da opção.
+  const devolvidoPorLinha = detail.refunded_lines ?? {};
+  const freteQueResta = Math.max(order.delivery_fee_cents - (detail.shipping_refunded_cents ?? 0), 0);
   const moves = detail.allowed_transitions.filter((t) => t !== "cancelled");
   const canCancel = detail.allowed_transitions.includes("cancelled");
   const risks = detail.risk_flags ? Object.keys(detail.risk_flags) : [];
@@ -355,28 +362,56 @@ export default async function OrderPage({
                         pagou por ele — com desconto no pedido, a linha vale menos que o preço
                         de etiqueta.
                       </legend>
-                      {order.items.map((item) => (
-                        <div key={item.line_no} className={styles.check}>
-                          <label>
-                            <input type="checkbox" name="refund_line" value={item.line_no} />
-                            <span>
-                              {item.name}
-                              <span className={styles.fieldHint}>
-                                {item.quantity} {item.unit_label} · {money(item.total_cents, currency)}
+                      {order.items.map((item) => {
+                        const total = Math.round(Number(item.quantity) * 1000);
+                        const devolvido = devolvidoPorLinha[String(item.line_no)] ?? 0;
+                        const resta = Math.max(total - devolvido, 0) / 1000;
+                        return (
+                          <div key={item.line_no} className={styles.check}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                name="refund_line"
+                                value={item.line_no}
+                                disabled={resta <= 0}
+                              />
+                              <span>
+                                {item.name}
+                                <span className={styles.fieldHint}>
+                                  {item.quantity} {item.unit_label} · {money(item.total_cents, currency)}
+                                  {devolvido > 0
+                                    ? resta <= 0
+                                      ? " · já devolvido"
+                                      : ` · ${devolvido / 1000} já devolvido`
+                                    : null}
+                                </span>
                               </span>
+                            </label>
+                            {resta > 0 ? (
+                              <input
+                                name={`refund_qty_${item.line_no}`}
+                                type="number"
+                                min={0}
+                                step="any"
+                                max={resta}
+                                defaultValue={resta}
+                                aria-label={`Quantidade a devolver de ${item.name}`}
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                      {freteQueResta > 0 ? (
+                        <label className={styles.check}>
+                          <input type="checkbox" name="include_shipping" />
+                          <span>
+                            Devolver também o frete ({money(freteQueResta, currency)})
+                            <span className={styles.fieldHint}>
+                              Marcado sem nenhum item, devolve só o frete.
                             </span>
-                          </label>
-                          <input
-                            name={`refund_qty_${item.line_no}`}
-                            type="number"
-                            min={0}
-                            step="any"
-                            max={Number(item.quantity)}
-                            defaultValue={item.quantity}
-                            aria-label={`Quantidade a devolver de ${item.name}`}
-                          />
-                        </div>
-                      ))}
+                          </span>
+                        </label>
+                      ) : null}
                       <label className={styles.check}>
                         <input type="checkbox" name="restock" defaultChecked />
                         <span>
@@ -392,7 +427,8 @@ export default async function OrderPage({
                         Ou um valor (R$)
                         <input name="amount" inputMode="decimal" placeholder="ex.: 12,50" />
                         <span className={styles.fieldHint}>
-                          Sem item marcado. Em branco: devolve tudo o que ainda resta.
+                          Sem item marcado. Em branco: devolve tudo o que ainda resta (frete
+                          incluído).
                         </span>
                       </label>
                       <label className={`${styles.field} ${styles.fieldWide}`}>

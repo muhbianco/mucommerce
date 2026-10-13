@@ -69,10 +69,20 @@ export async function requestRefund(form: FormData): Promise<void> {
     // itens não sai daqui**: quanto uma linha rendeu depende do desconto do pedido, e quem
     // calcula é o servidor. A tela manda o que foi escolhido, não quanto isso vale.
     const lines = refundLines(form);
+    const frete = form.get("include_shipping") === "on";
+    const amount = money(form, "amount");
+    if (frete && amount !== null) throw new FormError("frete_com_valor");
     await api(`${path}/orders/${orderId}/refunds`, {
-      json: lines.length
-        ? { lines, reason, restock: form.get("restock") === "on" }
-        : { amount_cents: money(form, "amount"), reason },
+      // Itens marcados (com ou sem frete), só o frete, ou um valor. Em branco: tudo o que resta.
+      json:
+        lines.length || frete
+          ? {
+              ...(lines.length ? { lines } : {}),
+              reason,
+              restock: form.get("restock") === "on",
+              include_shipping: frete,
+            }
+          : { amount_cents: amount, reason },
       // A API exige a chave: é ela que impede um clique duplo de devolver o dinheiro duas vezes.
       // Gerada uma vez por formulário; reenviar o mesmo formulário repete, não devolve de novo.
       idempotencyKey: text(form, "idempotency_key") || randomUUID(),

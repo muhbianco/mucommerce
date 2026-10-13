@@ -13,7 +13,12 @@ cima:
     linha = bolo vezes (total da linha dividido pelo subtotal)
 
 Frete e acréscimo de cartão ficam de fora do bolo de propósito: devolver o produto não devolve
-por si só o custo de tê-lo mandado. Quem quiser devolver o frete usa devolução por valor.
+por si só o custo de tê-lo mandado. O frete entra só quando a loja marca "devolver também o
+frete" (`RefundService.request(include_shipping=True)`), e uma vez só por pedido.
+
+**O que já foi devolvido de uma linha sai da conta.** Sem isso, a mesma unidade podia ser
+devolvida duas vezes — o pedido #9 da SG Pipas teve os dois itens devolvidos duas vezes em
+13/10, e a única trava era o total pago.
 
 O arredondamento é distribuído: as sobras de centavo caem nas primeiras linhas, e a soma de
 todas as linhas inteiras dá exatamente o bolo. Sem isso, devolver "tudo, item por item" deixaria
@@ -66,6 +71,54 @@ def full_line_cents(lines: Sequence[LineMoney], *, pot: int) -> dict[int, int]:
     return base
 
 
+@dataclass(frozen=True, slots=True)
+class LineRefund:
+    """Quanto de uma linha uma devolução cobre: quantidade (milésimos) e dinheiro (centavos)."""
+
+    quantity_milli: int
+    cents: int
+
+
+def refund_plan(
+    lines: Sequence[LineMoney],
+    selection: Mapping[int, int],
+    *,
+    subtotal_cents: int,
+    discount_cents: int,
+    already: Mapping[int, LineRefund] | None = None,
+) -> dict[int, LineRefund]:
+    """Por linha escolhida: quanto ainda dá para devolver dela e quanto isso vale.
+
+    `already` é o que devoluções anteriores já cobriram de cada linha. A quantidade pedida é
+    cortada no que sobra; o último pedaço de uma linha leva exatamente o que sobrou do valor
+    dela (sem centavo preso pelo arredondamento dos pedaços anteriores). Linha que já voltou
+    inteira, ou que não vale nada, não entra.
+    """
+    por_linha = full_line_cents(
+        lines, pot=pot_cents(subtotal_cents=subtotal_cents, discount_cents=discount_cents)
+    )
+    feito = already or {}
+    indice = {line.line_no: line for line in lines}
+    plano: dict[int, LineRefund] = {}
+    for line_no, quantidade in selection.items():
+        line = indice.get(line_no)
+        if line is None or quantidade <= 0 or line.quantity_milli <= 0:
+            continue
+        antes = feito.get(line_no, LineRefund(0, 0))
+        resta = line.quantity_milli - antes.quantity_milli
+        if resta <= 0:
+            continue
+        usada = min(quantidade, resta)
+        inteiro = por_linha.get(line_no, 0)
+        if usada == resta:
+            valor = max(inteiro - antes.cents, 0)
+        else:
+            valor = (inteiro * usada) // line.quantity_milli
+        if valor > 0:
+            plano[line_no] = LineRefund(quantity_milli=usada, cents=valor)
+    return plano
+
+
 def refund_cents(
     lines: Sequence[LineMoney],
     selection: Mapping[int, int],
@@ -79,20 +132,8 @@ def refund_cents(
     metade do que aquela linha rendeu — arredondado para baixo, porque devolver a mais sai do
     bolso da loja e a sobra continua devolvível depois.
     """
-    por_linha = full_line_cents(
-        lines, pot=pot_cents(subtotal_cents=subtotal_cents, discount_cents=discount_cents)
+    plano = refund_plan(
+        lines, selection, subtotal_cents=subtotal_cents, discount_cents=discount_cents
     )
-    indice = {line.line_no: line for line in lines}
-    escolhido: dict[int, int] = {}
-    for line_no, quantidade in selection.items():
-        line = indice.get(line_no)
-        if line is None or quantidade <= 0 or line.quantity_milli <= 0:
-            continue
-        usada = min(quantidade, line.quantity_milli)
-        inteiro = por_linha.get(line_no, 0)
-        valor = (
-            inteiro if usada == line.quantity_milli else (inteiro * usada) // line.quantity_milli
-        )
-        if valor > 0:
-            escolhido[line_no] = valor
+    escolhido = {line_no: parte.cents for line_no, parte in plano.items()}
     return sum(escolhido.values()), escolhido
