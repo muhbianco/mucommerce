@@ -92,9 +92,12 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const enderecoEscolhido = cart.options.addresses.find((a) => a.id === cart.fulfillment?.address_id);
   const pedeDocumento = porTransportadora && !enderecoEscolhido?.has_document;
   // WhatsApp: a loja escolhe se é obrigatório. Quem já tem um conhecido (da conta ou do último
-  // pedido) pode deixar em branco — o servidor usa aquele.
+  // pedido) pode deixar em branco — o servidor usa aquele. Zona entregue pela Uber pede sempre:
+  // o entregador liga para quem recebe (o servidor exige do mesmo jeito).
+  const pelaUber = quote.fulfillment?.type === "delivery" && quote.fulfillment.snapshot?.courier === "uber";
+  const pedeWhatsapp = Boolean(context.checkout?.require_whatsapp) || pelaUber;
   const whatsappConhecido = session.customer.phone_masked ?? null;
-  const whatsappObrigatorio = Boolean(context.checkout?.require_whatsapp) && !whatsappConhecido;
+  const whatsappObrigatorio = pedeWhatsapp && !whatsappConhecido;
 
   return (
     <StoreShell context={context}>
@@ -154,7 +157,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               <input name="name" required maxLength={120} defaultValue={session.customer.name ?? ""} autoComplete="name" />
             </label>
             <label className={styles.field}>
-              {context.checkout?.require_whatsapp ? "WhatsApp" : "WhatsApp (opcional)"}
+              {pedeWhatsapp ? "WhatsApp" : "WhatsApp (opcional)"}
               <input
                 name="phone"
                 type="tel"
@@ -168,7 +171,9 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
               <span className={styles.fieldHint} id="whatsapp-hint">
                 {whatsappConhecido
                   ? `Em branco, a loja usa o seu WhatsApp de antes (${whatsappConhecido}).`
-                  : "A loja usa para falar com você sobre o pedido."}
+                  : pelaUber
+                    ? "O entregador da Uber liga neste número se precisar."
+                    : "A loja usa para falar com você sobre o pedido."}
               </span>
             </label>
             {pedeDocumento ? (

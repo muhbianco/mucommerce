@@ -39,6 +39,8 @@ class OrderSummary(BaseModel):
     id: str
     number: int
     status: str
+    #: Para a vitrine dizer "aguardando o entregador" em vez de "pronto para retirar" na entrega.
+    fulfillment_type: str
     total_cents: int
     currency: str
     placed_at: datetime
@@ -71,6 +73,7 @@ async def my_orders(
                 id=o.id,
                 number=o.number,
                 status=o.status,
+                fulfillment_type=o.fulfillment_type,
                 total_cents=o.total_cents,
                 currency=o.currency,
                 placed_at=o.placed_at,

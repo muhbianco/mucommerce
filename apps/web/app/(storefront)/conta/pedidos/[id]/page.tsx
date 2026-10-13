@@ -89,7 +89,7 @@ export default async function OrderPage({
 
       <PageHead
         title={`Pedido #${order.number}`}
-        actions={<Pill state={stateOf(CUSTOMER_ORDER_STATE, order.status)}>{orderStatusLabel(order.status)}</Pill>}
+        actions={<Pill state={stateOf(CUSTOMER_ORDER_STATE, order.status)}>{orderStatusLabel(order.status, order.fulfillment_type)}</Pill>}
         lead={
           order.status === "awaiting_payment" && order.expires_at
             ? `Pague até ${when(order.expires_at)} para a loja separar o seu pedido.`
@@ -170,7 +170,7 @@ export default async function OrderPage({
           <ol className={styles.timeline}>
             {order.timeline.map((event, i) => (
               <li key={i} data-current={i === order.timeline.length - 1 ? "true" : undefined}>
-                <strong>{orderStatusLabel(event.status)}</strong>
+                <strong>{orderStatusLabel(event.status, order.fulfillment_type)}</strong>
                 <span className="muted">{when(event.at)}</span>
               </li>
             ))}

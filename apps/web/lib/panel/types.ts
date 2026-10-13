@@ -225,6 +225,44 @@ export interface DeliveryZone {
   min_order_cents: number | null;
   eta_minutes: number | null;
   active: boolean;
+  /** Quem leva: a equipe da loja, ou um entregador da Uber chamado no "Pronto" (docs/15). */
+  courier?: "own" | "uber";
+}
+
+/** De onde o entregador da Uber coleta (a entrega da equipe não usa). */
+export interface DeliveryOrigin {
+  name: string;
+  postal_code: string;
+  address: string;
+  number: string;
+  district: string;
+  city: string;
+  state: string;
+  complement: string | null;
+  phone: string;
+  notes: string | null;
+}
+
+/** A política da Uber; as chaves ficam no cofre e o teste delas só a API escreve. */
+export interface UberDeliverySettings {
+  auto_dispatch: boolean;
+  max_fee_cents: number | null;
+  environment: "test" | "production";
+}
+
+/** `GET /admin/tenants/{id}/delivery/uber`. */
+export interface UberStatus {
+  connected: boolean;
+  masked: Record<string, string>;
+  environment: "test" | "production";
+  auto_dispatch: boolean;
+  max_fee_cents: number | null;
+  origin_ready: boolean;
+  uber_zones: number;
+  last_test_ok: boolean | null;
+  last_test_detail: string | null;
+  last_test_at: string | null;
+  missing: ("chaves" | "coleta" | "zona")[];
 }
 
 export interface DeliveryWindow {
@@ -236,7 +274,12 @@ export interface DeliveryWindow {
 
 export interface FulfillmentSettings {
   pickup: { enabled: boolean; locations: PickupLocation[] };
-  delivery: { enabled: boolean; zones: DeliveryZone[] };
+  delivery: {
+    enabled: boolean;
+    zones: DeliveryZone[];
+    origin?: DeliveryOrigin | null;
+    uber?: UberDeliverySettings;
+  };
   min_order_cents: number;
   scheduling: {
     enabled: boolean;
@@ -557,6 +600,17 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelado",
   failed: "Expirado sem pagamento",
 };
+
+/** Na entrega, "pronto" é pronto para o entregador retirar (o da Uber é chamado nessa hora). */
+export function orderStatusLabel(status: string, fulfillmentType?: string): string {
+  if (status === "ready_for_pickup" && fulfillmentType === "delivery") return "Pronto para o entregador";
+  return ORDER_STATUS_LABEL[status] ?? status;
+}
+
+export function transitionLabel(target: string, fulfillmentType?: string): string {
+  if (target === "ready_for_pickup" && fulfillmentType === "delivery") return "Pronto para o entregador";
+  return TRANSITION_LABEL[target] ?? target;
+}
 
 /** What the button that moves the order to each status says. */
 export const TRANSITION_LABEL: Record<string, string> = {

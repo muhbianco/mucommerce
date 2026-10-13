@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # No payment deadline goes beyond this, whatever the provider allows.
     checkout_max_order_age_minutes: int = 120
 
+    # --- entrega pela Uber (Uber Direct, docs/15) --------------------------------------
+    uber_direct_auth_url: str = "https://auth.uber.com/oauth/v2/token"
+    uber_direct_api_url: str = "https://api.uber.com"
+    uber_direct_timeout_seconds: float = 10.0
+
     # --- envio por transportadora (etapa J, ADR 0015) ----------------------------------
     # Transportadoras que este ambiente permite; `fake` é de teste e é recusado em produção.
     shipping_allowed_providers: str = "melhorenvio"

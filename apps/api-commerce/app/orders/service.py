@@ -157,8 +157,15 @@ class OrderService:
         consents = await self._consents(cmd, now)
 
         customer = await self.session.get(Customer, cmd.customer_id)
+        # Zona entregue pela Uber exige telefone: o entregador liga para o cliente.
+        pela_uber = bool(
+            quote.fulfillment is not None and quote.fulfillment.snapshot.get("courier") == "uber"
+        )
         telefone = await order_phone(
-            self.session, customer, cmd.contact.phone, required=settings.require_whatsapp
+            self.session,
+            customer,
+            cmd.contact.phone,
+            required=settings.require_whatsapp or pela_uber,
         )
         number = await TenantRepository(self.session).next_sequence(ORDER_SEQUENCE)
         fq = quote.fulfillment

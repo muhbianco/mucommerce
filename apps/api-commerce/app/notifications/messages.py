@@ -24,6 +24,15 @@ ORDER_STATUS_LABEL = {
     "cancelled": "cancelado",
     "failed": "expirado sem pagamento",
 }
+
+
+def status_label(status: str, fulfillment_type: str = "") -> str:
+    """O nome da situação para o cliente. Na entrega, "pronto" é para o entregador retirar."""
+    if status == "ready_for_pickup" and fulfillment_type == "delivery":
+        return "pronto e aguardando o entregador"
+    return ORDER_STATUS_LABEL.get(status, status)
+
+
 # Changes the customer hears about (the others are internal steps).
 TOLD_ABOUT = ("accepted", "in_production", "ready_for_pickup", "shipped", "delivered")
 
@@ -226,10 +235,14 @@ def order_cancelled(ctx: MailContext) -> Message:
 
 
 def order_status_changed(ctx: MailContext) -> Message:
-    label = ORDER_STATUS_LABEL.get(ctx.order.status, ctx.order.status)
+    label = status_label(ctx.order.status, ctx.order.fulfillment_type)
     paragraphs = [f"O seu pedido #{ctx.order.number} está {label}."]
     where = _where(ctx)
-    if where and ctx.order.status in ("ready_for_pickup", "shipped"):
+    # Retirada pronta diz onde buscar; entrega pronta ainda não saiu (o "onde" vem no "saiu").
+    pronto_para_retirar = ctx.order.status == "ready_for_pickup" and (
+        ctx.order.fulfillment_type == "pickup"
+    )
+    if where and (pronto_para_retirar or ctx.order.status == "shipped"):
         paragraphs.append(where)
     return Message(
         template_key="order_status_changed",

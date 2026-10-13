@@ -21,7 +21,7 @@ import {
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 import {
   DELIVERY_STATUS_LABEL,
-  ORDER_STATUS_LABEL,
+  orderStatusLabel,
   type OrderDetail,
   PAYMENT_METHOD_LABEL,
   PAYMENT_PROVIDERS,
@@ -32,7 +32,7 @@ import {
   SHIPMENT_PREVIEW_PROBLEM,
   SHIPMENT_STATUS_LABEL,
   type ShipmentPreview,
-  TRANSITION_LABEL,
+  transitionLabel,
 } from "@/lib/panel/types";
 
 import styles from "../../../../../panel.module.css";
@@ -136,7 +136,7 @@ export default async function OrderPage({
   const moves = detail.allowed_transitions.filter((t) => t !== "cancelled");
   const canCancel = detail.allowed_transitions.includes("cancelled");
   const risks = detail.risk_flags ? Object.keys(detail.risk_flags) : [];
-  const statusLabel = ORDER_STATUS_LABEL[order.status] ?? order.status;
+  const statusLabel = orderStatusLabel(order.status, order.fulfillment_type);
   const hidden = (
     <>
       <input type="hidden" name="tenant_id" value={tenantId} />
@@ -649,7 +649,7 @@ export default async function OrderPage({
                 {order.timeline.map((event, i) => (
                   <li key={i}>
                     <span className={local.timelineWhen}>{when(event.at)}</span>
-                    <strong>{ORDER_STATUS_LABEL[event.status] ?? event.status}</strong>
+                    <strong>{orderStatusLabel(event.status, order.fulfillment_type)}</strong>
                     {event.reason ? <span className="muted"> — {event.reason}</span> : null}
                   </li>
                 ))}
@@ -701,7 +701,7 @@ export default async function OrderPage({
                     <input type="hidden" name="to" value={target} />
                     {/* The first allowed step is the natural next one; the others skip ahead. */}
                     <button type="submit" className={i === 0 ? styles.button : styles.buttonGhost}>
-                      {TRANSITION_LABEL[target] ?? target}
+                      {transitionLabel(target, order.fulfillment_type)}
                     </button>
                   </form>
                 ))}

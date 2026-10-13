@@ -76,6 +76,10 @@ const OK: Record<string, string> = {
   embalagem_reativada: "Embalagem reativada.",
   embalagem_apagada: "Embalagem apagada.",
   regras_embalagem: "Regras de embalagem salvas.",
+  uber_config: "Coleta e chamada da Uber salvas.",
+  uber_conectada: "Chaves da Uber guardadas. O resultado da conferência está na seção Entrega pela Uber.",
+  uber_testada: "Teste feito: o resultado está na seção Entrega pela Uber.",
+  uber_desconectada: "Conta da Uber desconectada. As zonas da Uber continuam no checkout, mas ninguém é chamado.",
 };
 
 const ERRORS: Record<string, string> = {
@@ -191,6 +195,14 @@ const ERRORS: Record<string, string> = {
   "packing_invalid.does_not_fit": "Nem uma unidade cabe nessa embalagem. Desmarque-a ou confira as medidas.",
   "packing_invalid.too_heavy": "Essa quantidade passa do peso que a embalagem aguenta.",
   "packing_invalid.missing_measures": "Para declarar quantos cabem, informe peso e medidas do produto.",
+  telefone_coleta_invalido: "Telefone da coleta inválido: escreva DDD + número (11 99999-9999).",
+  uf_invalida: "UF inválida: use a sigla do estado (SP).",
+  chave_uber_invalida: "Cole as três chaves da Uber inteiras (Customer ID, Client ID e Client Secret).",
+  "validation_error.uber_refused_client":
+    "A Uber recusou o Client ID ou o Client Secret. Copie de novo os dois da aba Developer, do mesmo ambiente.",
+  "validation_error.uber_refused_customer":
+    "As chaves valem, mas o Customer ID não é da mesma conta. Copie o Customer ID da aba Developer dessa conta.",
+  "validation_error.uber_not_connected": "Conecte a conta da Uber antes de testar.",
   dns_falta_apontar: "Posse confirmada, mas o domínio ainda não aponta para a MuhBianco. Confira o CNAME (ou o A, no domínio raiz).",
 };
 

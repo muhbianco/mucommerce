@@ -75,7 +75,15 @@ def test_allowed_transitions(
             "payment_approved",
         ),
         (order(S.ACCEPTED, "pickup"), S.SHIPPED, A.OPERATOR, OPS, "wrong_fulfillment"),
-        (order(S.ACCEPTED, "delivery"), S.READY_FOR_PICKUP, A.OPERATOR, OPS, "wrong_fulfillment"),
+        (order(S.ACCEPTED, "shipping"), S.READY_FOR_PICKUP, A.OPERATOR, OPS, "wrong_fulfillment"),
+        (order(S.READY_FOR_PICKUP, "pickup"), S.SHIPPED, A.OPERATOR, OPS, "wrong_fulfillment"),
+        (
+            order(S.READY_FOR_PICKUP, "pickup"),
+            S.SHIPPED,
+            A.SYSTEM,
+            frozenset(),
+            "wrong_fulfillment",
+        ),
         (order(S.ACCEPTED, "pickup"), S.DELIVERED, A.OPERATOR, OPS, "wrong_fulfillment"),
         (order(S.CANCELLED), S.PAYMENT_CONFIRMED, A.SYSTEM, frozenset(), "wrong_status"),
     ],
@@ -91,8 +99,18 @@ def test_refused_transitions_say_why(
 
 def test_allowed_targets_per_actor() -> None:
     accepted = order(S.ACCEPTED, "delivery")
-    assert allowed_targets(accepted, A.OPERATOR, ADMIN) == [S.CANCELLED, S.IN_PRODUCTION, S.SHIPPED]
-    assert allowed_targets(accepted, A.OPERATOR, OPS) == [S.IN_PRODUCTION, S.SHIPPED]
+    # Entrega tem "Pronto" (para o entregador retirar; é o que chama a Uber) — docs/15.
+    assert allowed_targets(accepted, A.OPERATOR, ADMIN) == [
+        S.CANCELLED,
+        S.IN_PRODUCTION,
+        S.READY_FOR_PICKUP,
+        S.SHIPPED,
+    ]
+    assert allowed_targets(accepted, A.OPERATOR, OPS) == [
+        S.IN_PRODUCTION,
+        S.READY_FOR_PICKUP,
+        S.SHIPPED,
+    ]
     assert allowed_targets(accepted, A.CUSTOMER) == [S.CANCELLED]
     ticket = order(S.ACCEPTED, "none")
     assert S.DELIVERED in allowed_targets(ticket, A.OPERATOR, OPS)
@@ -113,3 +131,12 @@ def test_fulfillment_follows_the_order() -> None:
     assert fulfillment_after(S.CANCELLED, "delivery") == FulfillmentStatus.CANCELLED
     assert fulfillment_after(S.ACCEPTED, "none") == FulfillmentStatus.NONE
     assert fulfillment_after(S.ACCEPTED, "pickup") is None
+
+
+def test_entrega_pronta_sai_pela_loja_ou_pela_coleta_da_uber() -> None:
+    pronta = order(S.READY_FOR_PICKUP, "delivery")
+    assert S.SHIPPED in allowed_targets(pronta, A.OPERATOR, OPS)
+    assert S.DELIVERED in allowed_targets(pronta, A.OPERATOR, OPS)
+    # A coleta confirmada pela Uber move sozinha; retirada no balcão não tem isso.
+    check_transition(pronta, S.SHIPPED, A.SYSTEM, frozenset())
+    assert fulfillment_after(S.READY_FOR_PICKUP, "delivery") == FulfillmentStatus.READY

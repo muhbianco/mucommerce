@@ -22,6 +22,7 @@ interface OrderPage {
     id: string;
     number: number;
     status: string;
+    fulfillment_type?: string;
     total_cents: number;
     currency: string;
     placed_at: string;
@@ -75,7 +76,7 @@ export default async function OrdersPage({
                 </Link>
               </th>
               <td>{when(order.placed_at)}</td>
-              <td>{orderStatusLabel(order.status)}</td>
+              <td>{orderStatusLabel(order.status, order.fulfillment_type)}</td>
               <td>
                 {formatPrice({
                   amount_cents: order.total_cents,

@@ -52,7 +52,36 @@ def normalize_fulfillment(previous: dict[str, Any] | None, value: dict[str, Any]
         if isinstance(incoming, list):
             stored = (previous.get(section) or {}).get(key) or []
             value[section][key] = _keep_ids(stored, incoming, label)
+    _keep_uber(previous.get("delivery"), value.get("delivery"))
     return value
+
+
+#: Escritos só pela tela das chaves da Uber (`admin_delivery`), nunca pela configuração geral: o
+#: teste das chaves e o ambiente delas não são coisa que um formulário possa afirmar.
+_UBER_SERVER_OWNED = ("environment", "account_check")
+
+
+def _keep_uber(previous: Any, delivery: Any) -> None:
+    """A coleta e a Uber sobrevivem a quem grava só as zonas (chave ausente = manter; `null` limpa
+    a coleta); os campos que a tela das chaves escreve sempre voltam do que estava guardado."""
+    if not isinstance(delivery, dict):
+        return
+    stored = previous if isinstance(previous, dict) else {}
+    for key in ("origin", "uber"):
+        if key not in delivery and key in stored:
+            delivery[key] = deepcopy(stored[key])
+    uber = delivery.get("uber")
+    if not isinstance(uber, dict):
+        return  # o esquema recusa com mensagem decente
+    uber = dict(uber)
+    raw = stored.get("uber")
+    stored_uber: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    for key in _UBER_SERVER_OWNED:
+        if key in stored_uber:
+            uber[key] = deepcopy(stored_uber[key])
+        else:
+            uber.pop(key, None)
+    delivery["uber"] = uber
 
 
 def normalize_landing(previous: dict[str, Any] | None, value: dict[str, Any]) -> dict[str, Any]:

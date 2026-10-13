@@ -39,6 +39,7 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 PORT = int(os.environ.get("E2E_API_PORT", "8791"))
 GOOGLE_PORT = int(os.environ.get("E2E_GOOGLE_PORT", "8792"))
@@ -94,6 +95,10 @@ E2E_ENV = {
     # A montagem da vitrine está ligada; quem responde é o gateway falso de `/__e2e/landing/build`
     # (a suíte não fala com modelo nenhum, e não teria chave para isso).
     "LANDING_LLM_ENABLED": "true",
+    # A Uber Direct é a de mentira de `/__e2e/uber` (este mesmo processo): a conta self-service do
+    # Brasil só dá chaves de produção, e a suíte não chama entregador de verdade (docs/15).
+    "UBER_DIRECT_AUTH_URL": f"http://127.0.0.1:{PORT}/__e2e/uber/oauth/v2/token",
+    "UBER_DIRECT_API_URL": f"http://127.0.0.1:{PORT}/__e2e/uber",
     "LOG_LEVEL": "WARNING",
 }
 # Before any `app` import: settings are read once, at import time.
@@ -102,7 +107,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import httpx  # noqa: E402
 import uvicorn  # noqa: E402
-from fastapi import APIRouter  # noqa: E402
+from fastapi import APIRouter, Request, Response  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from sqlalchemy import func, select  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker  # noqa: E402
@@ -792,6 +797,49 @@ async def shipping_sample(body: ShippingSampleIn) -> dict[str, str]:
             ids[chave] = pedido.id
         await session.commit()
     return ids
+
+
+class FeaturesIn(BaseModel):
+    tenant: str = "muhbianco"
+    flags: dict[str, bool]
+
+
+@e2e.post("/features")
+async def set_features(body: FeaturesIn) -> dict[str, bool]:
+    """Liga ou desliga módulos da loja para um spec, que desfaz no fim. O semeado fica como está
+    porque os outros specs contam com ele (a entrega própria, por exemplo, nasce desligada)."""
+    async with SessionFactory() as session:
+        service = TenantService(session)
+        tenant = await service.repo.get_by_slug(body.tenant)
+        assert tenant is not None
+        await service.set_features(await service.get_or_404(tenant.id), body.flags, ACTOR)
+        await session.commit()
+    return body.flags
+
+
+#: Client Secret que a Uber de mentira recusa, e Customer ID que não é das chaves.
+UBER_REFUSED_SECRET = "segredo-recusado"
+UBER_OTHER_CUSTOMER = "cliente-de-outra-conta"
+
+
+@e2e.post("/uber/oauth/v2/token")
+async def fake_uber_token(request: Request) -> Response:
+    """O token da Uber Direct como a sonda mediu: formulário `client_credentials`."""
+    form = parse_qs((await request.body()).decode())
+    if form.get("client_secret") == [UBER_REFUSED_SECRET]:
+        return Response('{"error":"invalid_client"}', 401, media_type="application/json")
+    return Response(
+        '{"access_token":"e2e-uber","expires_in":2592000,"scope":"eats.deliveries"}',
+        200,
+        media_type="application/json",
+    )
+
+
+@e2e.get("/uber/v1/customers/{customer_id}/deliveries")
+async def fake_uber_deliveries(customer_id: str) -> Response:
+    if customer_id == UBER_OTHER_CUSTOMER:
+        return Response('{"code":"customer_not_found"}', 404, media_type="application/json")
+    return Response('{"data":[]}', 200, media_type="application/json")
 
 
 @e2e.post("/tick")

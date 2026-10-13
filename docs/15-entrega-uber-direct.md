@@ -88,6 +88,30 @@ nunca no chat.
 
 Total da versão útil (F0–F3): **~7–8 dias de trabalho**, depois que houver a conta de teste.
 
+### F1 feita (13/10/2026, branch `feat/uber-direct-f1`)
+
+Só configuração: **nada chama a Uber ainda** além da conferência das chaves. Não vai para produção
+sozinha — uma loja marcaria zona da Uber, o checkout pediria o telefone e ninguém seria chamado.
+Sobe junto com a F2.
+
+- `DeliveryZone.courier` (`own` | `uber`), copiado para o retrato do pedido (`fulfillment.courier`).
+- `delivery.origin` (coleta com telefone obrigatório) e `delivery.uber` (`auto_dispatch`,
+  `max_fee_cents`, `environment`, `account_check`). `environment` e `account_check` só a tela das
+  chaves escreve (`set_setting(..., server_fields=True)`); a configuração geral não consegue afirmar
+  um teste que a Uber não fez, e quem grava só as zonas não apaga coleta nem Uber
+  (`settings_normalizers._keep_uber`: chave ausente = manter, `null` limpa).
+- `/admin/tenants/{id}/delivery/uber`: `GET` (quem tem `shipping:config`, staff incluso), `PUT
+  /credentials`, `POST /test`, `DELETE /credentials` (só o dono). Chaves conferidas na Uber antes
+  de guardar (token + listagem com o Customer ID); recusa diz qual chave
+  (`uber_refused_client` / `uber_refused_customer`); Uber fora do ar guarda e marca o teste como
+  não passou.
+- Estado: `ready_for_pickup` vale para entrega ("Pronto para o entregador"), e
+  `ready_for_pickup → shipped` pelo operador e pelo sistema (coleta da Uber, F3).
+- Checkout: zona da Uber exige WhatsApp mesmo sem `require_whatsapp`.
+- Painel: "Quem entrega" por zona e a seção "Entrega pela Uber" em Entrega e checkout.
+- Testes: `tests/test_delivery_uber.py`, `apps/web/e2e/uber.spec.ts` (Uber de mentira em
+  `tests/e2e/server.py`, `/__e2e/uber`).
+
 ## O que precisa do dono
 
 - Uma conta Uber Direct (pode ser a da Lunares ou uma de teste da MuhBianco) com as credenciais de

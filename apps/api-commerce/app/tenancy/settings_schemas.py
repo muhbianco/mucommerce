@@ -115,6 +115,11 @@ class CepRange(_Setting):
         return self
 
 
+#: Quem leva o pedido de uma zona: a equipe da loja, ou um entregador da Uber chamado quando o
+#: pedido fica pronto (docs/15-entrega-uber-direct.md).
+Courier = Literal["own", "uber"]
+
+
 class DeliveryZone(_Setting):
     id: SettingId
     name: PlaceName
@@ -128,6 +133,7 @@ class DeliveryZone(_Setting):
     min_order_cents: Cents | None = None
     eta_minutes: Annotated[int, Field(ge=0, le=10_080)] | None = None
     active: bool = True
+    courier: Courier = "own"
 
     @model_validator(mode="after")
     def _has_area(self) -> DeliveryZone:
@@ -156,9 +162,52 @@ class PickupSettings(_Setting):
     locations: Annotated[list[PickupLocation], Field(max_length=10)] = []
 
 
+class AccountCheck(_Setting):
+    """O último "testar conta" da transportadora, para a tela mostrar sem perguntar de novo."""
+
+    provider: Annotated[str, Field(max_length=24)]
+    ok: bool
+    detail: Annotated[str, Field(max_length=200)] = ""
+    #: ISO-8601 UTC.
+    at: Annotated[str, Field(max_length=40)]
+
+
+class DeliveryOrigin(_Setting):
+    """De onde o entregador da Uber coleta. A entrega da equipe da loja nunca precisou disto."""
+
+    name: PlaceName
+    postal_code: Cep
+    address: Annotated[str, Field(min_length=1, max_length=120)]
+    number: Annotated[str, Field(min_length=1, max_length=20)]
+    district: Annotated[str, Field(min_length=1, max_length=80)]
+    city: PlaceName
+    state: Annotated[str, Field(pattern=r"^[A-Z]{2}$")]
+    complement: Annotated[str, Field(max_length=80)] | None = None
+    #: A Uber exige um telefone na coleta: é para onde o entregador liga.
+    phone: Annotated[str, Field(min_length=10, max_length=20)]
+    #: Instrução para o entregador na coleta ("balcão dos fundos", "tocar o interfone 2").
+    notes: Annotated[str, Field(max_length=280)] | None = None
+
+
+class UberDeliverySettings(_Setting):
+    """Entrega pela Uber (Uber Direct) com a conta da própria loja. Os segredos ficam no cofre."""
+
+    #: Chama o entregador sozinho quando o pedido fica "Pronto". Desligado, a loja chama no pedido.
+    auto_dispatch: bool = True
+    #: Teto por corrida: cotação acima disto não chama sozinha; a loja confirma no pedido.
+    max_fee_cents: Annotated[int, Field(ge=0, le=1_000_000)] | None = None
+    #: As chaves coladas são do ambiente de teste (entregador simulado) ou de produção. A Uber
+    #: não diz isso na resposta (o `live_mode` mente): quem sabe é quem copiou as chaves.
+    environment: Literal["test", "production"] = "production"
+    #: O último teste das chaves. Nulo = nunca testadas.
+    account_check: AccountCheck | None = None
+
+
 class DeliverySettings(_Setting):
     enabled: bool = False
     zones: Annotated[list[DeliveryZone], Field(max_length=50)] = []
+    origin: DeliveryOrigin | None = None
+    uber: UberDeliverySettings = UberDeliverySettings()
 
 
 class SchedulingSettings(_Setting):
@@ -230,16 +279,6 @@ class PackingSettings(_Setting):
     declare_value: bool = True
     #: Somar o custo cadastrado da embalagem ao frete cobrado do cliente.
     charge_material: bool = False
-
-
-class AccountCheck(_Setting):
-    """O último "testar conta" da transportadora, para a tela mostrar sem perguntar de novo."""
-
-    provider: Annotated[str, Field(max_length=24)]
-    ok: bool
-    detail: Annotated[str, Field(max_length=200)] = ""
-    #: ISO-8601 UTC.
-    at: Annotated[str, Field(max_length=40)]
 
 
 class ShippingSettings(_Setting):

@@ -70,6 +70,8 @@ export const ORDER_STATUS_LABEL: Record<string, string> = {
   failed: "Expirado sem pagamento",
 };
 
-export function orderStatusLabel(status: string): string {
+/** Na entrega, "pronto" é pronto para o entregador retirar, não para o cliente. */
+export function orderStatusLabel(status: string, fulfillmentType?: string): string {
+  if (status === "ready_for_pickup" && fulfillmentType === "delivery") return "Pronto, aguardando o entregador";
   return ORDER_STATUS_LABEL[status] ?? status;
 }

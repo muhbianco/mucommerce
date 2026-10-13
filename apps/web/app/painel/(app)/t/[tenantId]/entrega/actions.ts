@@ -1,6 +1,7 @@
 "use server";
 
 import { api } from "@/lib/panel/api";
+import { normalizeWhatsapp } from "@/lib/panel/contact";
 import { lines, parseCepRanges } from "@/lib/panel/format";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 
@@ -21,6 +22,10 @@ function int(form: FormData, name: string, fallback: number | null): number | nu
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) throw new FormError("numero_invalido");
   return value;
+}
+
+async function current(tenantId: string): Promise<Record<string, unknown>> {
+  return { ...((await loadTenantContext(tenantId)).settings.fulfillment ?? {}) } as Record<string, unknown>;
 }
 
 /** Pickup locations, delivery zones and time windows (PUT: the whole fulfillment setting).
@@ -59,6 +64,7 @@ export async function saveFulfillment(form: FormData): Promise<void> {
         min_order_cents: money(form, `zone_min_${i}`),
         eta_minutes: int(form, `zone_eta_${i}`, null),
         active: checked(form, `zone_active_${i}`),
+        courier: text(form, `zone_courier_${i}`) === "uber" ? "uber" : "own",
       });
     }
     const windows = [];
@@ -71,14 +77,16 @@ export async function saveFulfillment(form: FormData): Promise<void> {
     }
     // `fulfillment` guarda retirada, zonas **e** envio por transportadora. Reler antes de
     // gravar é o que impede esta tela de apagar a configuração de envio (e vice-versa).
-    const atual = (await loadTenantContext(text(form, "tenant_id"))).settings.fulfillment ?? {};
+    // A coleta e a política da Uber também moram em `delivery`: esta parte do formulário não
+    // as mostra, então elas voltam como estavam.
+    const atual = (await current(text(form, "tenant_id"))) as { delivery?: Record<string, unknown> };
     await api(`${path}/settings/fulfillment`, {
       method: "PUT",
       json: {
         value: {
-          ...(atual as Record<string, unknown>),
+          ...atual,
           pickup: { enabled: checked(form, "pickup_enabled"), locations },
-          delivery: { enabled: checked(form, "delivery_enabled"), zones },
+          delivery: { ...(atual.delivery ?? {}), enabled: checked(form, "delivery_enabled"), zones },
           min_order_cents: money(form, "min_order") ?? 0,
           scheduling: {
             enabled: checked(form, "scheduling_enabled"),
@@ -110,5 +118,88 @@ export async function saveCheckout(form: FormData): Promise<void> {
         },
       },
     });
+  });
+}
+
+/**
+ * De onde o entregador da Uber coleta, se ele é chamado sozinho no "Pronto" e o teto da corrida.
+ * Mora em `fulfillment.delivery`, então relê e mescla (as zonas não podem sumir daqui).
+ */
+export async function saveUberSettings(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/entrega`, "uber_config", async () => {
+    const name = text(form, "origin_name");
+    let origin: Record<string, unknown> | null = null;
+    if (name || text(form, "origin_address")) {
+      const cep = text(form, "origin_cep").replace(/\D/g, "");
+      if (cep.length !== 8) throw new FormError("cep_origem_invalido");
+      const phone = normalizeWhatsapp(text(form, "origin_phone"));
+      if (!phone) throw new FormError("telefone_coleta_invalido");
+      const state = text(form, "origin_state").toUpperCase();
+      if (!/^[A-Z]{2}$/.test(state)) throw new FormError("uf_invalida");
+      origin = {
+        name: name || "Loja",
+        postal_code: cep,
+        address: text(form, "origin_address"),
+        number: text(form, "origin_number"),
+        district: text(form, "origin_district"),
+        city: text(form, "origin_city"),
+        state,
+        complement: text(form, "origin_complement") || null,
+        phone,
+        notes: text(form, "origin_notes").slice(0, 280) || null,
+      };
+    }
+    const atual = (await current(text(form, "tenant_id"))) as { delivery?: Record<string, unknown> };
+    const delivery = { ...(atual.delivery ?? {}) };
+    const uber = { ...((delivery.uber as Record<string, unknown> | undefined) ?? {}) };
+    await api(`${path}/settings/fulfillment`, {
+      method: "PUT",
+      json: {
+        value: {
+          ...atual,
+          delivery: {
+            ...delivery,
+            origin,
+            uber: {
+              ...uber,
+              auto_dispatch: checked(form, "uber_auto_dispatch"),
+              max_fee_cents: money(form, "uber_max_fee"),
+            },
+          },
+        },
+      },
+    });
+  });
+}
+
+/** Conecta a conta Uber Direct da loja (só o dono). A API confere as três chaves na Uber antes. */
+export async function connectUber(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/entrega`, "uber_conectada", async () => {
+    const chaves = {
+      customer_id: text(form, "uber_customer_id"),
+      client_id: text(form, "uber_client_id"),
+      client_secret: text(form, "uber_client_secret"),
+    };
+    if (Object.values(chaves).some((v) => v.length < 4 || v.length > 200)) throw new FormError("chave_uber_invalida");
+    const environment = text(form, "uber_environment") === "test" ? "test" : "production";
+    await api(`${path}/delivery/uber/credentials`, { method: "PUT", json: { ...chaves, environment } });
+  });
+}
+
+/** Confere de novo as chaves guardadas na Uber (o resultado aparece na seção). */
+export async function testUber(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/entrega`, "uber_testada", async () => {
+    await api(`${path}/delivery/uber/test`, { method: "POST", json: {} });
+  });
+}
+
+/** Apaga as chaves da Uber. Zonas da Uber continuam cobrando a taxa, mas ninguém é chamado. */
+export async function disconnectUber(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/entrega`, "uber_desconectada", async () => {
+    await api(`${path}/delivery/uber/credentials`, { method: "DELETE" });
   });
 }

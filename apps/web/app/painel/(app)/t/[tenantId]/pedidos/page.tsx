@@ -6,7 +6,7 @@ import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { ORDER_STATE, stateOf } from "@/lib/panel/states";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
-import { ORDER_STATUS_LABEL, type OrderSummary, type Page } from "@/lib/panel/types";
+import { orderStatusLabel, type OrderSummary, type Page } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
@@ -137,7 +137,7 @@ export default async function Orders({
                     <td>
                       <span className={styles.rowBadges}>
                         <Pill state={stateOf(ORDER_STATE, order.status)}>
-                          {ORDER_STATUS_LABEL[order.status] ?? order.status}
+                          {orderStatusLabel(order.status, order.fulfillment_type)}
                         </Pill>
                         {order.refund_status !== "none" ? <Pill state="info">Devolvido</Pill> : null}
                       </span>

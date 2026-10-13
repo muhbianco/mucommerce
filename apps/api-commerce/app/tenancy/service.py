@@ -344,11 +344,20 @@ class TenantService:
         return {**current, **flags}
 
     async def set_setting(
-        self, tenant: Tenant, key: str, value: dict[str, Any], actor: Actor
+        self,
+        tenant: Tenant,
+        key: str,
+        value: dict[str, Any],
+        actor: Actor,
+        *,
+        server_fields: bool = False,
     ) -> dict[str, Any]:
+        """`server_fields=True` é só para quem relê o valor guardado e muda um campo que o
+        formulário geral não pode escrever (o teste das chaves da Uber): pula a normalização,
+        que devolveria esses campos ao que estava guardado."""
         bind_session_tenant(self.session, tenant.id)
         current = await self.repo.settings(tenant.id)
-        normalizer = SETTING_NORMALIZERS.get(key)
+        normalizer = None if server_fields else SETTING_NORMALIZERS.get(key)
         if normalizer is not None:
             value = normalizer(current.get(key), value)
         schema_version, value = validate_setting(key, value)

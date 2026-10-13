@@ -158,6 +158,9 @@ def evaluate(
             "name": zone.name,
             "fee_cents": zone.fee_cents,
             "eta_minutes": zone.eta_minutes,
+            # Congelado no pedido: é por isto que o "Pronto" decide chamar a Uber, mesmo que a
+            # loja mude a zona depois.
+            "courier": zone.courier,
         }
     if subtotal_cents < minimum:
         problems.append("below_minimum")

@@ -147,8 +147,19 @@ TRANSITIONS: tuple[Transition, ...] = (
         S.READY_FOR_PICKUP,
         {A.OPERATOR},
         scope=Scope.ORDERS_TRANSITION,
-        guard=_fulfillment("pickup"),
+        # Na entrega, "pronto" é pronto para o entregador retirar — e é o que chama a Uber
+        # quando a zona é dela (docs/15-entrega-uber-direct.md).
+        guard=_fulfillment("pickup", "delivery"),
     ),
+    _t(
+        S.READY_FOR_PICKUP,
+        S.SHIPPED,
+        {A.OPERATOR},
+        scope=Scope.ORDERS_TRANSITION,
+        guard=_fulfillment("delivery"),
+    ),
+    # O entregador da Uber coletou: ninguém precisa clicar em "Saiu para entrega".
+    _t(S.READY_FOR_PICKUP, S.SHIPPED, {A.SYSTEM}, guard=_fulfillment("delivery")),
     _t(
         {S.ACCEPTED, S.IN_PRODUCTION},
         S.SHIPPED,

@@ -1,22 +1,24 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { requireMe } from "@/lib/panel/api";
-import { formatMoney, moneyInput } from "@/lib/panel/format";
-import { tenantScopes } from "@/lib/panel/scopes";
+import { api, requireMe } from "@/lib/panel/api";
+import { formatMoney, moneyInput, parseInstant } from "@/lib/panel/format";
+import { isStoreMember, tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 import type {
   CheckoutSettings,
+  DeliveryOrigin,
   DeliveryWindow,
   DeliveryZone,
   FulfillmentSettings,
   PickupLocation,
+  UberStatus,
 } from "@/lib/panel/types";
 
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
 import { PageHeader, Pill, Section, TableWrap } from "../ui";
-import { saveCheckout, saveFulfillment } from "./actions";
+import { connectUber, disconnectUber, saveCheckout, saveFulfillment, saveUberSettings, testUber } from "./actions";
 import local from "./entrega.module.css";
 
 export const metadata: Metadata = { title: "Entrega e checkout" };
@@ -97,6 +99,14 @@ function ZoneFields({ zone, i }: { zone: DeliveryZone | null; i: number }) {
           Prazo (minutos)
           <input name={`zone_eta_${i}`} type="number" min={0} defaultValue={zone?.eta_minutes ?? ""} placeholder="Opcional" />
         </label>
+        <label className={styles.field}>
+          Quem entrega
+          <select name={`zone_courier_${i}`} defaultValue={zone?.courier ?? "own"}>
+            <option value="own">Minha equipe</option>
+            <option value="uber">Uber (chamada no &quot;Pronto&quot;)</option>
+          </select>
+          <span className={styles.fieldHint}>Uber: configure a conta e a coleta em Entrega pela Uber, abaixo.</span>
+        </label>
         <div className={local.checkCell}>
           <label className={styles.check}>
             <input type="checkbox" name={`zone_active_${i}`} defaultChecked={zone?.active ?? true} /> Ativa
@@ -146,11 +156,251 @@ function ZoneFields({ zone, i }: { zone: DeliveryZone | null; i: number }) {
 function zoneSummary(zone: DeliveryZone): string {
   const parts = [
     zone.kind === "districts" ? "Bairros" : "Faixas de CEP",
+    zone.courier === "uber" ? "entrega pela Uber" : "equipe da loja",
     zone.fee_cents ? `taxa ${formatMoney(zone.fee_cents)}` : "entrega grátis",
   ];
   if (zone.min_order_cents) parts.push(`mínimo ${formatMoney(zone.min_order_cents)}`);
   if (zone.eta_minutes) parts.push(`${zone.eta_minutes} min`);
   return parts.join(" · ");
+}
+
+const FALTA: Record<UberStatus["missing"][number], string> = {
+  chaves: "conectar a conta Uber Direct da loja",
+  coleta: "informar o endereço de coleta, com telefone",
+  zona: 'marcar ao menos uma zona ativa com "Quem entrega: Uber"',
+};
+
+function when(iso: string | null | undefined, zone: string): string {
+  return (
+    parseInstant(iso)?.toLocaleString("pt-BR", { timeZone: zone, dateStyle: "short", timeStyle: "short" }) ?? ""
+  );
+}
+
+/**
+ * Entrega pela Uber (docs/15): a conta é da loja, o cliente paga a taxa da zona e a corrida sai
+ * da conta Uber dela. Formulários separados porque têm donos diferentes: as chaves (só o dono,
+ * conferidas na Uber) e a coleta com a política de chamada (configuração da loja).
+ */
+function UberSection({
+  tenantId,
+  status,
+  owner,
+  reader,
+  origin,
+  autoDispatch,
+  maxFee,
+  zone,
+}: {
+  tenantId: string;
+  status: UberStatus | null;
+  owner: boolean;
+  reader: boolean;
+  origin: Partial<DeliveryOrigin>;
+  autoDispatch: boolean;
+  maxFee: number | null;
+  zone: string;
+}) {
+  const tenantField = <input type="hidden" name="tenant_id" value={tenantId} />;
+  const pronta = status !== null && status.missing.length === 0 && status.last_test_ok !== false;
+  return (
+    <Section
+      id="uber"
+      title="Entrega pela Uber"
+      description="Um entregador da Uber leva os pedidos das zonas marcadas como Uber"
+      actions={
+        status ? (
+          <Pill state={pronta ? "live" : status.connected ? "warn" : "off"}>
+            {pronta ? "Pronta" : status.connected ? "Falta configurar" : "Desconectada"}
+          </Pill>
+        ) : undefined
+      }
+    >
+      <p className={local.intro}>
+        Quando um pedido de zona da Uber fica <strong>Pronto</strong>, chamamos um entregador da{" "}
+        <strong>sua conta Uber Direct</strong> para o endereço do cliente. O cliente paga a taxa da zona; a corrida é
+        cobrada pela Uber na sua conta. A Uber só atende até cerca de 5 km da coleta: monte as zonas da Uber perto da
+        loja.
+      </p>
+
+      {!reader ? (
+        <p className={styles.note}>Só o dono da loja conecta a conta da Uber.</p>
+      ) : status === null ? (
+        <p className={styles.note}>Não foi possível ler a situação da Uber agora. Recarregue a página.</p>
+      ) : (
+        <>
+          {status.missing.length ? (
+            <div className={styles.note}>
+              Para o &quot;Pronto&quot; chamar a Uber, falta:
+              <ul>
+                {status.missing.map((item) => (
+                  <li key={item}>{FALTA[item]}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <h4 className={local.subhead}>1. Conta Uber Direct</h4>
+          {status.connected ? (
+            <p className={styles.hint}>
+              <strong>Conta conectada</strong> (Customer ID {status.masked.customer_id ?? "••••"},{" "}
+              {status.environment === "test" ? "chaves de teste" : "chaves de produção"}).{" "}
+              {status.last_test_at
+                ? `Último teste em ${when(status.last_test_at, zone)}: ${
+                    status.last_test_ok ? "funcionando" : "não passou"
+                  }${status.last_test_detail ? ` (${status.last_test_detail})` : ""}.`
+                : "Ainda não testada."}
+            </p>
+          ) : (
+            <p className={styles.hint}>
+              No painel da Uber Direct, aba <strong>Developer</strong>, copie o Customer ID e crie o Client ID e o
+              Client Secret. Antes de guardar, conferimos as três na Uber.
+            </p>
+          )}
+          <form action={connectUber} className={styles.fields}>
+            {tenantField}
+            <label className={styles.field}>
+              Customer ID
+              <input
+                name="uber_customer_id"
+                autoComplete="off"
+                required
+                maxLength={200}
+                disabled={!owner}
+                placeholder={status.connected ? "cole de novo para trocar" : ""}
+              />
+            </label>
+            <label className={styles.field}>
+              Client ID
+              <input name="uber_client_id" autoComplete="off" required maxLength={200} disabled={!owner} />
+            </label>
+            <label className={styles.field}>
+              Client Secret
+              <input
+                name="uber_client_secret"
+                type="password"
+                autoComplete="off"
+                required
+                maxLength={200}
+                disabled={!owner}
+              />
+            </label>
+            <label className={styles.field}>
+              Ambiente das chaves
+              <select name="uber_environment" defaultValue={status.environment} disabled={!owner}>
+                <option value="production">Produção (entregador de verdade)</option>
+                <option value="test">Teste (entregador simulado)</option>
+              </select>
+              <span className={styles.fieldHint}>
+                A Uber não diz de qual ambiente são as chaves: escolha o mesmo de onde você copiou.
+              </span>
+            </label>
+            <p className={`${styles.fieldHint} ${styles.fieldWide}`}>
+              Guardamos cifrado e nunca mostramos de volta. As chaves chamam corrida na sua conta, então só o dono da loja
+              mexe aqui.
+            </p>
+            <div className={`${styles.formActions} ${styles.fieldWide}`}>
+              <button type="submit" className={styles.button} disabled={!owner}>
+                {status.connected ? "Trocar chaves" : "Conectar conta"}
+              </button>
+            </div>
+          </form>
+          {status.connected && owner ? (
+            <div className={styles.formActions}>
+              <form action={testUber}>
+                {tenantField}
+                <button type="submit" className={`${styles.buttonGhost} ${styles.buttonSmall}`}>
+                  Testar agora
+                </button>
+              </form>
+              <form action={disconnectUber}>
+                {tenantField}
+                <button type="submit" className={`${styles.buttonDanger} ${styles.buttonSmall}`}>
+                  Desconectar
+                </button>
+              </form>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      <h4 className={local.subhead}>2. Coleta e chamada</h4>
+      <form action={saveUberSettings}>
+        {tenantField}
+        <div className={styles.fields}>
+          <label className={styles.field}>
+            Nome na coleta
+            <input name="origin_name" maxLength={80} defaultValue={origin.name ?? ""} placeholder="Ex.: Doceria da Ana" />
+          </label>
+          <label className={styles.field}>
+            Telefone da coleta
+            <input
+              name="origin_phone"
+              inputMode="tel"
+              maxLength={20}
+              defaultValue={origin.phone ?? ""}
+              placeholder="(11) 99999-9999"
+            />
+            <span className={styles.fieldHint}>A Uber exige: é para onde o entregador liga.</span>
+          </label>
+          <label className={styles.field}>
+            CEP
+            <input name="origin_cep" inputMode="numeric" maxLength={9} defaultValue={origin.postal_code ?? ""} />
+          </label>
+          <label className={`${styles.field} ${styles.fieldWide}`}>
+            Rua
+            <input name="origin_address" maxLength={120} defaultValue={origin.address ?? ""} />
+          </label>
+          <label className={styles.field}>
+            Número
+            <input name="origin_number" maxLength={20} defaultValue={origin.number ?? ""} />
+          </label>
+          <label className={styles.field}>
+            Complemento
+            <input name="origin_complement" maxLength={80} defaultValue={origin.complement ?? ""} />
+          </label>
+          <label className={styles.field}>
+            Bairro
+            <input name="origin_district" maxLength={80} defaultValue={origin.district ?? ""} />
+          </label>
+          <label className={styles.field}>
+            Cidade
+            <input name="origin_city" maxLength={80} defaultValue={origin.city ?? ""} />
+          </label>
+          <label className={styles.field}>
+            UF
+            <input name="origin_state" maxLength={2} defaultValue={origin.state ?? ""} placeholder="SP" />
+          </label>
+          <label className={`${styles.field} ${styles.fieldWide}`}>
+            Instrução para o entregador
+            <input
+              name="origin_notes"
+              maxLength={280}
+              defaultValue={origin.notes ?? ""}
+              placeholder="Ex.: retirar no balcão dos fundos"
+            />
+          </label>
+          <label className={`${styles.check} ${styles.fieldWide}`}>
+            <input type="checkbox" name="uber_auto_dispatch" defaultChecked={autoDispatch} />
+            <span className={local.checkText}>
+              Chamar o entregador sozinho quando o pedido ficar Pronto
+              <span className={styles.fieldHint}>Desligado, você chama a Uber no pedido, quando quiser.</span>
+            </span>
+          </label>
+          <label className={styles.field}>
+            Teto por corrida (R$)
+            <input name="uber_max_fee" inputMode="decimal" defaultValue={moneyInput(maxFee)} placeholder="Sem teto" />
+            <span className={styles.fieldHint}>Se a Uber cotar acima disso, não chamamos sozinhos: você confirma no pedido.</span>
+          </label>
+        </div>
+        <p className={styles.hint}>Para tirar a coleta, apague o nome e a rua e salve.</p>
+        <div className={styles.formActions}>
+          <button type="submit" className={styles.button}>
+            Salvar coleta e chamada
+          </button>
+        </div>
+      </form>
+    </Section>
+  );
 }
 
 export default async function Fulfillment({
@@ -173,6 +423,16 @@ export default async function Fulfillment({
   const zones: (DeliveryZone | null)[] = [...(cfg.delivery?.zones ?? []), null].slice(0, 50);
   const windows: (DeliveryWindow | null)[] = [...(cfg.scheduling?.windows ?? []), ...Array(2).fill(null)].slice(0, 28);
   const tenantField = <input type="hidden" name="tenant_id" value={context.tenant_id} />;
+
+  // As chaves da Uber chamam corrida na conta da loja: só o dono conecta (o servidor recusa o
+  // resto). O staff da MuhBianco lê para conferir por que a Uber não foi chamada.
+  const scopes = tenantScopes(me, context.tenant_id);
+  const uberReader = Boolean(features.delivery) && scopes.can("shipping:config");
+  const uberOwner = uberReader && isStoreMember(me, context.tenant_id);
+  const uber = uberReader
+    ? await api<UberStatus>(`/admin/tenants/${tenantId}/delivery/uber`).catch(() => null)
+    : null;
+  const origin: Partial<DeliveryOrigin> = cfg.delivery?.origin ?? {};
 
   // Linhas já salvas abrem sob demanda; as vazias (para criar) ficam num cartão "Adicionar".
   // O índice `i` é o da lista inteira: é ele que vai no nome dos campos.
@@ -420,6 +680,19 @@ export default async function Fulfillment({
           </button>
         </div>
       </form>
+
+      {features.delivery ? (
+        <UberSection
+          tenantId={context.tenant_id}
+          status={uber}
+          owner={uberOwner}
+          reader={uberReader}
+          origin={origin}
+          autoDispatch={cfg.delivery?.uber?.auto_dispatch ?? true}
+          maxFee={cfg.delivery?.uber?.max_fee_cents ?? null}
+          zone={context.timezone}
+        />
+      ) : null}
 
       {features.checkout ? (
         <Section title="Checkout" description="Prazo para pagar, cancelamento e devoluções">
