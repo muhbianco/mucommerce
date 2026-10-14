@@ -159,7 +159,7 @@ TAGS_METADATA: list[dict[str, object]] = [
     },
     {
         "name": "Webhooks de entrega",
-        "description": "Avisos da Uber Direct da loja: só antecipam a consulta da corrida (docs/15).",
+        "description": "Avisos da Uber Direct: só antecipam a consulta da corrida (docs/15).",
     },
     {"name": "Infraestrutura", "description": "Health checks."},
 ]
