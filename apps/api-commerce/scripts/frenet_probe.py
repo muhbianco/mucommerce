@@ -36,6 +36,11 @@ O que cada teste responde:
 Com `--etiqueta partes.json` (remetente e destinatário no formato `From`/`To` da Frenet, com
 `Address`), cria um envio a partir da cotação de 1 volume, lê a etiqueta (antes de pagar) e apaga
 o envio. Os links e os dados pessoais ficam fora da saída.
+
+Com `--so-lojista`, chama a API whitelabel **só com o token do lojista**, sem `x-partner-token`.
+A referência da Frenet marca os dois cabeçalhos como obrigatórios, mas o bloco `security` de cada
+operação os lista como alternativas (`[{api_key}, {api_partner_key}]`): só a chamada responde.
+Também lê o saldo da carteira (`GET /v1/wallet`), que não custa nada.
 """
 
 from __future__ import annotations
@@ -72,18 +77,18 @@ def _secret(env: str, default: str, *, required: bool = True) -> str | None:
 
 
 class Sonda:
-    def __init__(self, token: str, partner: str | None) -> None:
+    def __init__(self, token: str, partner: str | None, *, so_lojista: bool = False) -> None:
         comum = {"Accept": "application/json", "Content-Type": "application/json"}
         self._api = httpx.Client(base_url=API, timeout=TIMEOUT, headers=comum | {"token": token})
+        wl_headers = comum | {"token": token}
+        if partner and not so_lojista:
+            wl_headers["x-partner-token"] = partner
         self._wl = (
-            httpx.Client(
-                base_url=WHITELABEL,
-                timeout=TIMEOUT,
-                headers=comum | {"token": token, "x-partner-token": partner},
-            )
-            if partner
+            httpx.Client(base_url=WHITELABEL, timeout=TIMEOUT, headers=wl_headers)
+            if partner or so_lojista
             else None
         )
+        self.so_lojista = so_lojista
         self.registro: list[dict[str, Any]] = []
 
     @property
@@ -203,7 +208,10 @@ def _itens(*itens: dict[str, Any], quantidade: int = 1, destino: str = DESTINO) 
 
 
 def rodar(sonda: Sonda) -> dict[str, Any]:
-    resultado: dict[str, Any] = {"parceiro": sonda.parceiro}
+    resultado: dict[str, Any] = {"whitelabel": sonda.parceiro, "so_lojista": sonda.so_lojista}
+    if sonda.parceiro:
+        status, _ = sonda.chama("0.saldo", "whitelabel", "GET", "/v1/wallet")
+        resultado["saldo_status"] = status
     status, _ = sonda.chama("1.servicos", "api", "GET", "/shipping/info")
     resultado["servicos_status"] = status
 
@@ -324,17 +332,27 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="probe-frenet.json")
     parser.add_argument("--etiqueta", help="arquivo com From/To (cria e apaga um envio, sem pagar)")
+    parser.add_argument(
+        "--so-lojista",
+        action="store_true",
+        help="chama a API whitelabel só com o token do lojista (sem x-partner-token)",
+    )
     args = parser.parse_args()
 
     sonda = Sonda(
         _secret("FRENET_TOKEN_FILE", "~/.secrets/frenet-token"),
-        _secret("FRENET_PARTNER_TOKEN_FILE", "~/.secrets/frenet-partner-token", required=False),
+        None
+        if args.so_lojista
+        else _secret(
+            "FRENET_PARTNER_TOKEN_FILE", "~/.secrets/frenet-partner-token", required=False
+        ),
+        so_lojista=args.so_lojista,
     )
     try:
         resultado = rodar(sonda)
         cotacao = resultado.pop("_cotacao_1_volume", None)
         if args.etiqueta and not sonda.parceiro:
-            sys.exit("--etiqueta precisa do token de parceiro (a etiqueta é da API whitelabel).")
+            sys.exit("--etiqueta precisa da API whitelabel (token de parceiro ou --so-lojista).")
         if args.etiqueta:
             partes = json.loads(Path(args.etiqueta).read_text(encoding="utf-8"))
             resultado |= etiqueta(sonda, partes, cotacao)

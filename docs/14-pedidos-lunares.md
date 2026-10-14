@@ -169,8 +169,26 @@ Cada etapa traz pytest, cenário Playwright quando mexe em tela, e a verificaç�
 
 ## Fatos verificados da Frenet
 
-_A preencher pela sonda, com data, chamada e resposta saneada. Precisa da aprovação do dono antes
-de o provedor ser escrito._
+### 14/10/2026 — só com o token do lojista (`--so-lojista`, saída em `probe-frenet-lojista.json`)
+
+A Frenet aceitou a parceria (13/10) e o token de parceiro ainda não chegou. A pergunta era se o
+token do lojista sozinho abre a API de etiquetas: a referência marca os dois cabeçalhos como
+obrigatórios, mas o bloco `security` de cada operação os lista como alternativas.
+
+| Pergunta | Resposta medida |
+|---|---|
+| **API de etiquetas só com o token do lojista** | **401 em todas as 7 chamadas** (`GET /v1/wallet`, `POST /v1/quotes` ×6, `GET /v1/shipments`), sem corpo. O `x-partner-token` é obrigatório; o `security` da doc está errado. Criar envio nem foi tentado (depende da cotação por volumes). |
+| Serviços (`GET /shipping/info`) | 200: Mini Envios (`04227`), Sedex (`03220`), PAC (`03298`), Jadlog Package (`F_3`). |
+| Cotação por itens (`POST /shipping/quote`) | 200. Preço e prazo **em texto** (`"18.48"`, `"6"`); `Error` e `Msg` por serviço; `AllowMultivolume: false` em todos. |
+| A Frenet junta itens? | **Junta.** 1 item de 0,5 kg: Jadlog R$ 18,48, PAC R$ 23,30. O mesmo item ×2: R$ 19,70 e R$ 24,97 (não o dobro). Mandar cada volume nosso como item faria a Frenet cotar uma caixa só. |
+| Limites | Lado de 105 cm: Correios recusam ("Dimensões máximas excedidas"), Jadlog cota. 31 kg: Correios recusam ("Peso excedido"); Jadlog cota com taxa de R$ 60. |
+| CEP inválido | 200 com erro em todos os serviços, e erros enganosos: Correios "contrato com os Correios inválido ou não existe", Jadlog "Attempted to divide by zero". O CEP tem de ser validado do nosso lado. |
+| Rastreio (`POST /tracking/trackinginfo`) | 200 com código inventado (`{"ExpectedDate": "0001-01-01T00:00:00"}`): não diz "não existe". |
+
+**Conclusão:** sem o token de parceiro, a loja alcança serviços, cotação por itens e rastreio; não
+alcança saldo, cotação por volumes, etiqueta, pagamento nem cancelamento. Próximo passo: a sonda
+com o token de parceiro (cotação por volumes, criar e apagar envio sem pagar) e, depois, uma
+etiqueta paga e cancelada com o ok do dono, para ver se o valor volta à carteira.
 
 A sonda é `apps/api-commerce/scripts/frenet_probe.py`. Ela lê `~/.secrets/frenet-token` (cliente)
 e `~/.secrets/frenet-partner-token` (parceiro) e grava `probe-frenet.json`, que está no gitignore.
