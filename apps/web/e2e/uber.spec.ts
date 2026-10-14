@@ -96,6 +96,13 @@ test("a loja conecta a Uber, marca a zona e informa a coleta", async ({ page }) 
   await expect(page).toHaveURL(/ok=uber_testada/);
   await expect(uber.getByText(/chaves de teste/)).toBeVisible();
 
+  // F3: o endereço do webhook da loja, para cadastrar na Uber, e a chave de assinatura dela.
+  await expect(uber.getByText(/\/api\/v1\/webhooks\/courier\/uber\//)).toBeVisible();
+  await uber.getByLabel(/Webhook Signing Key/).fill("chave-webhook-e2e");
+  await uber.getByRole("button", { name: "Guardar chave" }).click();
+  await expect(page).toHaveURL(/ok=uber_webhook/);
+  await expect(uber.getByText(/Chave guardada: os avisos da Uber chegam na hora/)).toBeVisible();
+
   // F2: o pedido pronto da zona da Uber chama o entregador pelo quadro do pedido.
   const amostra = await page.request.post(`${API}/__e2e/orders/uber-sample`, { data: {} });
   expect(amostra.ok()).toBeTruthy();

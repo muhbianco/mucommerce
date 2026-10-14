@@ -18,7 +18,16 @@ import type {
 import styles from "../../../../panel.module.css";
 import { Flash } from "../flash";
 import { PageHeader, Pill, Section, TableWrap } from "../ui";
-import { connectUber, disconnectUber, saveCheckout, saveFulfillment, saveUberSettings, testUber } from "./actions";
+import { CopyButton } from "../copy-button";
+import {
+  connectUber,
+  disconnectUber,
+  saveCheckout,
+  saveFulfillment,
+  saveUberSettings,
+  saveUberWebhookSecret,
+  testUber,
+} from "./actions";
 import local from "./entrega.module.css";
 
 export const metadata: Metadata = { title: "Entrega e checkout" };
@@ -319,6 +328,47 @@ function UberSection({
                 </button>
               </form>
             </div>
+          ) : null}
+
+          {status.connected ? (
+            <>
+              <h4 className={local.subhead}>Avisos da Uber (webhook)</h4>
+              <p className={styles.hint}>
+                Sem isto, a situação da corrida é conferida na Uber de 2 em 2 minutos. Com o webhook, muda na hora.
+                No painel da Uber Direct, em <strong>Developer → Webhooks</strong>, crie um webhook do tipo{" "}
+                <strong>Delivery Status</strong> com o endereço abaixo e cole aqui a <strong>Webhook Signing Key</strong>{" "}
+                que a Uber mostrar.
+              </p>
+              <p className={styles.hint}>
+                <code>{status.webhook_url}</code> <CopyButton value={status.webhook_url} />
+              </p>
+              <form action={saveUberWebhookSecret} className={styles.fields}>
+                {tenantField}
+                <label className={`${styles.field} ${styles.fieldWide}`}>
+                  Webhook Signing Key
+                  <input
+                    name="uber_webhook_secret"
+                    type="password"
+                    autoComplete="off"
+                    required
+                    minLength={8}
+                    maxLength={200}
+                    disabled={!owner}
+                    placeholder={status.webhook_secret_set ? "•••••••• (cole outra para trocar)" : ""}
+                  />
+                  <span className={styles.fieldHint}>
+                    {status.webhook_secret_set
+                      ? "Chave guardada: os avisos da Uber chegam na hora."
+                      : "Sem a chave, os avisos são recusados e vale a conferência de 2 em 2 minutos."}
+                  </span>
+                </label>
+                <div className={`${styles.formActions} ${styles.fieldWide}`}>
+                  <button type="submit" className={styles.buttonGhost} disabled={!owner}>
+                    {status.webhook_secret_set ? "Trocar chave" : "Guardar chave"}
+                  </button>
+                </div>
+              </form>
+            </>
           ) : null}
         </>
       )}

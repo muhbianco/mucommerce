@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     admin_tenants,
     admin_tickets,
     auth,
+    courier_webhooks,
     customer_addresses,
     customer_auth,
     customer_orders,
@@ -156,6 +157,10 @@ TAGS_METADATA: list[dict[str, object]] = [
         "name": "Webhooks de pagamento",
         "description": "Avisos dos provedores: guardados e conferidos com o provedor (ADR 0011).",
     },
+    {
+        "name": "Webhooks de entrega",
+        "description": "Avisos da Uber Direct da loja: só antecipam a consulta da corrida (docs/15).",
+    },
     {"name": "Infraestrutura", "description": "Health checks."},
 ]
 
@@ -204,6 +209,9 @@ ENDPOINT_ROUTERS: tuple[APIRouter, ...] = (
     customer_orders.router,
     legal.router,
     legal.storefront_router,
+    # Antes do de pagamento: `/webhooks/courier/uber/{chave}` tem três segmentos e não colide
+    # com `/webhooks/{provedor}/{chave}`, mas a ordem deixa isso explícito.
+    courier_webhooks.router,
     payment_webhooks.router,
 )
 

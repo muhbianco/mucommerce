@@ -69,7 +69,7 @@ nunca no chat.
 6. **Credenciais no cofre da loja** (`CredentialStore`, AES-GCM, provider `uber_direct`): os três
    valores, a chave do webhook e o **token de 30 dias** (cifrado, com validade), renovado só perto do
    fim — o limite de 100 tokens/hora não pode ser atingido por um laço.
-7. **Acompanhamento:** webhook por loja (`/api/v1/webhooks/uber/{chave-da-loja}`, assinatura
+7. **Acompanhamento:** webhook por loja (`/api/v1/webhooks/courier/uber/{chave-da-loja}`, assinatura
    verificada no corpo cru, caixa de entrada com idempotência, como os de pagamento) **e** consulta de
    reforço das entregas abertas a cada poucos minutos (a Uber tenta o webhook só 3 vezes).
 8. **Falhas não decidem sozinhas:** sem entregador, cancelada ou devolvida → o pedido volta a
@@ -138,6 +138,29 @@ O "Pronto" chama de verdade. Sem webhook ainda: a situação da corrida só muda
   chave repetida, resposta perdida, 401) e o quadro no `e2e/uber.spec.ts`
   (`/__e2e/orders/uber-sample`). A Uber de mentira do E2E recusa corrida sem entregador simulado.
 - Deploy: só a migration 0050 (expand) e o agendamento novo no beat; nenhuma variável nova.
+
+### F3 feita (14/10/2026, mesma branch)
+
+- **Acompanhar:** corrida ativa é consultada na Uber (`GET`) a cada 2 min pelo varredor. O webhook
+  da loja só **antecipa** a consulta: o corpo do aviso não decide nada (pode vir repetido, fora de
+  ordem, ou não vir — a Uber tenta 3 vezes e desiste).
+- **Webhook:** `POST /api/v1/webhooks/courier/uber/{public_key}` (três segmentos para não colidir
+  com `/webhooks/{provedor}/{chave}` dos pagamentos), só no host público, loja pela chave da URL.
+  Assinatura `x-uber-signature` (ou `x-postmates-signature`): HMAC-SHA256 em hex do corpo cru,
+  com a "Webhook Signing Key" que a loja cola em Entrega e checkout (cofre, `webhook_secret`).
+  Sem a chave ou com assinatura errada: 401 (a Uber não repete 4xx; a consulta cobre).
+- **Pedido anda sozinho:** `pickup_complete`/`dropoff` → "Saiu para entrega"; `delivered` →
+  "Entregue" (passando pelo "saiu" se a coleta não foi vista). Uber cancelou antes da coleta: a
+  corrida vira `failed` e o pedido fica "Pronto".
+- **Avisos:** `courier.needs_attention` no outbox quando a corrida para numa decisão da loja (falha
+  ao chamar, teto, Uber cancelou) → e-mail aos donos com o motivo e o link do pedido. O cliente
+  recebe o link de acompanhamento da Uber no e-mail de "saiu para entrega".
+- **Fica de fora:** nota no Chatwoot (é api-agents; a situação do pedido já chega lá pela
+  sincronização de pedidos) e a volta do pedido de "Saiu" para "Pronto" quando a corrida é
+  devolvida depois da coleta (`returned`): a corrida vira `failed`, a loja é avisada e decide.
+- **Para usar o webhook:** a loja cria no painel da Uber Direct (Developer → Webhooks) um webhook
+  "Delivery Status" com o endereço mostrado na tela e cola a chave de assinatura. Sem isso, a
+  consulta de 2 em 2 minutos faz o mesmo, mais devagar.
 
 ## O que precisa do dono
 

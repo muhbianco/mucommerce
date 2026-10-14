@@ -8,6 +8,8 @@ devolve `canceled`.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import uuid
 from datetime import timedelta
@@ -25,8 +27,9 @@ from app.core.scopes import TenantRole
 from app.courier import uber
 from app.courier.consumer import courier_on_order
 from app.courier.models import CourierDelivery, CourierStatus
-from app.courier.service import run_couriers
+from app.courier.service import ALERT_EVENT, run_couriers
 from app.models.base import utcnow
+from app.orders.models import Order
 from app.tenancy.context import bind_session_tenant
 from app.tenancy.models import Tenant
 from tests.shoppers import selling_store
@@ -539,3 +542,204 @@ async def test_corrida_de_outra_loja_nao_existe_aqui(
     assert chamada.status_code == 404
     assert await _corridas(session_factory, outra, order_id) == []
     assert len(await _corridas(session_factory, tenant, order_id)) == 1
+
+
+# --------------------------------------------------------------------- F3: acompanhar e avisos
+
+
+async def _status_do_pedido(
+    session_factory: async_sessionmaker[AsyncSession], tenant: Tenant, order_id: str
+) -> str:
+    async with session_factory() as session:
+        bind_session_tenant(session, tenant.id)
+        pedido = await session.get(Order, order_id)
+        assert pedido is not None
+        return str(pedido.status)
+
+
+async def _alertas(
+    session_factory: async_sessionmaker[AsyncSession], tenant: Tenant
+) -> list[dict[str, Any]]:
+    async with session_factory() as session:
+        stmt = (
+            select(OutboxEvent)
+            .where(OutboxEvent.tenant_id == tenant.id)
+            .where(OutboxEvent.event_type == ALERT_EVENT)
+        )
+        return [dict(e.payload) for e in (await session.execute(stmt)).scalars()]
+
+
+async def _ativa(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> tuple[Tenant, dict[str, str], str]:
+    tenant, owner, order_id = await _pedido_pronto(client, session_factory)
+    await _evento(session_factory, tenant, order_id)
+    await _volta(session_factory)
+    [corrida] = await _corridas(session_factory, tenant, order_id)
+    assert corrida.status == CourierStatus.ACTIVE
+    assert corrida.next_attempt_at is not None  # a consulta de reforço já está marcada
+    return tenant, owner, order_id
+
+
+async def test_a_consulta_move_o_pedido_coletado_e_entregue(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], uber_falsa: UberFalsa
+) -> None:
+    tenant, _, order_id = await _ativa(client, session_factory)
+
+    uber_falsa.andar("del_q1", "pickup")
+    await _volta(session_factory, 3)  # o entregador vai à loja: o pedido continua "Pronto"
+    assert await _status_do_pedido(session_factory, tenant, order_id) == "ready_for_pickup"
+
+    uber_falsa.andar("del_q1", "pickup_complete")
+    await _volta(session_factory, 6)
+    assert await _status_do_pedido(session_factory, tenant, order_id) == "shipped"
+    [corrida] = await _corridas(session_factory, tenant, order_id)
+    assert corrida.picked_up_at is not None and corrida.status == CourierStatus.ACTIVE
+
+    uber_falsa.andar("del_q1", "delivered")
+    await _volta(session_factory, 9)
+    assert await _status_do_pedido(session_factory, tenant, order_id) == "delivered"
+    [corrida] = await _corridas(session_factory, tenant, order_id)
+    assert corrida.status == CourierStatus.DELIVERED and corrida.active_marker is None
+    assert await _alertas(session_factory, tenant) == []
+
+
+async def test_entregue_sem_ver_a_coleta_passa_pelo_saiu(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], uber_falsa: UberFalsa
+) -> None:
+    """Consulta de 2 em 2 minutos pode pular a coleta: o histórico conta os dois passos."""
+    tenant, owner, order_id = await _ativa(client, session_factory)
+    uber_falsa.andar("del_q1", "delivered")
+    await _volta(session_factory, 3)
+    detalhe = (await client.get(orders_url(tenant, order_id), headers=owner)).json()
+    assert detalhe["order"]["status"] == "delivered"
+    passos = [e["status"] for e in detalhe["order"]["timeline"]]
+    assert passos[-2:] == ["shipped", "delivered"]
+
+
+async def test_uber_cancela_antes_da_coleta_e_a_loja_e_avisada(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], uber_falsa: UberFalsa
+) -> None:
+    tenant, _, order_id = await _ativa(client, session_factory)
+    uber_falsa.andar("del_q1", "canceled", reason="no_couriers_available")
+    await _volta(session_factory, 3)
+    [corrida] = await _corridas(session_factory, tenant, order_id)
+    assert corrida.status == CourierStatus.FAILED
+    assert "no_couriers_available" in (corrida.last_error or "")
+    # O pedido fica "Pronto": a loja chama de novo ou leva.
+    assert await _status_do_pedido(session_factory, tenant, order_id) == "ready_for_pickup"
+    [alerta] = await _alertas(session_factory, tenant)
+    assert alerta["order_id"] == order_id and "no_couriers_available" in alerta["reason"]
+
+
+async def test_falha_ao_chamar_tambem_avisa_a_loja(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], uber_falsa: UberFalsa
+) -> None:
+    tenant, _, order_id = await _pedido_pronto(client, session_factory)
+    uber_falsa.fora_do_raio = True
+    await _evento(session_factory, tenant, order_id)
+    await _volta(session_factory)
+    [alerta] = await _alertas(session_factory, tenant)
+    assert alerta["status"] == "failed" and "fora do alcance" in alerta["reason"]
+
+
+def _assina(segredo: str, corpo: bytes) -> str:
+    return hmac.new(segredo.encode(), corpo, hashlib.sha256).hexdigest()
+
+
+async def test_webhook_assinado_antecipa_a_consulta(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession], uber_falsa: UberFalsa
+) -> None:
+    tenant, owner, order_id = await _ativa(client, session_factory)
+    url_uber = f"/api/v1/admin/tenants/{tenant.id}/delivery/uber"
+    antes = (await client.get(url_uber, headers=owner)).json()
+    assert antes["webhook_secret_set"] is False
+    assert antes["webhook_url"].endswith(f"/api/v1/webhooks/courier/uber/{tenant.public_key}")
+
+    endereco = f"/api/v1/webhooks/courier/uber/{tenant.public_key}"
+    host = {"host": settings.api_public_host, "content-type": "application/json"}
+    corpo = json.dumps(
+        {"kind": "event.delivery_status", "delivery_id": "del_q1", "status": "pickup_complete"}
+    ).encode()
+
+    # Sem a chave guardada, o aviso é recusado (a consulta de 2 em 2 minutos cobre).
+    sem_chave = await client.post(
+        endereco, content=corpo, headers=host | {"x-uber-signature": _assina("x" * 20, corpo)}
+    )
+    assert sem_chave.status_code == 401
+
+    segredo = "chave-de-assinatura-da-loja"
+    guardada = await client.put(
+        f"{url_uber}/webhook-secret", json={"secret": segredo}, headers=owner
+    )
+    assert guardada.status_code == 200, guardada.text
+    assert guardada.json()["webhook_secret_set"] is True
+    assert segredo not in guardada.text
+
+    errada = await client.post(
+        endereco, content=corpo, headers=host | {"x-uber-signature": _assina("outra", corpo)}
+    )
+    assert errada.status_code == 401
+    outro_host = await client.post(
+        endereco,
+        content=corpo,
+        headers={"host": "loja.exemplo.test", "x-uber-signature": _assina(segredo, corpo)},
+    )
+    assert outro_host.status_code == 404
+
+    uber_falsa.andar("del_q1", "pickup_complete")
+    aceito = await client.post(
+        endereco, content=corpo, headers=host | {"x-uber-signature": _assina(segredo, corpo)}
+    )
+    assert aceito.status_code == 200 and aceito.json()["status"] == "agendada"
+    # Sem esperar os 2 minutos: o aviso adiantou a consulta, e o GET decide.
+    await _volta(session_factory)
+    assert await _status_do_pedido(session_factory, tenant, order_id) == "shipped"
+
+    desconhecida = json.dumps({"delivery_id": "del_nao_e_nossa"}).encode()
+    resposta = await client.post(
+        endereco,
+        content=desconhecida,
+        headers=host | {"x-uber-signature": _assina(segredo, desconhecida)},
+    )
+    assert resposta.status_code == 200 and resposta.json()["status"] == "desconhecida"
+
+
+def test_emails_da_entrega_pela_uber() -> None:
+    from types import SimpleNamespace
+
+    from app.notifications.messages import (
+        MailContext,
+        order_status_changed,
+        store_courier_attention,
+    )
+
+    pedido: Any = SimpleNamespace(
+        number=12,
+        status="shipped",
+        fulfillment_type="delivery",
+        fulfillment={"name": "Centro"},
+    )
+    saiu = order_status_changed(
+        MailContext(
+            store_name="Loja",
+            timezone="America/Sao_Paulo",
+            order=pedido,
+            items=[],
+            courier_tracking_url="https://direct-order.uber.com/br/orders/x",
+        )
+    )
+    assert any("direct-order.uber.com" in p for p in saiu.paragraphs)
+
+    loja = store_courier_attention(
+        MailContext(
+            store_name="Loja",
+            timezone="America/Sao_Paulo",
+            order=pedido,
+            items=[],
+            panel_url="https://painel/t/x/pedidos/y",
+            courier_problem="a Uber cancelou a corrida (no_couriers_available)",
+        )
+    )
+    assert "no_couriers_available" in loja.paragraphs[0]
+    assert loja.cta_url == "https://painel/t/x/pedidos/y"

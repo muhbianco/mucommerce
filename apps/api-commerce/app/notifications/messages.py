@@ -55,6 +55,10 @@ class MailContext:
     #: Como o ingresso chega, quando quem emite é o lojista (`ticketing=own`). Com MuTickets
     #: esta fica vazia: quem fala do ingresso é o e-mail próprio dele, com o link.
     own_ticket_note: str | None = None
+    #: O link da Uber para acompanhar o entregador, quando a entrega é por ela (docs/15).
+    courier_tracking_url: str | None = None
+    #: Por que a corrida da Uber precisa da loja (aviso `courier.needs_attention`).
+    courier_problem: str | None = None
 
 
 def money(cents: int, currency: str = "BRL") -> str:
@@ -244,6 +248,8 @@ def order_status_changed(ctx: MailContext) -> Message:
     )
     if where and (pronto_para_retirar or ctx.order.status == "shipped"):
         paragraphs.append(where)
+    if ctx.order.status == "shipped" and ctx.courier_tracking_url:
+        paragraphs.append(f"Acompanhe o entregador pela Uber: {ctx.courier_tracking_url}")
     return Message(
         template_key="order_status_changed",
         subject=f"Pedido #{ctx.order.number}: {label}",
@@ -265,6 +271,23 @@ def refund_completed(ctx: MailContext) -> Message:
             "O prazo até o dinheiro aparecer depende do banco ou do cartão.",
         ],
         cta_url=ctx.url,
+    )
+
+
+def store_courier_attention(ctx: MailContext) -> Message:
+    """A corrida da Uber parou numa decisão da loja: chamar de novo, confirmar o valor ou levar."""
+    motivo = (ctx.courier_problem or "a Uber não completou a chamada").rstrip(".")
+    return Message(
+        template_key="store_courier_attention",
+        subject=f"Pedido #{ctx.order.number}: a entrega pela Uber precisa de você",
+        heading=f"Pedido #{ctx.order.number}: entrega pela Uber",
+        paragraphs=[
+            f"A corrida não seguiu sozinha: {motivo}.",
+            "No pedido você escolhe chamar a Uber de novo, confirmar o valor cotado ou levar "
+            "com a sua equipe.",
+        ],
+        cta_url=ctx.panel_url,
+        cta_label="Abrir o pedido",
     )
 
 

@@ -476,6 +476,34 @@ class OrderService:
             scopes=frozenset(),
         )
 
+    async def courier_picked_up(self, order: Order) -> None:
+        """O entregador da Uber coletou: o pedido sai sozinho (docs/15, F3)."""
+        if order.status != OrderStatus.READY_FOR_PICKUP:
+            return
+        await self._transition(
+            order,
+            OrderStatus.SHIPPED,
+            ActorKind.SYSTEM,
+            source="courier",
+            reason="coletado pelo entregador da Uber",
+            scopes=frozenset(),
+        )
+
+    async def courier_delivered(self, order: Order) -> None:
+        """A Uber confirmou a entrega. Se a coleta passou sem a gente ver (consulta espaçada),
+        o pedido passa pelo "saiu" antes: o histórico conta os dois passos."""
+        await self.courier_picked_up(order)
+        if order.status != OrderStatus.SHIPPED:
+            return
+        await self._transition(
+            order,
+            OrderStatus.DELIVERED,
+            ActorKind.SYSTEM,
+            source="courier",
+            reason="a Uber confirmou a entrega",
+            scopes=frozenset(),
+        )
+
     def allowed_transitions(self, order: Order, scopes: frozenset[str]) -> list[str]:
         """What this person may do with the order right now (the panel shows exactly these)."""
         snapshot = OrderSnapshot(

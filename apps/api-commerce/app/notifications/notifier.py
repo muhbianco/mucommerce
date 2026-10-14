@@ -35,6 +35,7 @@ from app.notifications.messages import (
     order_status_changed,
     payment_pix_pending,
     refund_completed,
+    store_courier_attention,
     store_order_paid,
     ticket_issued,
 )
@@ -56,6 +57,8 @@ EVENT_TYPES = (
     "order.status_changed",
     "payment.requires_action",
     "refund.completed",
+    # A corrida da Uber precisa da loja (docs/15): só os donos ouvem, o cliente não.
+    "courier.needs_attention",
 )
 Builder = Callable[[MailContext], Message]
 # Who hears about what: the customer always, the store's owners when money lands.
@@ -68,7 +71,10 @@ CUSTOMER_BUILDERS: dict[str, Builder] = {
     "payment.requires_action": payment_pix_pending,
     "refund.completed": refund_completed,
 }
-STORE_BUILDERS: dict[str, Builder] = {"order.paid": store_order_paid}
+STORE_BUILDERS: dict[str, Builder] = {
+    "order.paid": store_order_paid,
+    "courier.needs_attention": store_courier_attention,
+}
 MAX_STORE_RECIPIENTS = 5
 
 
@@ -163,6 +169,11 @@ async def _context(
         refund = await session.get(Refund, refund_id)
     host = await _host(session, tenant)
     url = f"{settings.storefront_origin(host)}/conta/pedidos/{order.id}" if host else None
+    rastreio = (
+        await _courier_tracking_url(session, order.id)
+        if order.fulfillment_type == "delivery"
+        else None
+    )
     return MailContext(
         store_name=tenant.name,
         timezone=tenant.timezone,
@@ -178,6 +189,23 @@ async def _context(
         tickets=await _tickets(session, order),
         own_ticket_note=await _own_ticket_note(session, items),
         store_origin=settings.storefront_origin(host) if host else None,
+        courier_tracking_url=rastreio,
+        courier_problem=(str(event.payload.get("reason") or "") or None)
+        if event.event_type == "courier.needs_attention"
+        else None,
+    )
+
+
+async def _courier_tracking_url(session: AsyncSession, order_id: str) -> str | None:
+    """O link da corrida mais recente do pedido que tem um (a que levou, se houve outra antes)."""
+    from app.courier.models import CourierDelivery
+
+    return await session.scalar(
+        select(CourierDelivery.tracking_url)
+        .where(CourierDelivery.order_id == order_id)
+        .where(CourierDelivery.tracking_url.is_not(None))
+        .order_by(CourierDelivery.created_at.desc())
+        .limit(1)
     )
 
 

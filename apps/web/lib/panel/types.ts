@@ -263,6 +263,10 @@ export interface UberStatus {
   last_test_detail: string | null;
   last_test_at: string | null;
   missing: ("chaves" | "coleta" | "zona")[];
+  /** O endereço que a loja cadastra no painel da Uber (Developer → Webhooks). */
+  webhook_url: string;
+  /** A "Webhook Signing Key" já foi guardada (o valor nunca volta). */
+  webhook_secret_set: boolean;
 }
 
 /** Uma corrida da Uber do pedido (`courier_deliveries`). */

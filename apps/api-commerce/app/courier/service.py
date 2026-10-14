@@ -15,7 +15,13 @@ A cotação é guardada (commit) **antes** da criação: se a resposta da criaç
 da loja não é criada: fica esperando a loja confirmar.
 
 Falha não decide sozinha: sem chaves, sem coleta, fora do raio, sem resposta depois das
-tentativas — a linha vira `failed` com o motivo e a loja escolhe chamar de novo ou levar.
+tentativas — a linha vira `failed` com o motivo e a loja escolhe chamar de novo ou levar. A loja
+é avisada por e-mail (`courier.needs_attention` no outbox) além do quadro do pedido.
+
+Acompanhar (F3): corrida ativa é consultada na Uber a cada `TRACK_EVERY`, e o webhook da loja só
+**antecipa** a consulta — quem decide é a resposta do `GET`, nunca o corpo do aviso (que pode
+chegar fora de ordem, repetido, ou não chegar: a Uber tenta três vezes e desiste). Coletado vira
+"Saiu para entrega"; entregue vira "Entregue".
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.audit.outbox import emit
 from app.audit.writer import audit
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
@@ -40,6 +47,7 @@ from app.orders.state_machine import OrderStatus
 from app.tenancy.context import CROSS_TENANT_OPTION, bind_session_tenant
 from app.tenancy.models import Tenant
 from app.tenancy.repository import TenantRepository
+from app.tenancy.resolver import TenantResolver
 from app.tenancy.service import Actor
 from app.tenancy.settings_schemas import DeliverySettings, fulfillment_settings
 
@@ -56,6 +64,10 @@ BACKOFF = (
 )
 #: Depois disto sem resposta, a loja decide (a corrida pode estar demorando demais para o pedido).
 MAX_ATTEMPTS = 5
+#: Corrida ativa é perguntada à Uber nesse intervalo, com ou sem webhook.
+TRACK_EVERY = timedelta(minutes=2)
+#: O outbox avisa a loja (e-mail) quando a corrida precisa de uma decisão dela.
+ALERT_EVENT = "courier.needs_attention"
 #: Tentativas anteriores mostradas no pedido.
 HISTORY_LIMIT = 10
 #: O varredor atende tantas linhas por volta, em todas as lojas.
@@ -112,7 +124,7 @@ def _close(row: CourierDelivery, status: CourierStatus, now: datetime, error: st
 
 
 def _apply(row: CourierDelivery, info: uber.DeliveryInfo, now: datetime) -> None:
-    """O que a Uber contou sobre a corrida, na linha. Não mexe no pedido (isso é a F3)."""
+    """O que a Uber contou sobre a corrida, na linha. O pedido anda em `_sync_order`."""
     row.provider_delivery_id = info.id or row.provider_delivery_id
     row.provider_status = info.status or row.provider_status
     row.fee_cents = info.fee_cents if info.fee_cents is not None else row.fee_cents
@@ -138,7 +150,7 @@ def _apply(row: CourierDelivery, info: uber.DeliveryInfo, now: datetime) -> None
         _close(row, CourierStatus.FAILED, now, "a corrida voltou para a loja")
     elif row.status != CourierStatus.CANCELLING:
         row.status = CourierStatus.ACTIVE
-        row.next_attempt_at = None
+        row.next_attempt_at = now + TRACK_EVERY  # a próxima consulta, com ou sem webhook
         row.last_error = None
 
 
@@ -299,15 +311,17 @@ class CourierService:
         )
 
     # ------------------------------------------------------------------ worker
-    async def process(self, row_id: str, now: datetime | None = None) -> str:
+    async def process(
+        self, row_id: str, now: datetime | None = None, *, force: bool = False
+    ) -> str:
         """Um passo de uma corrida. **Faz commit** (reivindicação, depois resultado); repetir é
-        seguro. Devolve o que aconteceu, para log e teste."""
+        seguro. Devolve o que aconteceu, para log e teste. `force`: o operador pediu agora."""
         now = now or utcnow()
         row = await self._locked(row_id, skip_locked=True)
         if row is None:
             await self.session.commit()
             return "busy"
-        devido = row.next_attempt_at is not None and row.next_attempt_at <= now
+        devido = force or (row.next_attempt_at is not None and row.next_attempt_at <= now)
         if not devido:
             await self.session.commit()
             return "not_due"
@@ -316,31 +330,118 @@ class CourierService:
         if row.status in (CourierStatus.REQUESTED, CourierStatus.CREATING):
             # CREATING com prazo vencido: o worker anterior morreu no meio.
             return await self._dispatch(row)
+        if row.status == CourierStatus.ACTIVE:
+            return await self._track(row)
         await self.session.commit()
         return "not_due"
 
     async def refresh(self, order_id: str) -> CourierDelivery | None:
-        """ "Atualizar": pergunta à Uber como está a corrida aberta. Faz commit."""
+        """ "Atualizar": pergunta à Uber agora, pelo mesmo caminho do varredor. Faz commit."""
         row = await self.open_for(order_id)
-        if row is None or row.provider_delivery_id is None:
+        if row is None or row.status != CourierStatus.ACTIVE:
             return row
-        row_id, delivery_id = row.id, row.provider_delivery_id
+        resultado = await self.process(row.id, force=True)
+        if resultado == "sem_chaves":
+            raise ValidationError("Conecte a conta da Uber.", reason="uber_not_connected")
+        if resultado == "uber_unavailable":
+            raise ValidationError("A Uber não respondeu agora.", reason="uber_unavailable")
+        return await self.open_for(order_id)
+
+    async def webhook_hint(self, delivery_id: str) -> str:
+        """O webhook da Uber disse que a corrida mudou: antecipa a consulta dela.
+
+        Só isso. O corpo do aviso não decide nada — quem decide é o `GET` do varredor, que não
+        se confunde com aviso repetido, fora de ordem ou perdido.
+        """
+        row = await self._one(
+            select(CourierDelivery)
+            .where(CourierDelivery.provider == uber.PROVIDER)
+            .where(CourierDelivery.provider_delivery_id == delivery_id)
+            .order_by(CourierDelivery.created_at.desc())
+            .limit(1)
+        )
+        if row is None:
+            return "desconhecida"  # criada agora e ainda sem id gravado: a consulta cobre
+        if row.active_marker != 1 or row.status != CourierStatus.ACTIVE:
+            return "fechada"
+        row.next_attempt_at = utcnow()
+        await self.session.flush()
+        return "agendada"
+
+    # ------------------------------------------------------------------ acompanhar
+    async def _track(self, row: CourierDelivery) -> str:
+        now = utcnow()
+        row_id, delivery_id, order_id = row.id, row.provider_delivery_id, row.order_id
+        if delivery_id is None:
+            row.next_attempt_at = None
+            await self.session.commit()
+            return "sem_corrida"
         credenciais = await uber.load_credentials(self.session, self.tenant_id)
         token = await uber.stored_token(self.session, self.tenant_id)
-        await self.session.commit()  # nada fica preso enquanto a Uber responde
+        # A próxima consulta já marcada: outra volta do varredor não pega esta enquanto a Uber
+        # responde, e uma consulta que falhe tenta de novo sozinha no intervalo normal.
+        row.next_attempt_at = now + TRACK_EVERY
+        await self.session.commit()
         if credenciais is None:
-            raise ValidationError("Conecte a conta da Uber.", reason="uber_not_connected")
+            return "sem_chaves"
         try:
             info = await (await self._client(credenciais, token)).get(delivery_id)
         except uber.CourierError as exc:
-            raise ValidationError(
-                f"A Uber não respondeu: {exc}", reason="uber_unavailable"
-            ) from exc
-        row = await self._locked(row_id)
-        if row is not None and info is not None and row.active_marker == 1:
-            _apply(row, info, utcnow())
+            logger.warning(
+                "courier: consulta à Uber falhou",
+                extra={"courier_id": row_id, "error_code": exc.code, "status": exc.status},
+            )
+            return "uber_unavailable"
+        if info is None:
+            logger.warning("courier: a Uber não acha a corrida", extra={"courier_id": row_id})
+            return "desconhecida"
+        # Pedido antes da corrida: a mesma ordem de trava do resto do sistema.
+        order = await get_order(self.session, order_id, lock=True)
+        atual = await self._locked(row_id)
+        if atual is None or atual.active_marker != 1 or atual.status != CourierStatus.ACTIVE:
+            await self.session.commit()
+            return "superseded"
+        _apply(atual, info, utcnow())
+        await self._sync_order(atual, order)
+        if atual.status == CourierStatus.FAILED:
+            await self._alert(atual, atual.last_error)
         await self.session.commit()
-        return row
+        if atual.status == CourierStatus.ACTIVE:
+            return str(atual.provider_status)
+        return str(atual.status)
+
+    async def _sync_order(self, row: CourierDelivery, order: Order) -> None:
+        """Coletado: "Saiu para entrega". Entregue: "Entregue". O resto não mexe no pedido —
+        falha antes da coleta deixa o pedido "Pronto", para a loja chamar de novo ou levar."""
+        coletado = row.provider_status in ("pickup_complete", "dropoff")
+        entregue = row.status == CourierStatus.DELIVERED
+        if not (coletado or entregue):
+            return
+        from app.orders.service import OrderService
+
+        contexto = await TenantResolver(self.session).resolve_by_id(self.tenant_id)
+        pedidos = OrderService(self.session, contexto, Actor.system("courier"))
+        if entregue:
+            await pedidos.courier_delivered(order)
+        else:
+            await pedidos.courier_picked_up(order)
+
+    async def _alert(self, row: CourierDelivery, motivo: str | None) -> None:
+        """A corrida precisa de uma decisão da loja: o notifier manda o e-mail aos donos."""
+        await emit(
+            self.session,
+            aggregate_type="order",
+            aggregate_id=row.order_id,
+            event_type=ALERT_EVENT,
+            payload={
+                "order_id": row.order_id,
+                "courier_delivery_id": row.id,
+                "status": str(row.status),
+                "reason": (motivo or "")[:300],
+                "quoted_fee_cents": row.quoted_fee_cents,
+            },
+            tenant_id=self.tenant_id,
+        )
 
     # ------------------------------------------------------------------ chamar
     async def _dispatch(self, row: CourierDelivery) -> str:
@@ -354,6 +455,7 @@ class CourierService:
         claim_or_reason = await self._claim(row, order, now)
         if isinstance(claim_or_reason, str):
             _close(row, CourierStatus.FAILED, now, claim_or_reason)
+            await self._alert(row, claim_or_reason)
             await self.session.commit()
             return "failed"
         claim = claim_or_reason
@@ -554,6 +656,8 @@ class CourierService:
                 row.last_error = str(erro)[:300]
                 row.next_attempt_at = now + BACKOFF[min(row.attempts - 1, len(BACKOFF) - 1)]
                 resultado = "retry"
+        if resultado in ("failed", "awaiting_confirmation"):
+            await self._alert(row, row.last_error)
         await self.session.commit()
         logger.info(
             "courier: chamada à Uber",
@@ -641,8 +745,8 @@ class CourierService:
 
 
 async def due_couriers(session: AsyncSession, now: datetime) -> list[tuple[str, str]]:
-    """O que está na hora, em todas as lojas: chamar, tentar de novo, cancelar, ou assumir a
-    reivindicação de um worker que morreu (prazo vencido)."""
+    """O que está na hora, em todas as lojas: chamar, tentar de novo, cancelar, consultar uma
+    corrida ativa, ou assumir a reivindicação de um worker que morreu (prazo vencido)."""
     stmt = (
         select(CourierDelivery.id, CourierDelivery.tenant_id)
         .where(
@@ -650,6 +754,7 @@ async def due_couriers(session: AsyncSession, now: datetime) -> list[tuple[str, 
                 CourierDelivery.status == CourierStatus.REQUESTED,
                 CourierDelivery.status == CourierStatus.CREATING,
                 CourierDelivery.status == CourierStatus.CANCELLING,
+                CourierDelivery.status == CourierStatus.ACTIVE,  # a consulta de reforço
             )
         )
         .where(CourierDelivery.next_attempt_at <= now)
@@ -675,7 +780,7 @@ async def run_couriers(factory: async_sessionmaker[AsyncSession], now: datetime)
         async with factory() as session:
             try:
                 resultado = await process_one(session, row_id, tenant_id, now)
-                feitos += resultado in ("active", "cancelled", "awaiting_confirmation", "failed")
+                feitos += resultado not in ("busy", "not_due")
             except Exception:
                 logger.exception("courier: falha ao processar", extra={"courier_id": row_id})
     return feitos

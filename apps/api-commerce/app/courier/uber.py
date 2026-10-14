@@ -20,6 +20,8 @@ Este módulo só fala com a Uber. Quem decide quando chamar é `app.courier.serv
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -42,6 +44,8 @@ SECRET_KEYS = ("customer_id", "client_id", "client_secret")
 #: O token guardado e quando ele vence (ISO). Não são chaves da loja: a tela não os mostra.
 TOKEN_KEY = "access_token"  # noqa: S105 (nome da linha no cofre, não segredo)
 TOKEN_EXPIRES_KEY = "access_token_expires_at"  # noqa: S105 (idem)
+#: A "Webhook Signing Key" que o painel da Uber mostra no webhook cadastrado pela loja.
+WEBHOOK_SECRET_KEY = "webhook_secret"  # noqa: S105 (nome da linha no cofre)
 SCOPE = "eats.deliveries"
 #: Renova antes do fim: um token que vence no meio de uma chamada vira erro para a loja.
 TOKEN_MARGIN = timedelta(days=1)
@@ -196,9 +200,29 @@ async def save_credentials(
 
 async def forget_credentials(session: AsyncSession, tenant_id: str) -> None:
     store = CredentialStore(session, tenant_id)
-    for chave in SECRET_KEYS:
+    for chave in (*SECRET_KEYS, WEBHOOK_SECRET_KEY):
         await store.delete(PROVIDER, chave)
     await forget_token(session, tenant_id)
+
+
+async def save_webhook_secret(session: AsyncSession, tenant_id: str, secret: str) -> str:
+    return await CredentialStore(session, tenant_id).put(PROVIDER, WEBHOOK_SECRET_KEY, secret)
+
+
+async def load_webhook_secret(session: AsyncSession, tenant_id: str) -> str | None:
+    return await CredentialStore(session, tenant_id).get(PROVIDER, WEBHOOK_SECRET_KEY)
+
+
+def signature_ok(secret: str, raw_body: bytes, signature: str | None) -> bool:
+    """`x-uber-signature`: HMAC-SHA256 do corpo **cru**, em hexadecimal (doc de webhooks da Uber).
+
+    Sobre os bytes que chegaram, nunca sobre o JSON relido: a doc avisa que reserializar troca os
+    escapes unicode e a assinatura deixa de bater.
+    """
+    if not secret or not signature:
+        return False
+    esperado = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(esperado, signature.strip().lower())
 
 
 async def stored_token(session: AsyncSession, tenant_id: str) -> str | None:

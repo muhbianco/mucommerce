@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.audit.writer import audit
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.rate_limit import rate_limit
 from app.core.scopes import Scope
@@ -66,10 +67,19 @@ class UberStatusRead(BaseModel):
     last_test_at: str | None = None
     #: O que falta para o "Pronto" chamar a Uber: `chaves`, `coleta`, `zona`.
     missing: list[str] = []
+    #: O endereço que a loja cadastra no painel da Uber (Developer → Webhooks).
+    webhook_url: str = ""
+    #: A "Webhook Signing Key" da Uber já foi colada aqui (o valor nunca volta).
+    webhook_secret_set: bool = False
 
 
-async def _status(session: AsyncSession, tenant_id: str) -> UberStatusRead:
+def webhook_url(tenant: TenantContext) -> str:
+    return f"https://{settings.api_public_host}/api/v1/webhooks/courier/uber/{tenant.public_key}"
+
+
+async def _status(session: AsyncSession, tenant: TenantContext) -> UberStatusRead:
     """Lido do banco: o contexto da requisição tem cache, e logo depois de gravar mentiria."""
+    tenant_id = tenant.id
     valores = await TenantService(session).repo.settings(tenant_id)
     cfg = fulfillment_settings(valores).delivery
     guardado = await CredentialStore(session, tenant_id).status(uber.PROVIDER)
@@ -98,6 +108,8 @@ async def _status(session: AsyncSession, tenant_id: str) -> UberStatusRead:
         last_test_detail=check.detail if check else None,
         last_test_at=check.at if check else None,
         missing=faltando,
+        webhook_url=webhook_url(tenant),
+        webhook_secret_set=uber.WEBHOOK_SECRET_KEY in guardado,
     )
 
 
@@ -132,7 +144,7 @@ def _check(resultado: uber.UberCheck) -> dict[str, Any]:
 
 @router.get("", response_model=UberStatusRead, summary="Entrega pela Uber: chaves e o que falta")
 async def read_uber(session: DbSession, tenant: DeliveryReader) -> UberStatusRead:
-    return await _status(session, tenant.id)
+    return await _status(session, tenant)
 
 
 @router.put(
@@ -181,7 +193,7 @@ async def save_uber_credentials(
         after={"masked": mascaradas, "environment": body.environment, "checked": resultado.ok},
     )
     await session.commit()
-    return await _status(session, tenant.id)
+    return await _status(session, tenant)
 
 
 @router.post(
@@ -201,7 +213,7 @@ async def test_uber(
     resultado = await uber.check_credentials(chaves)
     await _save_uber(request, session, user, tenant, {"account_check": _check(resultado)})
     await session.commit()
-    return await _status(session, tenant.id)
+    return await _status(session, tenant)
 
 
 @router.delete(
@@ -221,7 +233,40 @@ async def forget_uber_credentials(
         tenant_id=tenant.id,
     )
     await session.commit()
-    return await _status(session, tenant.id)
+    return await _status(session, tenant)
+
+
+class WebhookSecretIn(StrictModel):
+    secret: Annotated[str, Field(min_length=8, max_length=200)]
+
+
+@router.put(
+    "/webhook-secret",
+    response_model=UberStatusRead,
+    summary="Guarda a chave de assinatura do webhook da Uber (só o dono)",
+    dependencies=[Depends(rate_limit("uber_test", 5, 60))],
+)
+async def save_uber_webhook_secret(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: DeliveryOwner,
+    body: WebhookSecretIn,
+) -> UberStatusRead:
+    """Sem ela o webhook da loja recusa tudo (401) e a corrida anda só pela consulta de 2 em 2
+    minutos — funciona, só mais devagar."""
+    mascarada = await uber.save_webhook_secret(session, tenant.id, body.secret.strip())
+    await audit(
+        session,
+        actor=admin_actor(request, user).id,
+        action="delivery.uber_webhook_secret_saved",
+        entity_type="tenant",
+        entity_id=tenant.id,
+        tenant_id=tenant.id,
+        after={"masked": mascarada},
+    )
+    await session.commit()
+    return await _status(session, tenant)
 
 
 # ------------------------------------------------------------------ a corrida do pedido

@@ -188,6 +188,16 @@ export async function connectUber(form: FormData): Promise<void> {
   });
 }
 
+/** A "Webhook Signing Key" do webhook que a loja cadastrou na Uber (só o dono). */
+export async function saveUberWebhookSecret(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/entrega`, "uber_webhook", async () => {
+    const secret = text(form, "uber_webhook_secret");
+    if (secret.length < 8 || secret.length > 200) throw new FormError("chave_webhook_invalida");
+    await api(`${path}/delivery/uber/webhook-secret`, { method: "PUT", json: { secret } });
+  });
+}
+
 /** Confere de novo as chaves guardadas na Uber (o resultado aparece na seção). */
 export async function testUber(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);

@@ -79,6 +79,7 @@ const OK: Record<string, string> = {
   uber_config: "Coleta e chamada da Uber salvas.",
   uber_conectada: "Chaves da Uber guardadas. O resultado da conferência está na seção Entrega pela Uber.",
   uber_testada: "Teste feito: o resultado está na seção Entrega pela Uber.",
+  uber_webhook: "Chave do webhook guardada: a Uber passa a avisar na hora.",
   uber_request: "Uber chamada. O resultado está no quadro Entrega pela Uber.",
   uber_confirm: "Corrida confirmada com o valor cotado.",
   uber_cancel: "Corrida da Uber cancelada.",
@@ -208,6 +209,7 @@ const ERRORS: Record<string, string> = {
   "validation_error.uber_refused_customer":
     "As chaves valem, mas o Customer ID não é da mesma conta. Copie o Customer ID da aba Developer dessa conta.",
   "validation_error.uber_not_connected": "Conecte a conta da Uber antes de testar.",
+  chave_webhook_invalida: "Cole a Webhook Signing Key inteira, como aparece no painel da Uber.",
   courier_in_progress: "Este pedido já tem uma corrida da Uber em andamento.",
   "validation_error.courier_not_ready": "Marque o pedido como Pronto antes de chamar a Uber.",
   "validation_error.courier_not_delivery": "Só pedido de entrega chama a Uber.",
