@@ -202,6 +202,29 @@ O que ela precisa responder antes do provedor:
 
 Com `--etiqueta`, ela cria e apaga um envio sem pagar.
 
+### 20/10/2026 — com o token de parceiro (saída em `probe-frenet-parceiro.json`)
+
+| Pergunta | Resposta medida |
+|---|---|
+| Token de parceiro | Com `token` (loja) **e** `x-partner-token` (plataforma) a API whitelabel responde. |
+| Respostas | **camelCase** (`quotations`, `shippingServiceCode`, `shipmentId`); o pedido aceita PascalCase e camelCase. |
+| Saldo (`GET /v1/wallet`) | `balance`, `bonusBalance`, `blockedBalance`, `labelLimit` (20), `walletLimit`. Conta do dono com R$ 0. |
+| Cotação por volumes (`POST /v1/quotes`) | 200, preço em **número**, `deliveryTime` em dias; vem mais transportadora que na API comum (J&T, Loggi, Optimus, Total, além de Correios e Jadlog). PAC/SEDEX às vezes não voltam numa cotação e voltam na seguinte. CEP sem atendimento: **404 código 1005**. |
+| Serviços da conta | `GET whitelabel-configuration.frenet.com.br/v1/carriers/services` → `shippingServices[]` com `enabled`. Na conta do dono só Correios e Jadlog estão habilitados (os outros cotam, mas a etiqueta não deve sair). |
+| Criar envio (`POST /v1/shipments`) | `Order.Created` **só** como `2026-10-20T18:40:23Z` (o `isoformat()` com fração e `+00:00` deu "Formato de data inválido"). E-mail do remetente obrigatório (erro **2004**). Um volume por envio (`Volumes` é objeto). Criado: `shipmentStatus` **1**, sem `labelUrl`. |
+| Apagar (`DELETE /v1/shipments/{id}`) | 204; o envio fica em `shipmentStatus` **9** (excluído). |
+| Situações (`shipmentStatus`) | 1 criado, 2 pendente de pagamento, 3 falha no pagamento, 4 pago, 5 postado, 6 cancelamento agendado, 7 cancelado, 9 excluído, 18 entregue no ponto. Não há "entregue ao cliente" nem código de rastreio: só `trackingUrl`. |
+| **Não medido** | O pagamento (`POST /v1/shipments/checkout`) e o link da etiqueta depois dele: a conta não tem saldo. Erro 3000 = saldo insuficiente (doc). |
+
+**Provedor (`app/shipping/providers/frenet.py`, 20/10):** cota volumes, lista os serviços da conta,
+compra a etiqueta (cria → paga → confere a situação → lê o link) e rastreia pela situação. Paga e
+confirmada, a etiqueta nunca volta como erro (senão o operador compraria de novo); sem
+confirmação de pagamento, o envio é apagado ou, se a situação não puder ser lida, o id vai para o
+log e o motivo pede conferência no painel da Frenet. O link de rastreio fica em
+`order_shipments.tracking_url` (migration 0051). O token de parceiro mora no Env da stack
+(`FRENET_PARTNER_TOKEN`); sem ele a Frenet não aparece. Módulo `shipping.frenet`, do lojista,
+desligado por padrão.
+
 ## Estado em 12/10/2026
 
 Nada foi para produção: o deploy segue congelado pela revisão da Meta.

@@ -274,58 +274,92 @@ def rodar(sonda: Sonda) -> dict[str, Any]:
     return resultado
 
 
+def _pega(dados: Any, chave: str) -> Any:
+    """A Frenet responde em camelCase e documenta em PascalCase: aceita as duas."""
+    if not isinstance(dados, dict):
+        return None
+    if chave in dados:
+        return dados[chave]
+    return dados.get(chave[:1].lower() + chave[1:])
+
+
+#: Formatos de `Order.Created` tentados em ordem. Com `isoformat()` (micro e +00:00) a Frenet
+#: respondeu 400 "Formato de data inválido" (20/10/2026); a sonda acha qual ela aceita.
+_FORMATOS_DATA = (
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.000Z",
+    "%Y-%m-%d %H:%M:%S",
+)
+
+
 def etiqueta(sonda: Sonda, partes: dict[str, Any], cotacao: Any) -> dict[str, Any]:
-    """Cria um envio sem pagar, lê a etiqueta e apaga. Nada aqui gasta saldo."""
-    opcoes = (cotacao or {}).get("Quotations") or (cotacao or {}).get("quotations") or []
-    valida = next((o for o in opcoes if not (o.get("Error") or o.get("error"))), None)
+    """Cria um envio sem pagar, lê a etiqueta e o envio, e apaga. Nada aqui gasta saldo: o
+    pagamento (`/v1/shipments/checkout`) não é chamado."""
+    opcoes = _pega(cotacao, "Quotations") or []
+    valida = next((o for o in opcoes if not _pega(o, "Error")), None)
     if valida is None:
         return {"etiqueta": "sem cotação válida para criar o envio"}
-    envio = [
-        {
-            "Order": {
-                "Id": f"sonda-{datetime.now(UTC):%Y%m%d%H%M%S}",
-                "Value": 150.0,
-                "Created": datetime.now(UTC).isoformat(),
-                "Items": [
-                    {
-                        "ItemId": "1",
-                        "ProductName": "Item de sondagem",
-                        "SKU": "SONDA-1",
-                        "Quantity": 1,
-                        "Price": 150.0,
-                        **VOLUME_A,
-                    }
-                ],
-                "From": partes["From"],
-                "To": partes["To"],
-            },
-            "Volumes": dict(VOLUME_A, VolumeId=1, Price=150.0, DeclaredValue=150.0),
-            "Quotation": {
-                k: valida.get(k)
-                for k in (
-                    "ShippingServiceCode",
-                    "ShippingServiceName",
-                    "Carrier",
-                    "CarrierCode",
-                    "ShippingPrice",
-                    "PlatformShippingPrice",
-                    "DeliveryTime",
-                )
-            },
-        }
-    ]
-    status, criado = sonda.chama(
-        "7.cria-envio", "whitelabel", "POST", "/v1/shipments", envio, pessoal=True
-    )
-    itens = (criado or {}).get("Items") or (criado or {}).get("items") or []
-    ids = [i.get("ShipmentId") or i.get("shipmentId") for i in itens if isinstance(i, dict)]
+    agora = datetime.now(UTC)
+    status, criado, formato_ok = 0, None, None
+    for formato in _FORMATOS_DATA:
+        envio = [
+            {
+                "Order": {
+                    "Id": f"sonda-{agora:%Y%m%d%H%M%S}",
+                    "Value": 150.0,
+                    "Created": agora.strftime(formato),
+                    "Items": [
+                        {
+                            "ItemId": "1",
+                            "ProductName": "Item de sondagem",
+                            "SKU": "SONDA-1",
+                            "Quantity": 1,
+                            "Price": 150.0,
+                            **VOLUME_A,
+                        }
+                    ],
+                    "From": partes["From"],
+                    "To": partes["To"],
+                },
+                "Volumes": dict(VOLUME_A, VolumeId=1, Price=150.0, DeclaredValue=150.0),
+                "Quotation": {
+                    k: _pega(valida, k)
+                    for k in (
+                        "ShippingServiceCode",
+                        "ShippingServiceName",
+                        "Carrier",
+                        "CarrierCode",
+                        "ShippingPrice",
+                        "PlatformShippingPrice",
+                        "DeliveryTime",
+                    )
+                },
+            }
+        ]
+        status, criado = sonda.chama(
+            f"7.cria-envio ({formato})", "whitelabel", "POST", "/v1/shipments", envio, pessoal=True
+        )
+        recusou_data = status == 400 and "Created" in str(criado)
+        if not recusou_data:
+            formato_ok = formato if 200 <= status < 300 else None
+            break
+    itens = _pega(criado, "Items") or []
+    ids = [_pega(i, "ShipmentId") for i in itens if isinstance(i, dict)]
     ids = [i for i in ids if i]
     for shipment_id in ids:
+        sonda.chama("7.envio-antes-de-pagar", "whitelabel", "GET", f"/v1/shipments/{shipment_id}")
         sonda.chama(
             "7.etiqueta-antes-de-pagar", "whitelabel", "GET", f"/v1/shipments/{shipment_id}/label"
         )
         sonda.chama("7.apaga-envio", "whitelabel", "DELETE", f"/v1/shipments/{shipment_id}")
-    return {"cria_status": status, "envios_criados": len(ids)}
+        sonda.chama("7.envio-depois-de-apagar", "whitelabel", "GET", f"/v1/shipments/{shipment_id}")
+    return {
+        "cria_status": status,
+        "envios_criados": len(ids),
+        "formato_data_aceito": formato_ok,
+        "servico_usado": _pega(valida, "ShippingServiceCode"),
+    }
 
 
 def main() -> None:

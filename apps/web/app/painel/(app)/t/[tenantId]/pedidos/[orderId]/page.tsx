@@ -482,9 +482,18 @@ export default async function OrderPage({
                       },
                       {
                         label: "Rastreio",
-                        value: porVolume
-                          ? `Um código por volume (${volumes.length}), abaixo`
-                          : (shipment.tracking_code ?? "Ainda não veio"),
+                        value: porVolume ? (
+                          `Um código por volume (${volumes.length}), abaixo`
+                        ) : shipment.tracking_code ? (
+                          shipment.tracking_code
+                        ) : shipment.tracking_url ? (
+                          // A Frenet não dá código, só o link de rastreio.
+                          <a href={shipment.tracking_url} target="_blank" rel="noopener noreferrer">
+                            Acompanhar envio
+                          </a>
+                        ) : (
+                          "Ainda não veio"
+                        ),
                       },
                       {
                         label: "Custo da etiqueta",
@@ -505,7 +514,20 @@ export default async function OrderPage({
                           <div className={local.labelMain}>
                             <strong>Volume {v.n}</strong>
                             <span className={local.parcelMeta}>
-                              {[weightLabel(v.weight_grams), v.tracking_code ?? "rastreio ainda não veio"].join(" · ")}
+                              {[
+                                weightLabel(v.weight_grams),
+                                v.tracking_code ?? (v.tracking_url ? null : "rastreio ainda não veio"),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              {!v.tracking_code && v.tracking_url ? (
+                                <>
+                                  {" · "}
+                                  <a href={v.tracking_url} target="_blank" rel="noopener noreferrer">
+                                    acompanhar
+                                  </a>
+                                </>
+                              ) : null}
                             </span>
                           </div>
                           {v.status ? (

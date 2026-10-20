@@ -14,12 +14,14 @@ from typing import Any
 from app.core.config import settings
 from app.shipping.provider import ShippingProvider
 from app.shipping.providers.fake import FakeShippingProvider
+from app.shipping.providers.frenet import FrenetProvider
 from app.shipping.providers.melhorenvio import MelhorEnvioProvider
 from app.tenancy.context import TenantContext
 
 _PROVIDERS: dict[str, ShippingProvider] = {
     "fake": FakeShippingProvider(),
     "melhorenvio": MelhorEnvioProvider(),
+    "frenet": FrenetProvider(),
 }
 
 
@@ -28,7 +30,12 @@ def register(provider: ShippingProvider) -> None:
 
 
 def allowed() -> list[str]:
-    return [name for name in settings.shipping_allowed_provider_list if name in _PROVIDERS]
+    """Permitidas pelo ambiente **e** prontas: a Frenet sem o token de parceiro não aparece."""
+    return [
+        name
+        for name in settings.shipping_allowed_provider_list
+        if name in _PROVIDERS and getattr(_PROVIDERS[name], "available", True)
+    ]
 
 
 def get_provider(name: str) -> ShippingProvider | None:

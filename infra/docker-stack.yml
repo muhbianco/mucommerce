@@ -72,7 +72,10 @@ x-api-env: &api_env
   # proxima subida da stack. O default e o do codigo, entao esquecer a chave no Env do
   # Portainer nao derruba o checkout -- so mantem o que ja estava valendo.
   PAYMENTS_ALLOWED_PROVIDERS: ${PAYMENTS_ALLOWED_PROVIDERS:-mercadopago,infinitepay,pagbank}
-  SHIPPING_ALLOWED_PROVIDERS: ${SHIPPING_ALLOWED_PROVIDERS:-melhorenvio}
+  SHIPPING_ALLOWED_PROVIDERS: ${SHIPPING_ALLOWED_PROVIDERS:-melhorenvio,frenet}
+  # Token de parceiro da Frenet (da plataforma; o de cada loja fica no cofre dela). Vazio, a
+  # Frenet some da tela de Envio de todas as lojas: sem ele a API de etiquetas recusa tudo.
+  FRENET_PARTNER_TOKEN: ${FRENET_PARTNER_TOKEN:-}
   # Montagem da vitrine com IA (ADR 0017). Mesma forma das duas de cima: com padrao no codigo,
   # esquecer a chave no Env do Portainer nao derruba nada -- so mantem desligado. Ligar depende
   # do gateway da api-agents estar no ar; com ele fora, todo pedido vira rascunho `failed`.

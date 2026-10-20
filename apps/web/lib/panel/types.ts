@@ -721,6 +721,8 @@ export interface Shipment {
   service_name: string;
   tracking_code: string | null;
   label_url: string | null;
+  /** Link de rastreio, quando a transportadora não dá código (Frenet). */
+  tracking_url?: string | null;
   charged_cents: number;
   cost_cents: number | null;
   last_error: string | null;
@@ -738,6 +740,7 @@ export interface ShipmentParcel {
   value_cents: number;
   tracking_code: string | null;
   label_url: string | null;
+  tracking_url?: string | null;
   status: string | null;
   cost_cents: number | null;
 }

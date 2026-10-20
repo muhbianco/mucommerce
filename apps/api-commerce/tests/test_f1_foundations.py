@@ -59,6 +59,8 @@ def test_a_new_store_starts_with_the_owner_defaults() -> None:
         "pickup": False,
         "delivery": False,
         "shipping.melhorenvio": True,
+        # A Frenet o lojista liga em Módulos: a etiqueta sai do saldo da conta Frenet dele.
+        "shipping.frenet": False,
         "coupons": True,
         "payments.mercadopago": False,
         "payments.pagbank": False,

@@ -162,6 +162,7 @@ class ShipmentService:
         remessa.provider_shipment_id = resultado.provider_shipment_id
         remessa.tracking_code = resultado.tracking_code or None
         remessa.label_url = resultado.label_url
+        remessa.tracking_url = _tracking_url(resultado.raw)
         remessa.cost_cents = resultado.cost_cents
         remessa.carrier = resultado.carrier or remessa.carrier
         remessa.purchased_at = self.now
@@ -281,6 +282,7 @@ class ShipmentService:
                 "provider_shipment_id": resultado.provider_shipment_id,
                 "tracking_code": resultado.tracking_code or None,
                 "label_url": resultado.label_url,
+                "tracking_url": _tracking_url(resultado.raw),
                 "cost_cents": resultado.cost_cents,
                 "status": ShipmentStatus.PURCHASED.value,
                 "carrier": resultado.carrier or None,
@@ -293,6 +295,7 @@ class ShipmentService:
         remessa.provider_shipment_id = primeiro.get("provider_shipment_id")
         remessa.tracking_code = primeiro.get("tracking_code")
         remessa.label_url = primeiro.get("label_url")
+        remessa.tracking_url = primeiro.get("tracking_url")
         remessa.cost_cents = sum(int(v.get("cost_cents") or 0) for v in volumes)
         remessa.carrier = str(primeiro.get("carrier") or remessa.carrier)
         remessa.purchased_at = self.now
@@ -524,6 +527,12 @@ def _dispatch_error(exc: ShippingProviderError) -> Exception:
     if exc.definitive:
         return ShippingRefusedError(_motivo(exc))
     return ShippingUnavailableError()
+
+
+def _tracking_url(raw: Any) -> str | None:
+    """O link de rastreio que o provedor deu (Frenet: não há código, só link)."""
+    url = raw.get("tracking_url") if isinstance(raw, dict) else None
+    return str(url)[:500] if url else None
 
 
 def _sender(origin: ShippingOrigin) -> ShippingParty:

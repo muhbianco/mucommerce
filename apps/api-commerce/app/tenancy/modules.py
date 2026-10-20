@@ -105,10 +105,19 @@ MODULES: tuple[Module, ...] = (
     ),
     Module(
         key="shipping.melhorenvio",
-        label="Envio por transportadora",
+        label="Envio pelo Melhor Envio",
         summary="Correios, Jadlog e Azul Cargo com preço pelo CEP, etiqueta e rastreio.",
         owner="store",
         default_on=True,
+        where="envio",
+        requires=("checkout",),
+    ),
+    Module(
+        key="shipping.frenet",
+        label="Envio pela Frenet",
+        summary="Correios, Jadlog e outras transportadoras da sua conta Frenet: preço pelo CEP e "
+        "etiqueta paga com o saldo de lá.",
+        owner="store",
         where="envio",
         requires=("checkout",),
     ),

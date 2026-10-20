@@ -169,7 +169,12 @@ class Settings(BaseSettings):
 
     # --- envio por transportadora (etapa J, ADR 0015) ----------------------------------
     # Transportadoras que este ambiente permite; `fake` é de teste e é recusado em produção.
-    shipping_allowed_providers: str = "melhorenvio"
+    shipping_allowed_providers: str = "melhorenvio,frenet"
+    #: Token de parceiro da Frenet (da plataforma, não da loja). Vazio = a Frenet não aparece:
+    #: sem ele a API de etiquetas recusa tudo (medido em 14/10/2026).
+    frenet_partner_token: SecretStr = SecretStr("")
+    frenet_whitelabel_url: str = "https://whitelabel.frenet.com.br/v1"
+    frenet_config_url: str = "https://whitelabel-configuration.frenet.com.br/v1"
     # Cotação entra no caminho do checkout: timeout curto, senão a tela trava esperando.
     shipping_timeout_seconds: float = 8.0
     # A API do Melhor Envio exige identificação com contato no User-Agent.

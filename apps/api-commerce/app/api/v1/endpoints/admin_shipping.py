@@ -192,6 +192,7 @@ class ShipmentParcelRead(BaseModel):
     value_cents: int
     tracking_code: str | None = None
     label_url: str | None = None
+    tracking_url: str | None = None
     status: str | None = None
     cost_cents: int | None = None
 
@@ -230,6 +231,8 @@ class ShipmentRead(BaseModel):
     service_name: str
     tracking_code: str | None
     label_url: str | None
+    #: Link de rastreio, quando a transportadora não dá código (Frenet).
+    tracking_url: str | None = None
     charged_cents: int
     cost_cents: int | None
     last_error: str | None
@@ -872,6 +875,7 @@ async def _shipment_read(session: DbSession, remessa: OrderShipment) -> Shipment
         service_name=remessa.service_name,
         tracking_code=remessa.tracking_code,
         label_url=remessa.label_url,
+        tracking_url=remessa.tracking_url,
         charged_cents=remessa.charged_cents,
         cost_cents=remessa.cost_cents,
         last_error=remessa.last_error,
@@ -893,6 +897,7 @@ async def _shipment_read(session: DbSession, remessa: OrderShipment) -> Shipment
                 value_cents=int(v.get("value_cents") or 0),
                 tracking_code=v.get("tracking_code"),
                 label_url=v.get("label_url"),
+                tracking_url=v.get("tracking_url"),
                 status=v.get("status"),
                 cost_cents=v.get("cost_cents"),
             )

@@ -42,7 +42,8 @@ const MODULES: { key: string; label: string }[] = [
   { key: "pickup", label: "Retirada" },
   { key: "delivery", label: "Entrega" },
   { key: "coupons", label: "Cupons" },
-  { key: "shipping.melhorenvio", label: "Envio por transportadora" },
+  { key: "shipping.melhorenvio", label: "Envio pelo Melhor Envio" },
+  { key: "shipping.frenet", label: "Envio pela Frenet" },
 ];
 
 interface Shortcut {

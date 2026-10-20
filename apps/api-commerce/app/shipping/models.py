@@ -85,6 +85,8 @@ class OrderShipment(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):
     provider_shipment_id: Mapped[str | None] = mapped_column(String(64))
     tracking_code: Mapped[str | None] = mapped_column(String(64))
     label_url: Mapped[str | None] = mapped_column(String(500))
+    #: Link de rastreio, quando a transportadora dá link em vez de código (Frenet).
+    tracking_url: Mapped[str | None] = mapped_column(String(500))
     #: O que a loja cobrou do cliente (congelado no pedido) e o que a etiqueta custou de fato.
     charged_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     cost_cents: Mapped[int | None] = mapped_column(BigInteger)
