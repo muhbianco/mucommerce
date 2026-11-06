@@ -26,8 +26,39 @@ export async function requestDraft(form: FormData): Promise<void> {
 export async function applyDraft(form: FormData): Promise<void> {
   const { path, page } = tenantBase(form);
   const draftId = id(text(form, "draft_id"));
-  await run(`${page}/vitrine`, "proposta_publicada", async () => {
+  // Volta para as propostas, e não para o editor: é lá que fica o "restaurar o que estava".
+  await run(`${page}/vitrine/propostas`, "proposta_publicada", async () => {
     await api(`${path}/landing/drafts/${draftId}/apply`, { method: "POST" });
+  });
+}
+
+/** Devolve ao ar o que estava antes da última proposta publicada (marca, desenho e página). */
+export async function revertDraft(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const draftId = id(text(form, "draft_id"));
+  await run(`${page}/vitrine/propostas`, "proposta_restaurada", async () => {
+    await api(`${path}/landing/drafts/${draftId}/revert`, { method: "POST" });
+  });
+}
+
+/** Esquece a leitura de cada arquivo: a próxima proposta olha todo o material de novo. */
+export async function resetBrandReading(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  await run(`${page}/vitrine/propostas`, "leitura_reiniciada", async () => {
+    await api(`${path}/landing/brand/reset`, { method: "POST" });
+  });
+}
+
+const ROLES = new Set(["banner", "place_photo", "product_photo", "team_photo", "logo", "texture", "other"]);
+
+/** Corrige o que a imagem é. Imagem sem papel não vira mais foto de destaque (docs/16). */
+export async function setMediaRole(form: FormData): Promise<void> {
+  const { path, page } = tenantBase(form);
+  const mediaId = id(text(form, "media_id"));
+  const role = text(form, "role");
+  if (!ROLES.has(role)) throw new FormError("papel_invalido");
+  await run(`${page}/vitrine/propostas`, "papel_salvo", async () => {
+    await api(`${path}/media/${mediaId}`, { method: "PATCH", json: { role } });
   });
 }
 

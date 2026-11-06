@@ -14,7 +14,7 @@ from app.schemas.internal import StorefrontContext, StorefrontTenant
 from app.tenancy.context import TenantContext
 from app.tenancy.models import DomainPurpose
 from app.tenancy.repository import TenantRepository
-from app.tenancy.settings_schemas import checkout_settings
+from app.tenancy.settings_schemas import checkout_settings, design_settings
 
 
 async def _branding_and_seo(
@@ -68,6 +68,7 @@ async def build_storefront_context(
         and bool(storefront.get("password_set")),
         features=features,
         branding=branding,
+        design=design_settings(tenant.settings).model_dump(mode="json"),
         seo=seo,
         fulfillment=public_fulfillment(tenant),
         payments=await load_public_payments(session, tenant),

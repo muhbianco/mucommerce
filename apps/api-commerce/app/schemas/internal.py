@@ -37,6 +37,9 @@ class StorefrontContext(BaseModel):
     password_gate: bool = False
     features: dict[str, bool]
     branding: dict[str, Any]
+    #: O desenho por área (`DesignV1`): cabeçalho, cards, produto, checkout, rodapé. Sempre
+    #: completo — loja sem a chave recebe os padrões, que são o desenho de antes dele existir.
+    design: dict[str, Any] = {}
     seo: dict[str, Any]
     fulfillment: dict[str, Any]
     #: Meios aceitos e teto de parcelamento — a vitrine anuncia "em até 12x" antes do carrinho.

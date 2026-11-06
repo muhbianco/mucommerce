@@ -30,6 +30,13 @@ MIN_CHROMA = 18
 QUANTIZE_TO = 8
 #: Dois tons da mesma família não são duas sugestões. Mede-se em graus de matiz.
 MIN_HUE_DISTANCE = 30.0
+#: Cor de marca precisa de luz e de saturação. Um petróleo quase preto (`#042229`) é o fundo
+#: do emblema, não a cor que alguém reconhece como da loja — e era o que ganhava por presença
+#: no logotipo da SGPipas, enterrando o ciano neon e o amarelo (docs/16 §A.2).
+MIN_BRAND_VALUE = 90
+MIN_BRAND_SATURATION = 0.35
+#: Quantas amostras o perfil da marca recebe por imagem.
+SWATCHES_PER_IMAGE = 6
 
 
 def _channel(value: int) -> float:
@@ -115,14 +122,11 @@ class Palette:
         return {"primary": self.primary, "on_primary": self.on_primary, "secondary": self.secondary}
 
 
-def extract_palette(data: bytes) -> Palette | None:
-    """As cores dominantes de uma imagem, ou `None` quando não há cor nenhuma para sugerir.
+def _ranked_accents(data: bytes) -> list[tuple[int, int, int]]:
+    """As cores candidatas a marca, da mais forte para a mais fraca, **sem escurecer**.
 
-    Roda sobre a menor rendição que o processamento já produziu — orientada, sem EXIF e pequena
-    —, então o custo é desprezível e não há segundo decode do original.
-
-    Ordena por presença **e** por saturação: uma área bege grande não deve ganhar de uma marca
-    pequena e vívida, que é justamente a cor que a pessoa reconhece como sendo dela.
+    Ordena por presença **e** por saturação e croma: uma área bege grande não deve ganhar de uma
+    marca pequena e vívida, que é justamente a cor que a pessoa reconhece como sendo dela.
     """
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -133,9 +137,9 @@ def extract_palette(data: bytes) -> Palette | None:
             # declarado cobre todos os modos de imagem; aqui já convertemos para RGBA.
             pixels = cast("list[tuple[int, int, int, int]]", list(rgba.get_flattened_data()))
     except Exception:
-        return None
+        return []
 
-    vivos = [
+    coloridos = [
         (r, g, b)
         for r, g, b, a in pixels
         if a >= MIN_ALPHA
@@ -143,42 +147,136 @@ def extract_palette(data: bytes) -> Palette | None:
         and max(r, g, b) >= NEAR_BLACK
         and max(r, g, b) - min(r, g, b) >= MIN_CHROMA
     ]
-    if not vivos:
-        return None
+    if not coloridos:
+        return []
+
+    # Os pixels com luz e saturação de marca, quando há o bastante deles. Quantizar só esses
+    # impede que um fundo escuro grande gaste as oito cores da redução e o acento pequeno — o
+    # amarelo de um traço, o ciano de um contorno — desapareça antes da escolha.
+    acesos = [p for p in coloridos if _is_lit(p)]
+    if len(acesos) >= max(40, len(coloridos) // 100):
+        coloridos = acesos
 
     # Quantiza para juntar tons quase iguais (antisserrilhado, gradiente suave).
-    amostra = Image.new("RGB", (len(vivos), 1))
-    amostra.putdata(vivos)
+    amostra = Image.new("RGB", (len(coloridos), 1))
+    amostra.putdata(coloridos)
     reduzida = amostra.quantize(colors=QUANTIZE_TO, method=Image.Quantize.FASTOCTREE)
     paleta: list[int] = reduzida.getpalette() or []
     # Numa imagem paletizada, `getcolors` devolve (quantas vezes, índice na paleta). O tipo
     # que o Pillow declara é o do caso geral, e o mypy não tem como estreitá-lo sozinho.
     contagens = cast("list[tuple[int, int]]", reduzida.getcolors() or [])
 
-    candidatos: list[tuple[float, tuple[int, int, int]]] = []
+    todos: list[tuple[float, tuple[int, int, int]]] = []
     for contagem, indice in contagens:
         cor = (paleta[indice * 3], paleta[indice * 3 + 1], paleta[indice * 3 + 2])
         if max(cor) - min(cor) < MIN_CHROMA:
             continue
-        # Presença ponderada pela saturação: vívido pequeno vence apagado grande.
-        peso = contagem * (0.4 + _saturation(cor))
-        candidatos.append((peso, cor))
-    if not candidatos:
-        return None
-
+        croma = (max(cor) - min(cor)) / 255
+        todos.append((contagem * (0.4 + _saturation(cor)) * (1 + 2 * croma), cor))
+    # Escuro e apagado só vira candidato quando a imagem não tem acento nenhum.
+    candidatos = [item for item in todos if _is_lit(item[1])] or todos
     candidatos.sort(key=lambda item: item[0], reverse=True)
-    primary = candidatos[0][1]
-    # A sugestão já sai legível como cor de texto sobre papel claro.
-    primary = darken_until(primary, against=(255, 255, 255), ratio=4.5)
+    return [cor for _, cor in candidatos]
 
-    secondary: tuple[int, int, int] | None = None
-    for _, cor in candidatos[1:]:
-        if _hue_distance(_hue(cor), _hue(primary)) >= MIN_HUE_DISTANCE:
-            secondary = darken_until(cor, against=(255, 255, 255), ratio=4.5)
+
+def _is_lit(rgb: tuple[int, int, int]) -> bool:
+    return max(rgb) >= MIN_BRAND_VALUE and _saturation(rgb) >= MIN_BRAND_SATURATION
+
+
+def _distinct_hues(cores: list[tuple[int, int, int]], limit: int) -> list[tuple[int, int, int]]:
+    """As primeiras `limit` cores de famílias diferentes, na ordem dada."""
+    escolhidas: list[tuple[int, int, int]] = []
+    for cor in cores:
+        if all(_hue_distance(_hue(cor), _hue(outra)) >= MIN_HUE_DISTANCE for outra in escolhidas):
+            escolhidas.append(cor)
+        if len(escolhidas) >= limit:
             break
+    return escolhidas
 
+
+def extract_palette(data: bytes) -> Palette | None:
+    """As cores dominantes de uma imagem, ou `None` quando não há cor nenhuma para sugerir.
+
+    Roda sobre a menor rendição que o processamento já produziu — orientada, sem EXIF e pequena
+    —, então o custo é desprezível e não há segundo decode do original. A sugestão sai
+    escurecida o bastante para servir de cor de texto sobre papel claro.
+    """
+    cores = _distinct_hues(_ranked_accents(data), 2)
+    if not cores:
+        return None
+    primary = darken_until(cores[0], against=(255, 255, 255), ratio=4.5)
+    secondary = (
+        darken_until(cores[1], against=(255, 255, 255), ratio=4.5) if len(cores) > 1 else None
+    )
     return Palette(
         primary=to_hex(primary),
         on_primary=on_color(primary),
         secondary=to_hex(secondary) if secondary else None,
     )
+
+
+def brand_accents(data: bytes, *, limit: int = 3) -> list[str]:
+    """As cores de marca da imagem **como aparecem** — ciano neon continua neon.
+
+    É o que o perfil da marca usa. Escurecer para texto é trabalho do tema
+    (`web/lib/theme.ts` deriva a tinta de toda cor de preenchimento), não da cor da marca.
+    """
+    return [to_hex(c) for c in _distinct_hues(_ranked_accents(data), limit)]
+
+
+@dataclass(frozen=True, slots=True)
+class Swatch:
+    """Uma cor presente na imagem, sem escurecer: é insumo do perfil, não sugestão de texto."""
+
+    hex: str
+    #: Fração dos pixels opacos que caem nesta cor (0 a 1).
+    share: float
+    saturation: float
+    #: Luminância relativa WCAG (0 = preto, 1 = branco).
+    luminance: float
+
+    def as_dict(self) -> dict[str, str | float]:
+        return {
+            "hex": self.hex,
+            "share": round(self.share, 3),
+            "saturation": round(self.saturation, 3),
+            "luminance": round(self.luminance, 3),
+        }
+
+
+def extract_swatches(data: bytes, *, limit: int = SWATCHES_PER_IMAGE) -> list[Swatch]:
+    """As cores de uma imagem **como ela é**, fundo e neutros incluídos.
+
+    A paleta de sugestão (`extract_palette`) descarta fundo e escurece o acento para virar cor
+    de texto. O perfil da marca precisa do contrário: saber que o emblema é azul-noite com
+    ciano neon é o que leva a um papel escuro com brilho na cor da marca. Determinístico e
+    barato — roda sobre a miniatura de 320px.
+    """
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            rgba = image.convert("RGBA")
+            rgba.thumbnail((160, 160))
+            pixels = cast("list[tuple[int, int, int, int]]", list(rgba.get_flattened_data()))
+    except Exception:
+        return []
+    opacos = [(r, g, b) for r, g, b, a in pixels if a >= MIN_ALPHA]
+    if not opacos:
+        return []
+    amostra = Image.new("RGB", (len(opacos), 1))
+    amostra.putdata(opacos)
+    reduzida = amostra.quantize(colors=12, method=Image.Quantize.FASTOCTREE)
+    paleta: list[int] = reduzida.getpalette() or []
+    contagens = cast("list[tuple[int, int]]", reduzida.getcolors() or [])
+    total = sum(c for c, _ in contagens) or 1
+    saida: list[Swatch] = []
+    for contagem, indice in sorted(contagens, reverse=True):
+        cor = (paleta[indice * 3], paleta[indice * 3 + 1], paleta[indice * 3 + 2])
+        saida.append(
+            Swatch(
+                hex=to_hex(cor),
+                share=contagem / total,
+                saturation=_saturation(cor),
+                luminance=relative_luminance(cor),
+            )
+        )
+    return saida[:limit]

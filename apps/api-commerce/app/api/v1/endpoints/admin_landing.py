@@ -19,15 +19,17 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import CurrentAdmin, DbSession, admin_actor, require_tenant_scopes
 from app.api.v1.endpoints.storefront_catalog import _card, _category
 from app.catalog.storefront import image_payload
 from app.core.config import settings
 from app.core.scopes import Scope
+from app.landing.brand import parse_profile
 from app.landing.brief import STEP_KEYS, LandingBriefService, filled_steps
 from app.landing.drafts import LandingDraftService
-from app.landing.models import LandingDraft
+from app.landing.models import BrandProfile, DraftStatus, LandingDraft
 from app.landing.quota import LandingQuotaService
 from app.landing.resolver import resolve_landing
 from app.landing.schemas import BriefV1
@@ -156,14 +158,27 @@ class DraftOut(BaseModel):
     instruction: str | None
     #: Nulo enquanto a montagem não terminou.
     blocks: list[dict[str, Any]] | None
+    #: A marca proposta (só as chaves que a IA pode mudar). Nulo em proposta só de blocos.
+    branding: dict[str, Any] | None = None
+    #: O desenho por área proposto. Nulo em proposta só de blocos.
+    design: dict[str, Any] | None = None
+    #: Explicação, decisões e o que muda contra o que está no ar.
+    summary: dict[str, Any] | None = None
     #: A saída precisou de conserto determinístico (id inventado, lista comprida demais).
     repaired: bool
     failure_reason: str | None
     created_at: str
     applied_at: str | None
+    #: A página, a marca ou o desenho foram editados depois de a proposta ser montada:
+    #: publicar substitui essa edição. A tela avisa antes.
+    edited_since: bool = False
+    #: É a última publicada e guarda o que estava no ar antes: dá para restaurar.
+    revertible: bool = False
 
 
-def _draft_out(draft: LandingDraft) -> DraftOut:
+def _draft_out(
+    draft: LandingDraft, *, edited_since: bool = False, revertible: bool = False
+) -> DraftOut:
     return DraftOut(
         id=draft.id,
         status=str(draft.status),
@@ -171,10 +186,15 @@ def _draft_out(draft: LandingDraft) -> DraftOut:
         parent_draft_id=draft.parent_draft_id,
         instruction=draft.instruction,
         blocks=draft.blocks,
+        branding=draft.branding,
+        design=draft.design,
+        summary=draft.summary,
         repaired=draft.repaired,
         failure_reason=draft.failure_reason,
         created_at=draft.created_at.isoformat(),
         applied_at=draft.applied_at.isoformat() if draft.applied_at else None,
+        edited_since=edited_since,
+        revertible=revertible,
     )
 
 
@@ -203,8 +223,19 @@ async def list_drafts(
 ) -> DraftListOut:
     service = LandingDraftService(session, tenant, admin_actor(request, user))
     cota = await LandingQuotaService(session, tenant).state()
+    drafts = await service.list()
+    para_tras = await service.edited_since(drafts)
+    publicadas = sorted(
+        (d for d in drafts if d.status == DraftStatus.APPLIED and d.applied_at is not None),
+        key=lambda d: d.applied_at or d.created_at,
+        reverse=True,
+    )
+    restauravel = publicadas[0].id if publicadas and publicadas[0].previous_settings else None
     return DraftListOut(
-        drafts=[_draft_out(d) for d in await service.list()],
+        drafts=[
+            _draft_out(d, edited_since=d.id in para_tras, revertible=d.id == restauravel)
+            for d in drafts
+        ],
         quota=QuotaOut(
             period=cota.period, used=cota.used, limit=cota.limit, left=cota.left, paid=cota.paid
         ),
@@ -266,6 +297,24 @@ async def apply_draft(
     saved = await service.apply(draft_id)
     await session.commit()
     return saved
+
+
+@router.post(
+    "/landing/drafts/{draft_id}/revert",
+    response_model=DraftOut,
+    summary="Volta ao ar o que estava antes da última proposta publicada",
+)
+async def revert_draft(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+    draft_id: str,
+) -> DraftOut:
+    service = LandingDraftService(session, tenant, admin_actor(request, user))
+    draft = await service.revert(draft_id)
+    await session.commit()
+    return _draft_out(draft)
 
 
 @router.post(
@@ -371,3 +420,98 @@ async def branding_suggestions(
             )
         )
     return saidas
+
+
+# ---------------------------------------------------------------- perfil da marca
+
+
+class BrandMaterialOut(BaseModel):
+    """Um arquivo da loja e o que a leitura da marca disse dele."""
+
+    media_id: str
+    kind: str | None
+    relevance: str | None
+    description: str | None
+    usable_on_page: bool
+    superseded_by: str | None
+    #: `llm` (o modelo olhou) ou `deterministic` (papel declarado e dono do arquivo).
+    source: str | None
+
+
+class BrandProfileOut(BaseModel):
+    """O que a plataforma entendeu da marca. A tela mostra sem jargão."""
+
+    #: Nulo enquanto nenhuma proposta foi pedida.
+    profile: dict[str, Any] | None
+    version: int
+    #: `llm` ou `deterministic`.
+    source: str | None
+    updated_at: str | None
+    changes: list[str]
+    contradictions: list[str]
+    #: Arquivos novos que ainda não foram lidos (passaram do teto de uma leitura).
+    pending: int
+    materials: list[BrandMaterialOut]
+
+
+@router.get(
+    "/landing/brand",
+    response_model=BrandProfileOut,
+    summary="O perfil da marca: o que a leitura dos materiais concluiu",
+)
+async def brand_profile(
+    session: DbSession,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+) -> BrandProfileOut:
+    del tenant  # a sessão já está presa à loja (require_tenant_scopes)
+    linha = (await session.execute(select(BrandProfile))).scalar_one_or_none()
+    if linha is None:
+        return BrandProfileOut(
+            profile=None,
+            version=0,
+            source=None,
+            updated_at=None,
+            changes=[],
+            contradictions=[],
+            pending=0,
+            materials=[],
+        )
+    perfil = parse_profile(linha.data)
+    extras = linha.changes or {}
+    return BrandProfileOut(
+        profile=perfil.model_dump(mode="json") if perfil else None,
+        version=linha.version,
+        source=linha.source,
+        updated_at=linha.updated_at.isoformat() if linha.updated_at else None,
+        changes=[str(c) for c in extras.get("changes") or []][:8],
+        contradictions=[str(c) for c in extras.get("contradictions") or []][:5],
+        pending=int(extras.get("pending") or 0),
+        materials=[
+            BrandMaterialOut(
+                media_id=media_id,
+                kind=info.get("kind"),
+                relevance=info.get("relevance"),
+                description=info.get("description"),
+                usable_on_page=bool(info.get("usable_on_page")),
+                superseded_by=info.get("superseded_by"),
+                source=info.get("source"),
+            )
+            for media_id, info in (linha.materials or {}).items()
+            if isinstance(info, dict)
+        ],
+    )
+
+
+@router.post(
+    "/landing/brand/reset",
+    status_code=204,
+    summary="Esquece a leitura dos arquivos: a próxima proposta olha tudo de novo",
+)
+async def reset_brand_reading(
+    request: Request,
+    session: DbSession,
+    user: CurrentAdmin,
+    tenant: Annotated[TenantContext, Depends(require_tenant_scopes(Scope.SETTINGS_WRITE))],
+) -> None:
+    await LandingDraftService(session, tenant, admin_actor(request, user)).reset_brand_reading()
+    await session.commit()

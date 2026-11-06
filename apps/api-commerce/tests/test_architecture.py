@@ -169,6 +169,17 @@ def test_the_prompt_builder_never_touches_the_database() -> None:
     assert not offenders, f"prompt.py tocou no banco: {offenders}"
 
 
+def test_the_brand_engine_rules_are_pure() -> None:
+    """Perfil da marca, regras da proposta e catálogo (docs/16) decidem; não executam. Sem banco,
+    sem rede: é o que deixa o perfil de reserva e o lint testáveis sem nada em volta, e o que
+    garante que nenhum deles alcance o modelo por fora do `generation.py`."""
+    for nome in ("brand.py", "design_rules.py", "registry.py", "design.py"):
+        text = (APP / "landing" / nome).read_text(encoding="utf-8")
+        proibidos = ["AsyncSession", "sqlalchemy", "httpx", "await ", "gateway"]
+        offenders = [termo for termo in proibidos if termo in text]
+        assert not offenders, f"{nome} deixou de ser puro: {offenders}"
+
+
 def test_the_packing_engine_is_pure_and_deterministic() -> None:
     """O motor de embalagem (frete v2) é puro: o hash do plano vai na assinatura da cotação e é
     reconstruído no `place`, então a mesma entrada tem de dar o mesmo plano. Sem banco, sem

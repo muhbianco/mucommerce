@@ -30,7 +30,12 @@ from app.inventory.models import (
     InventoryReservation,
     StockAdjustment,
 )
-from app.landing.models import LandingBrief, LandingDraft, LandingGenerationUsage  # noqa: F401
+from app.landing.models import (  # noqa: F401
+    BrandProfile,
+    LandingBrief,
+    LandingDraft,
+    LandingGenerationUsage,
+)
 from app.media.models import MediaAsset
 from app.models.base import Base
 from app.notifications.models import NotificationDelivery

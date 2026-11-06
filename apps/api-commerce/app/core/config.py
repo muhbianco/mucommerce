@@ -104,8 +104,9 @@ class Settings(BaseSettings):
     #: "algumas incluídas" seria mentira, e ninguém contrata para experimentar.
     landing_free_generations_per_month: int = 3
     landing_paid_generations_per_month: int = 30
-    #: Teto de saída por chamada. O gateway da api-agents tem o dele, e o menor vence.
-    landing_llm_max_output_tokens: int = 4000
+    #: Teto de saída por chamada. O gateway da api-agents tem o dele, e o menor vence. 6.000
+    #: desde o motor de identidade (docs/16): a proposta é marca, áreas e blocos, não só a home.
+    landing_llm_max_output_tokens: int = 6000
     #: Uma geração demora dezenas de segundos: quem espera é o worker, não a tela.
     landing_llm_timeout_seconds: float = 75.0
     #: Uma tentativa e um conserto. Modelo que erra o mesmo esquema duas vezes não acerta na

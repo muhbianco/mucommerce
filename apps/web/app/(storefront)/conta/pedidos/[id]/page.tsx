@@ -63,7 +63,7 @@ export default async function OrderPage({
   const cancelavel = ["awaiting_payment", "payment_confirmed", "accepted"].includes(order.status);
 
   return (
-    <StoreShell context={context}>
+    <StoreShell context={context} flow="purchase">
       <Breadcrumb
         trail={[
           { name: "Minha conta", href: "/conta" },

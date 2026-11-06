@@ -5,20 +5,48 @@ import { api, requireMe } from "@/lib/panel/api";
 import { tenantScopes } from "@/lib/panel/scopes";
 import { loadTenantContext } from "@/lib/panel/tenant-context";
 import type { Media } from "@/lib/panel/types";
-import { themeVariables, type Branding } from "@/lib/theme";
+import type { Branding, StoreDesign } from "@/lib/theme";
 
-import { Block as StoreBlock } from "../../../../../../(storefront)/_store/landing-blocks";
-import storeStyles from "../../../../../../(storefront)/_store/store.module.css";
 import styles from "../../../../../panel.module.css";
 import { Flash } from "../../flash";
 import { ImageUploader } from "../../image-uploader";
 import { EmptyState, PageHeader, Pill, Section } from "../../ui";
-import vitrine from "../vitrine.module.css";
-import { applyDraft, discardDraft, refineDraft, requestDraft } from "./actions";
+import {
+  applyDraft,
+  discardDraft,
+  refineDraft,
+  requestDraft,
+  resetBrandReading,
+  revertDraft,
+  setMediaRole,
+} from "./actions";
 import { DraftRefresher } from "./refresher";
 import local from "./propostas.module.css";
+import { StorePreview, Swatch } from "./store-preview";
 
-export const metadata: Metadata = { title: "Propostas de página inicial" };
+export const metadata: Metadata = { title: "Identidade da loja" };
+
+interface Change {
+  scope: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+interface Summary {
+  text?: string;
+  decisions?: { area: string; why: string }[];
+  changes?: Change[];
+  fixes?: string[];
+  profile?: {
+    source?: string;
+    refreshed?: boolean;
+    changes?: string[];
+    contradictions?: string[];
+    pending?: number;
+    note?: string | null;
+  };
+}
 
 interface Draft {
   id: string;
@@ -27,10 +55,15 @@ interface Draft {
   parent_draft_id: string | null;
   instruction: string | null;
   blocks: Record<string, unknown>[] | null;
+  branding: Branding | null;
+  design: StoreDesign | null;
+  summary: Summary | null;
   repaired: boolean;
   failure_reason: string | null;
   created_at: string;
   applied_at: string | null;
+  edited_since: boolean;
+  revertible: boolean;
 }
 
 interface DraftList {
@@ -39,38 +72,114 @@ interface DraftList {
   enabled: boolean;
 }
 
+interface BrandMaterial {
+  media_id: string;
+  kind: string | null;
+  relevance: string | null;
+  description: string | null;
+  usable_on_page: boolean;
+  superseded_by: string | null;
+  source: string | null;
+}
+
+interface BrandState {
+  profile: {
+    summary: string;
+    personality: Record<string, string>;
+    palette: { primary: string | null; secondary: string | null; accent: string | null; surface: string };
+    typography: { headings: string; case: string };
+    preserve: string[];
+    avoid: string[];
+    inferred: string[];
+    confidence: string;
+  } | null;
+  version: number;
+  source: string | null;
+  updated_at: string | null;
+  changes: string[];
+  contradictions: string[];
+  pending: number;
+  materials: BrandMaterial[];
+}
+
 type Resolved = Record<string, unknown> & { type: string };
 
 /** Como cada situação aparece para a lojista, em palavras dela. */
 const STATUS: Record<string, { label: string; state: "live" | "pending" | "off"; hint: string }> = {
   queued: { label: "Na fila", state: "pending", hint: "A montagem começa em instantes." },
-  running: { label: "Montando", state: "pending", hint: "Costuma levar menos de um minuto." },
+  running: { label: "Montando", state: "pending", hint: "Lendo o seu material e desenhando a loja. Leva até um minuto." },
   ready: { label: "Pronta", state: "live", hint: "Dê uma olhada e decida." },
   failed: { label: "Não deu certo", state: "off", hint: "Não foi cobrada." },
   applied: { label: "Publicada", state: "live", hint: "Está no ar agora." },
   discarded: { label: "Descartada", state: "off", hint: "" },
+  reverted: { label: "Desfeita", state: "off", hint: "A loja voltou a ser como era antes dela." },
 };
 
 const EM_ANDAMENTO = new Set(["queued", "running"]);
 
-/** O papel da imagem, como a lojista o escolheu. */
-const ROLE_LABEL: Record<string, string> = {
-  banner: "foto grande",
-  place_photo: "a loja",
-  product_photo: "produto",
-  team_photo: "eu ou a equipe",
+/** O papel da imagem, como a lojista o escolhe. */
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: "logo", label: "Logotipo" },
+  { value: "banner", label: "Foto grande / banner" },
+  { value: "place_photo", label: "A loja por dentro ou por fora" },
+  { value: "product_photo", label: "Foto de produto" },
+  { value: "team_photo", label: "Eu ou a equipe" },
+  { value: "texture", label: "Textura / padrão gráfico" },
+  { value: "other", label: "Outra coisa" },
+];
+
+/** O que a leitura da marca disse que cada arquivo é. */
+const KIND_LABEL: Record<string, string> = {
   logo: "logotipo",
+  emblem: "emblema",
+  banner: "banner",
+  product_photo: "foto de produto",
+  lifestyle: "foto de uso",
+  place: "a loja",
+  team: "equipe",
+  promo: "promoção",
   texture: "textura",
-  icon: "ícone",
-  other: "outra",
+  screenshot: "print de tela",
+  other: "outra coisa",
 };
+
+const RELEVANCE_LABEL: Record<string, string> = {
+  identity: "identidade",
+  product: "produto",
+  promotional_temporary: "promoção temporária",
+  reference: "referência",
+  irrelevant: "não usada",
+};
+
+const SURFACE_LABEL: Record<string, string> = { light: "fundo claro", warm: "fundo creme", dark: "fundo escuro" };
+
+const HEADING_LABEL: Record<string, string> = {
+  system: "letra simples",
+  serif: "letra serifada",
+  rounded: "letra arredondada",
+  display: "letra condensada forte",
+  elegant: "letra elegante",
+  geometric: "letra geométrica",
+};
+
+const DECISION_LABEL: Record<string, string> = {
+  marca: "Marca",
+  cabecalho: "Cabeçalho",
+  vitrine: "Vitrine",
+  produto: "Produto",
+  checkout: "Carrinho e checkout",
+  rodape: "Rodapé",
+  pagina_inicial: "Página inicial",
+};
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
 
 export default async function PropostasPage({
   params,
   searchParams,
 }: {
   params: Promise<{ tenantId: string }>;
-  searchParams: Promise<{ ok?: string; erro?: string; ver?: string }>;
+  searchParams: Promise<{ ok?: string; erro?: string; ver?: string; tela?: string; antes?: string }>;
 }) {
   const { tenantId } = await params;
   const me = await requireMe();
@@ -80,35 +189,57 @@ export default async function PropostasPage({
 
   const path = `/admin/tenants/${tenantId}`;
   const base = `/t/${tenantId}`;
-  const { ok, erro, ver } = await searchParams;
+  const { ok, erro, ver, tela, antes } = await searchParams;
+  const phone = tela === "celular";
 
-  const [lista, material] = await Promise.all([
+  const [lista, material, marca] = await Promise.all([
     api<DraftList>(`${path}/landing/drafts`),
     api<Media[]>(`${path}/media?owner_type=landing`),
+    api<BrandState>(`${path}/landing/brand`).catch(() => null),
   ]);
   const montando = lista.drafts.some((d) => EM_ANDAMENTO.has(d.status));
+  const leitura = new Map((marca?.materials ?? []).map((m) => [m.media_id, m]));
 
   // A proposta aberta: a que ela pediu para ver, ou a primeira pronta.
-  const aberta =
-    lista.drafts.find((d) => d.id === ver) ?? lista.drafts.find((d) => d.status === "ready");
+  const aberta = lista.drafts.find((d) => d.id === ver) ?? lista.drafts.find((d) => d.status === "ready");
+  const comoHoje = Boolean(antes) && Boolean(aberta);
+
+  const brandingAtual = (context.settings.branding ?? {}) as Branding;
+  const designAtual = (context.settings.design ?? {}) as StoreDesign;
+  const brandingPrevia: Branding = comoHoje
+    ? brandingAtual
+    : { ...brandingAtual, ...(aberta?.branding ?? {}) };
+  const designPrevia: StoreDesign = comoHoje ? designAtual : (aberta?.design ?? designAtual);
+
   const preview =
     aberta && aberta.blocks
-      ? await api<Resolved[]>(`${path}/landing/drafts/${aberta.id}/preview`).catch(
-          () => [] as Resolved[],
-        )
+      ? await api<Resolved[]>(
+          comoHoje ? `${path}/landing/preview` : `${path}/landing/drafts/${aberta.id}/preview`,
+        ).catch(() => [] as Resolved[])
       : [];
-  const branding = (context.settings.branding ?? {}) as Branding;
+  const logo = context.settings.branding?.logo_media_id
+    ? await api<Media>(`${path}/media/${String(context.settings.branding.logo_media_id)}`).catch(() => null)
+    : null;
+  const logoUrl = logo?.renditions?.[0]?.url ?? null;
+
+  const verLink = (extra: Record<string, string | undefined>) => {
+    const q = new URLSearchParams();
+    if (aberta) q.set("ver", aberta.id);
+    for (const [k, v] of Object.entries(extra)) if (v) q.set(k, v);
+    return `?${q.toString()}`;
+  };
+
+  const resumo = aberta?.summary ?? null;
+  const proposta = aberta && (aberta.branding || aberta.design);
 
   return (
     <>
       <PageHeader
         eyebrow="Vitrine"
-        title="Propostas de página inicial"
-        lead="A gente monta a partir do que você contou. Nada vai para o ar sem o seu OK."
+        title="Identidade da loja"
+        lead="A gente lê o seu material, entende como a sua marca se expressa e propõe a loja inteira: cores, letras, botões, cabeçalho, vitrine, página de produto, carrinho, checkout e página inicial. Nada vai para o ar sem o seu OK — e dá para voltar."
         actions={
           <Pill state={lista.quota.left > 0 ? "live" : "off"}>
-            {/* "restam N" e não "N de M": a seção logo abaixo já diz quantas foram usadas, e as
-                duas contas lado a lado, cada uma medindo uma ponta, confundem. */}
             {lista.quota.left > 0 ? `restam ${lista.quota.left}` : "acabaram as deste mês"}
           </Pill>
         }
@@ -117,39 +248,141 @@ export default async function PropostasPage({
       <DraftRefresher active={montando} />
 
       <Section
-        title="O material da sua loja"
-        description={`${material.length} ${material.length === 1 ? "imagem" : "imagens"}`}
+        title="1. O material da sua loja"
+        description={`${material.length} ${material.length === 1 ? "imagem" : "imagens"} · o logotipo fica em Marca; as fotos dos produtos entram sozinhas`}
       >
         <p className={styles.hint}>
-          Mande foto da loja, dos produtos, da equipe — o que mostrar o seu negócio. Diga o que é
-          cada uma: é assim que a gente sabe qual serve de foto grande e qual não. O logotipo fica
-          em <a href={`${base}/configuracoes#marca`}>Marca</a>, e é de lá que tiramos as cores.
+          Mande logotipo, banners, fotos da loja, posts do Instagram — o que mostre como a sua marca é. A gente olha cada
+          imagem e diz o que entendeu; se errar, corrija o que é cada uma.
         </p>
         {material.length ? (
           <div className={local.material}>
-            {material.map((media) => (
-              <figure key={media.id} className={local.materialTile}>
-                {media.renditions.length ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={media.renditions[0]!.url} alt={media.alt ?? ""} />
-                ) : (
-                  <div className={local.materialPending}>processando…</div>
-                )}
-                <figcaption>{ROLE_LABEL[media.role ?? ""] ?? "sem descrição"}</figcaption>
-              </figure>
-            ))}
+            {material.map((media) => {
+              const lido = leitura.get(media.id);
+              return (
+                <figure key={media.id} className={local.materialTile}>
+                  {media.renditions.length ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={media.renditions[0]!.url} alt={media.alt ?? ""} />
+                  ) : (
+                    <div className={local.materialPending}>processando…</div>
+                  )}
+                  <figcaption>
+                    {lido?.kind ? (
+                      <span className={local.reading}>
+                        A gente viu: <strong>{KIND_LABEL[lido.kind] ?? lido.kind}</strong>
+                        {lido.relevance ? ` · ${RELEVANCE_LABEL[lido.relevance] ?? lido.relevance}` : ""}
+                        {lido.superseded_by ? " · substituída por uma mais nova" : ""}
+                      </span>
+                    ) : (
+                      <span className={local.reading}>Ainda não lida</span>
+                    )}
+                    <form action={setMediaRole} className={local.roleForm}>
+                      <input type="hidden" name="tenant_id" value={tenantId} />
+                      <input type="hidden" name="media_id" value={media.id} />
+                      <label className={local.srOnly} htmlFor={`papel-${media.id}`}>
+                        O que é esta imagem
+                      </label>
+                      <select id={`papel-${media.id}`} name="role" defaultValue={media.role ?? ""}>
+                        <option value="" disabled>
+                          O que é?
+                        </option>
+                        {ROLE_OPTIONS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {r.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="submit" className={styles.buttonSmall}>
+                        Salvar
+                      </button>
+                    </form>
+                  </figcaption>
+                </figure>
+              );
+            })}
           </div>
         ) : null}
-        <ImageUploader
-          tenantId={tenantId}
-          ownerType="landing"
-          label="Enviar imagens da loja"
-          askRole
-        />
+        <ImageUploader tenantId={tenantId} ownerType="landing" label="Enviar imagens da marca" askRole />
       </Section>
 
       <Section
-        title="Pedir uma proposta"
+        title="2. A identidade que a gente identificou"
+        description={
+          marca?.profile
+            ? marca.source === "llm"
+              ? "Lida nas suas imagens e no que você contou"
+              : "Medida no logotipo e no que você contou — as imagens ainda não foram lidas"
+            : "Aparece na primeira proposta"
+        }
+        actions={
+          marca?.profile ? (
+            <form action={resetBrandReading}>
+              <input type="hidden" name="tenant_id" value={tenantId} />
+              <button type="submit" className={styles.buttonSmall}>
+                Ler todo o material de novo
+              </button>
+            </form>
+          ) : null
+        }
+      >
+        {marca?.profile ? (
+          <div className={local.identity}>
+            <p className={local.identitySummary}>{marca.profile.summary}</p>
+            <div className={local.chips}>
+              {Object.values(marca.profile.personality)
+                .filter((v) => v !== "equilibrada" && v !== "intermediaria")
+                .map((v) => (
+                  <span key={v} className={local.chip}>
+                    {v}
+                  </span>
+                ))}
+              <span className={local.chip}>{SURFACE_LABEL[marca.profile.palette.surface] ?? marca.profile.palette.surface}</span>
+              <span className={local.chip}>
+                {HEADING_LABEL[marca.profile.typography.headings] ?? marca.profile.typography.headings}
+                {marca.profile.typography.case === "upper" ? ", caixa alta" : ""}
+              </span>
+            </div>
+            <div className={local.swatches}>
+              {marca.profile.palette.primary && HEX.test(marca.profile.palette.primary) ? (
+                <Swatch color={marca.profile.palette.primary} label="principal" />
+              ) : null}
+              {marca.profile.palette.secondary && HEX.test(marca.profile.palette.secondary) ? (
+                <Swatch color={marca.profile.palette.secondary} label="destaque" />
+              ) : null}
+              {marca.profile.palette.accent && HEX.test(marca.profile.palette.accent) ? (
+                <Swatch color={marca.profile.palette.accent} label="apoio" />
+              ) : null}
+            </div>
+            {marca.profile.preserve.length ? (
+              <p className={styles.hint}>A gente preserva: {marca.profile.preserve.join(" · ")}</p>
+            ) : null}
+            {marca.changes.length ? (
+              <p className={styles.hint}>O que o material novo mudou: {marca.changes.join(" · ")}</p>
+            ) : null}
+            {marca.contradictions.length ? (
+              <p className={styles.hint}>Encontramos material que se contradiz: {marca.contradictions.join(" · ")}</p>
+            ) : null}
+            {marca.pending ? (
+              <p className={styles.hint}>
+                {marca.pending} {marca.pending === 1 ? "imagem ainda não foi lida" : "imagens ainda não foram lidas"}: entram
+                na próxima proposta.
+              </p>
+            ) : null}
+            {marca.profile.confidence === "baixa" && marca.profile.inferred.length ? (
+              <p className={styles.hint}>Deduzido, não visto: {marca.profile.inferred.join(" · ")}</p>
+            ) : null}
+          </div>
+        ) : (
+          <p className={styles.hint}>
+            Conte sobre a sua loja em <a href={`${base}/vitrine/brief/negocio`}>Sobre a sua loja</a>, mande o material e peça
+            uma proposta: a primeira leitura da sua marca aparece aqui.
+          </p>
+        )}
+      </Section>
+
+      <Section
+        title="3. Pedir uma proposta"
         description={`Você já usou ${lista.quota.used} de ${lista.quota.limit} neste mês`}
         actions={
           lista.enabled && lista.quota.left > 0 && !montando ? (
@@ -164,20 +397,17 @@ export default async function PropostasPage({
       >
         {!lista.enabled ? (
           <p className={styles.hint}>
-            A montagem com IA ainda não está disponível na sua loja. Assim que entrar no ar, o
-            botão aparece aqui.
+            A montagem com IA ainda não está disponível na sua loja. Assim que entrar no ar, o botão aparece aqui.
           </p>
         ) : montando ? (
-          <p className={styles.hint}>
-            Estamos montando a sua proposta. Isso costuma levar menos de um minuto — esta página se
-            atualiza sozinha, ou{" "}
+          <p className={styles.hint} role="status">
+            Estamos lendo o seu material e desenhando a loja. Leva até um minuto — esta página se atualiza sozinha, ou{" "}
             <a href={`${base}/vitrine/propostas`}>clique aqui para atualizar</a>.
           </p>
         ) : lista.quota.left > 0 ? (
           <p className={styles.hint}>
-            Antes de pedir, confira o que você já contou em{" "}
-            <a href={`${base}/vitrine/brief/negocio`}>Sobre a sua loja</a>. Quanto mais completo,
-            melhor a proposta.
+            Cada proposta lê só o material novo e redesenha o que fizer sentido. Antes de pedir, confira{" "}
+            <a href={`${base}/vitrine/brief/negocio`}>Sobre a sua loja</a>.
           </p>
         ) : (
           <p className={styles.hint}>
@@ -190,50 +420,95 @@ export default async function PropostasPage({
 
       {aberta && aberta.blocks ? (
         <Section
-          title="Prévia"
-          description="O mesmo desenho que a sua loja vai ter, se você publicar"
+          title="4. A proposta"
+          description={proposta ? "A loja inteira, como vai ficar se você publicar" : "Proposta antiga: só a página inicial"}
           actions={
             <>
               <form action={applyDraft}>
                 <input type="hidden" name="tenant_id" value={tenantId} />
                 <input type="hidden" name="draft_id" value={aberta.id} />
                 <button type="submit" className={styles.button} disabled={aberta.status !== "ready"}>
-                  Publicar esta página
+                  Publicar na loja
                 </button>
               </form>
               <form action={discardDraft}>
                 <input type="hidden" name="tenant_id" value={tenantId} />
                 <input type="hidden" name="draft_id" value={aberta.id} />
-                <button type="submit" className={styles.buttonSmall}>
+                <button type="submit" className={styles.buttonSmall} disabled={aberta.status !== "ready"}>
                   Descartar
                 </button>
               </form>
             </>
           }
         >
-          {aberta.repaired ? (
-            <p className={styles.hint}>
-              Ajustamos alguns detalhes da proposta automaticamente (uma imagem ou um produto que
-              não existia mais). O que você vê abaixo é o resultado final.
+          {aberta.edited_since && aberta.status === "ready" ? (
+            <p className={local.warning} role="alert">
+              Você mudou a loja depois desta proposta. Publicar substitui o que você fez — e dá para voltar logo depois, em
+              Versões.
             </p>
           ) : null}
-          <div className={vitrine.canvas}>
-            <div
-              className={`${storeStyles.storefront} ${vitrine.canvasInner}`}
-              style={themeVariables(branding)}
-            >
-              {preview.map((block, i) => (
-                <StoreBlock
-                  key={typeof block.id === "string" ? block.id : i}
-                  block={block}
-                  first={i === 0}
-                  context={{ catalogOn: Boolean(context.features.catalog), chatUrl: null }}
-                />
-              ))}
+
+          {resumo?.text ? <p className={local.identitySummary}>{resumo.text}</p> : null}
+
+          {resumo?.changes?.length ? (
+            <div className={local.changes}>
+              <h3 className={local.subhead}>O que muda</h3>
+              <ul>
+                {resumo.changes.map((c) => (
+                  <li key={`${c.scope}-${c.label}`}>
+                    <strong>{c.label}:</strong>{" "}
+                    {HEX.test(c.before) ? <Swatch color={c.before} label="" /> : <span className="muted">{c.before}</span>} →{" "}
+                    {HEX.test(c.after) ? <Swatch color={c.after} label="" /> : <span>{c.after}</span>}
+                  </li>
+                ))}
+              </ul>
             </div>
+          ) : proposta ? (
+            <p className={styles.hint}>Esta proposta não muda nada em relação ao que está no ar.</p>
+          ) : null}
+
+          {resumo?.decisions?.length ? (
+            <div className={local.changes}>
+              <h3 className={local.subhead}>Por quê</h3>
+              <ul>
+                {resumo.decisions.map((d, i) => (
+                  <li key={i}>
+                    <strong>{DECISION_LABEL[d.area] ?? d.area}:</strong> {d.why}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {resumo?.profile?.note ? <p className={styles.hint}>{resumo.profile.note}</p> : null}
+          {resumo?.fixes?.length || aberta.repaired ? (
+            <p className={styles.hint}>
+              Ajustamos alguns detalhes sozinhos para a loja continuar legível e funcionando
+              {resumo?.fixes?.length ? `: ${resumo.fixes.join("; ")}` : ""}.
+            </p>
+          ) : null}
+
+          <div className={local.previewBar} role="group" aria-label="Como ver a prévia">
+            <a className={styles.buttonSmall} href={verLink({ tela: phone ? undefined : "celular", antes })}>
+              {phone ? "Ver no computador" : "Ver no celular"}
+            </a>
+            <a className={styles.buttonSmall} href={verLink({ tela, antes: comoHoje ? undefined : "1" })}>
+              {comoHoje ? "Ver a proposta" : "Ver como está hoje"}
+            </a>
+            <span className={styles.hint}>{comoHoje ? "Mostrando a loja como está no ar." : "Mostrando a proposta."}</span>
           </div>
 
-          {lista.enabled && lista.quota.left > 0 ? (
+          <StorePreview
+            branding={brandingPrevia}
+            design={designPrevia}
+            blocks={preview}
+            storeName={context.name}
+            logoUrl={logoUrl}
+            catalogOn={Boolean(context.features.catalog)}
+            phone={phone}
+          />
+
+          {lista.enabled && lista.quota.left > 0 && aberta.status === "ready" ? (
             <form action={refineDraft} className={local.refine}>
               <input type="hidden" name="tenant_id" value={tenantId} />
               <input type="hidden" name="draft_id" value={aberta.id} />
@@ -245,15 +520,14 @@ export default async function PropostasPage({
                   id="instrucao"
                   name="instruction"
                   maxLength={200}
-                  placeholder="Ex.: mais curto, sem exclamação, e o horário logo no começo"
+                  placeholder="Ex.: mais vibrante, botões maiores, checkout mais limpo"
                 />
                 <button type="submit" className={styles.buttonSmall}>
-                  Pedir de novo
+                  Pedir ajuste
                 </button>
               </div>
               <small className={styles.hint}>
-                Isso gasta mais uma das suas propostas do mês. Para trocar uma foto, reordenar ou
-                mudar o arranjo de um bloco, use o{" "}
+                Isso gasta mais uma das suas propostas do mês. Para trocar uma foto ou reordenar a página inicial, use o{" "}
                 <a href={`${base}/vitrine`}>editor da página inicial</a> — lá é de graça.
               </small>
             </form>
@@ -261,20 +535,15 @@ export default async function PropostasPage({
         </Section>
       ) : null}
 
-      <Section title="Histórico" description={`${lista.drafts.length} no total`}>
+      <Section title="5. Versões" description={`${lista.drafts.length} no total`}>
         {lista.drafts.length === 0 ? (
           <EmptyState title="Nenhuma proposta ainda.">
-            Conte sobre a sua loja e peça a primeira: dá para trocar tudo depois, e nada vai para o
-            ar sem você mandar.
+            Mande o material da marca e peça a primeira: nada vai para o ar sem você mandar, e dá para voltar.
           </EmptyState>
         ) : (
           <ul className={local.list}>
             {lista.drafts.map((draft) => {
-              const estado = STATUS[draft.status] ?? {
-                label: draft.status,
-                state: "off" as const,
-                hint: "",
-              };
+              const estado = STATUS[draft.status] ?? { label: draft.status, state: "off" as const, hint: "" };
               return (
                 <li key={draft.id} className={local.item} data-current={draft.id === aberta?.id ? "" : undefined}>
                   <div className={local.itemHead}>
@@ -284,9 +553,7 @@ export default async function PropostasPage({
                       {new Date(draft.created_at).toLocaleString("pt-BR", { timeZone: context.timezone })}
                     </span>
                     {draft.source === "refine" ? (
-                      <span className={local.itemNote}>
-                        pedido de mudança: “{draft.instruction}”
-                      </span>
+                      <span className={local.itemNote}>pedido de mudança: “{draft.instruction}”</span>
                     ) : null}
                   </div>
                   <p className={local.itemHint}>{draft.failure_reason || estado.hint}</p>
@@ -294,6 +561,15 @@ export default async function PropostasPage({
                     <a className={styles.buttonSmall} href={`?ver=${draft.id}`}>
                       Ver esta
                     </a>
+                  ) : null}
+                  {draft.revertible ? (
+                    <form action={revertDraft}>
+                      <input type="hidden" name="tenant_id" value={tenantId} />
+                      <input type="hidden" name="draft_id" value={draft.id} />
+                      <button type="submit" className={styles.buttonSmall}>
+                        Voltar ao que estava antes
+                      </button>
+                    </form>
                   ) : null}
                 </li>
               );

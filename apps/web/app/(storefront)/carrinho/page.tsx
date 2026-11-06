@@ -237,7 +237,7 @@ export default async function CartPage({
   const selos = estimateBadges(shippingQuote?.options ?? []);
 
   return (
-    <StoreShell context={context}>
+    <StoreShell context={context} flow="purchase">
       <PageHead title="Carrinho" />
       {ok === "adicionado" ? <Notice kind="ok">Item adicionado.</Notice> : null}
       {ok === "cupom" ? <Notice kind="ok">Cupom aplicado.</Notice> : null}

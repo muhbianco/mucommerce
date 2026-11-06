@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { contrast, luminance } from "./color";
-import { onColor, storeTheme, themeVariables } from "./theme";
+import { onColor, storeAttributes, storeStyle, storeTheme, themeVariables } from "./theme";
 
 describe("store theme", () => {
   it("picks readable text on the brand colour", () => {
@@ -53,6 +53,7 @@ const NAO_SAO_COR = new Set([
   "--brand-radius-lg",
   "--brand-space",
   "--brand-logo-height",
+  "--brand-heading-transform",
 ]);
 
 describe("a paleta se defende da cor que o lojista escolheu", () => {
@@ -199,5 +200,66 @@ describe("medidas do tema", () => {
     expect(padrao["--brand-space"]).toBe("1");
     expect(padrao["--brand-logo-height"]).toBe("40px");
     expect(padrao["--brand-font-display"]).toBe(padrao["--brand-font"]);
+  });
+});
+
+describe("motor de identidade (docs/16)", () => {
+  it("loja sem proposta ganha os atributos do desenho de antes", () => {
+    // Cada padrão é o desenho que existia: o CSS não tem regra para ele.
+    expect(storeAttributes({}, {})).toEqual({
+      "data-surface": "light",
+      "data-heading-case": "normal",
+      "data-shadow": "soft",
+      "data-button": "solid",
+      "data-header": "classic",
+      "data-nav": "strip",
+      "data-card": "standard",
+      "data-ratio": "square",
+      "data-columns": "normal",
+      "data-product": "split",
+      "data-price": "plain",
+      "data-checkout": "branded",
+      "data-footer": "simple",
+    });
+    expect(themeVariables({})["--brand-heading-transform"]).toBe("none");
+  });
+
+  it("duas marcas opostas não saem com o mesmo desenho", () => {
+    const pipas = storeAttributes(
+      { primary_color: "#19d3e6", surface: "dark", heading_case: "upper", shadow: "glow", button_style: "block" },
+      { header: { layout: "brand_bar" }, catalog: { card: "bold" }, product: { price: "emphasis" }, checkout: { style: "neutral" } },
+    );
+    const beleza = storeAttributes(
+      { primary_color: "#5c264c", surface: "light", heading_font: "elegant", shadow: "none", button_style: "outline" },
+      { header: { layout: "centered", nav: "underline" }, catalog: { card: "editorial", image_ratio: "portrait", columns: "large" }, product: { layout: "gallery_wide" } },
+    );
+    const iguais = Object.keys(pipas).filter((k) => pipas[k] === beleza[k]);
+    expect(iguais).toEqual(["data-footer"]);
+  });
+
+  it("checkout neutro só existe onde há o que neutralizar", () => {
+    const claro = { primary_color: "#19d3e6", surface: "light" as const };
+    expect(storeAttributes(claro, { checkout: { style: "neutral" } })["data-checkout"]).toBe("branded");
+    expect(Object.keys(storeStyle(claro, { checkout: { style: "neutral" } })).some((k) => k.startsWith("--nt-"))).toBe(false);
+
+    const escuro = { primary_color: "#19d3e6", surface: "dark" as const };
+    expect(storeAttributes(escuro, { checkout: { style: "neutral" } })["data-checkout"]).toBe("neutral");
+    const vars = storeStyle(escuro, { checkout: { style: "neutral" } });
+    // A folha clara da compra tem o mesmo cuidado de contraste do tema claro.
+    expect(contrast(vars["--nt-ink"]!, vars["--nt-paper"]!)).toBeGreaterThanOrEqual(7);
+    expect(contrast(vars["--nt-brand-ink"]!, vars["--nt-surface"]!)).toBeGreaterThanOrEqual(4.5);
+    expect(vars["--nt-ink-rgb"]).toMatch(/^\d{1,3} \d{1,3} \d{1,3}$/);
+  });
+
+  it("o brilho usa a marca como preenchimento, não a tinta escurecida", () => {
+    const vars = themeVariables({ primary_color: "#19d3e6" });
+    expect(vars["--store-brand-fill-rgb"]).toBe("25 211 230");
+    expect(vars["--store-brand-rgb"]).not.toBe(vars["--store-brand-fill-rgb"]);
+  });
+
+  it("as fontes novas apontam para as famílias que o app hospeda", () => {
+    expect(themeVariables({ heading_font: "display" })["--brand-font-display"]).toContain("--store-font-display");
+    expect(themeVariables({ heading_font: "elegant" })["--brand-font-display"]).toContain("--store-font-elegant");
+    expect(themeVariables({ font: "geometric" })["--brand-font"]).toContain("--store-font-geometric");
   });
 });

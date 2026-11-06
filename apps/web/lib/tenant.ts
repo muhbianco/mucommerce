@@ -37,6 +37,8 @@ export interface StorefrontContext {
   password_gate?: boolean;
   features: Record<string, boolean>;
   branding: Record<string, unknown>;
+  /** O desenho por área (`DesignV1`). Opcional: API anterior ao motor de identidade não manda. */
+  design?: Record<string, unknown>;
   seo: Record<string, unknown>;
   /** O que a loja oferece, como `public_fulfillment` monta do lado da API. */
   fulfillment: {

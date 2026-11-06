@@ -100,7 +100,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const whatsappObrigatorio = pedeWhatsapp && !whatsappConhecido;
 
   return (
-    <StoreShell context={context}>
+    <StoreShell context={context} flow="purchase">
       <PageHead title="Finalizar compra" lead="Confira o pedido e confirme. O pagamento vem na tela seguinte." />
       {erro ? <Notice kind="error">{ERRORS[erro] ?? "Não foi possível finalizar. Tente de novo."}</Notice> : null}
       <Split

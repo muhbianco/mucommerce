@@ -37,7 +37,17 @@ const STRIP_LIMIT = 10;
  * e fechar um menu. Gaveta exigiria duplicar a navegação, e navegação duplicada é rótulo
  * repetido no documento.
  */
-export async function StoreShell({ context, children }: { context: StorefrontContext; children: ReactNode }) {
+export async function StoreShell({
+  context,
+  children,
+  flow,
+}: {
+  context: StorefrontContext;
+  children: ReactNode;
+  /** `purchase` no carrinho, no checkout e no pagamento: é onde o desenho "compra neutra"
+   *  troca o papel da marca por uma folha clara (docs/16). */
+  flow?: "purchase";
+}) {
   const jar = await cookies();
   const signedIn = Boolean(jar.get(CUSTOMER_SESSION_COOKIE));
   const cartCount = parseCartCount(jar.get(CART_COUNT_COOKIE)?.value);
@@ -113,7 +123,7 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
         </nav>
       ) : null}
 
-      <main id="conteudo" className={styles.page}>
+      <main id="conteudo" className={styles.page} data-flow={flow}>
         {children}
       </main>
 
@@ -122,6 +132,10 @@ export async function StoreShell({ context, children }: { context: StorefrontCon
       <CartFab />
 
       <footer className={styles.footer}>
+        {/* Só aparece no rodapé "na cor da marca"; nos outros o CSS o esconde. */}
+        <p className={styles.footerBrand} aria-hidden="true">
+          {context.tenant.name}
+        </p>
         <nav className={styles.footerNav} aria-label="Sobre a loja">
           <Link href="/politicas/termos">Termos de uso</Link>
           <Link href="/politicas/privacidade">Política de privacidade</Link>

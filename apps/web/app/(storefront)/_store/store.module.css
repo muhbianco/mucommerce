@@ -2763,3 +2763,360 @@
   font-size: 0.9rem;
   font-weight: 600;
 }
+
+/* ================================================================== motor de identidade
+   Os desenhos que a proposta da IA escolhe (docs/16). Cada atributo vem de uma lista fechada —
+   `BrandingV1` e `DesignV1` na API, `storeAttributes()` em `lib/theme.ts` — e o padrão de cada
+   um NÃO tem regra aqui: é o desenho de antes. Loja sem proposta não muda um pixel.
+
+   Nada aqui esconde, remove ou reordena preço, frete, formulário ou botão de pagar: o
+   checkout só ganha estilo. */
+
+/* ------------------------------------------------------------------ títulos */
+
+.storefront[data-heading-case="upper"] :where(h1, h2, h3),
+.storefront[data-heading-case="upper"] .brand {
+  text-transform: var(--brand-heading-transform, none);
+  letter-spacing: 0.01em;
+}
+
+.storefront[data-heading-case="upper"] .hero h1 {
+  font-size: clamp(2.1rem, 7vw, 3.3rem);
+  line-height: 1.02;
+}
+
+/* ------------------------------------------------------------------ faixas no papel escuro */
+
+/* A faixa "escura" pinta com a tinta do texto (`--store-ink`), que no papel escuro é quase
+   branca: a faixa escura saía como uma caixa clara, o contrário do pedido. No escuro ela fica um
+   degrau abaixo do papel, com a tinta de sempre. */
+.storefront[data-surface="dark"] [data-tone="dark"] {
+  --section-bg: color-mix(in oklab, var(--store-paper) 55%, #000);
+  --section-fg: var(--store-ink);
+  --section-line: var(--store-line);
+}
+
+/* ------------------------------------------------------------------ profundidade */
+
+.storefront[data-shadow="none"] {
+  --store-shadow: none;
+  --store-shadow-lg: none;
+}
+
+.storefront[data-shadow="strong"] {
+  --store-shadow:
+    0 2px 0 rgb(var(--store-ink-rgb) / 8%),
+    0 16px 32px -14px rgb(var(--store-ink-rgb) / 38%);
+  --store-shadow-lg: 0 20px 44px -12px rgb(var(--store-ink-rgb) / 42%);
+}
+
+/* O halo usa a marca como preenchimento (`--store-brand-fill-rgb`), não a tinta de texto: o
+   ciano neon de um emblema continua neon. A regra do gerador só deixa isto no papel escuro. */
+.storefront[data-shadow="glow"] {
+  --store-shadow:
+    0 0 0 1px rgb(var(--store-brand-fill-rgb) / 38%),
+    0 0 28px -6px rgb(var(--store-brand-fill-rgb) / 55%);
+  --store-shadow-lg:
+    0 0 0 1px rgb(var(--store-brand-fill-rgb) / 45%),
+    0 0 44px -8px rgb(var(--store-brand-fill-rgb) / 60%);
+}
+
+.storefront:is([data-shadow="strong"], [data-shadow="glow"]) .productCard {
+  box-shadow: var(--store-shadow);
+}
+
+.storefront[data-shadow="glow"] .productCard {
+  border-color: rgb(var(--store-brand-fill-rgb) / 30%);
+}
+
+.storefront[data-shadow="glow"] :where(:global(.button)) {
+  box-shadow: 0 0 22px -4px rgb(var(--store-brand-fill-rgb) / 70%);
+}
+
+/* ------------------------------------------------------------------ botões */
+
+.storefront[data-button="pill"] :where(button, .button, .buttonGhost, .buttonSmall, :global(.button)) {
+  border-radius: var(--store-radius-pill);
+  padding-inline: 1.35rem;
+}
+
+.storefront[data-button="block"] :where(button, .button, .buttonGhost, .buttonSmall, :global(.button)) {
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 800;
+}
+
+/* Contornado é para marca discreta — mas o botão de comprar e o de fechar o pedido continuam
+   cheios: o que leva à venda não pode parecer secundário. */
+.storefront[data-button="outline"] :not(.buy) > :global(.button):not(.checkoutCta) {
+  background: transparent;
+  color: var(--store-brand-ink);
+  border-color: var(--store-brand-ink);
+}
+
+.storefront[data-button="outline"] :not(.buy) > :global(.button):not(.checkoutCta):hover {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+  color: var(--brand-on-primary);
+}
+
+/* ------------------------------------------------------------------ cabeçalho */
+
+/* Na cor da marca. O texto usa `--brand-on-primary`, que `onColor` garante legível. */
+.storefront[data-header="brand_bar"] .header {
+  background: var(--brand-primary);
+  border-bottom-color: transparent;
+}
+
+.storefront[data-header="brand_bar"] .header .brand,
+.storefront[data-header="brand_bar"] .headerNav a,
+.storefront[data-header="brand_bar"] .headerNav .linkButton {
+  color: var(--brand-on-primary);
+}
+
+.storefront[data-header="brand_bar"] .cartCount {
+  background: var(--brand-on-primary);
+  color: var(--brand-primary);
+}
+
+.storefront[data-header="minimal"] .header {
+  background: var(--store-paper);
+  border-bottom-color: transparent;
+  padding-block: 0.9rem;
+}
+
+.storefront[data-header="minimal"] .catStrip {
+  background: var(--store-paper);
+}
+
+@media (min-width: 761px) {
+  /* Logotipo no eixo: busca à esquerda, conta e carrinho à direita. */
+  .storefront[data-header="centered"] .header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas: "search brand nav";
+  }
+
+  .storefront[data-header="centered"] .header .brand {
+    grid-area: brand;
+    justify-self: center;
+  }
+
+  .storefront[data-header="centered"] .header .searchWrap,
+  .storefront[data-header="centered"] .header .spacer {
+    grid-area: search;
+    max-width: 22rem;
+  }
+
+  .storefront[data-header="centered"] .headerNav {
+    grid-area: nav;
+    justify-self: end;
+  }
+
+  .storefront[data-header="centered"] .catStrip {
+    justify-content: center;
+  }
+}
+
+/* ------------------------------------------------------------------ menu de categorias */
+
+.storefront[data-nav="pills"] .catStrip a {
+  background: transparent;
+  border: 1.5px solid var(--store-line);
+}
+
+.storefront[data-nav="pills"] .catStrip a:hover {
+  border-color: var(--store-brand-ink);
+  background: var(--store-brand-tint);
+}
+
+.storefront[data-nav="underline"] .catStrip {
+  gap: 1.25rem;
+}
+
+.storefront[data-nav="underline"] .catStrip a {
+  background: none;
+  border-radius: 0;
+  padding: 0.35rem 0.1rem;
+  border-bottom: 2px solid transparent;
+  letter-spacing: 0.02em;
+}
+
+.storefront[data-nav="underline"] .catStrip a:hover {
+  background: none;
+  color: var(--store-ink);
+  border-bottom-color: var(--store-brand-ink);
+}
+
+/* ------------------------------------------------------------------ cards de produto */
+
+.storefront[data-card="compact"] .productCard {
+  padding: 0.4rem;
+  gap: 0.2rem;
+}
+
+.storefront[data-card="compact"] .cardName {
+  font-size: 0.86rem;
+}
+
+/* Editorial: a foto é o card. Sem moldura, sem fundo, texto discreto embaixo. */
+.storefront[data-card="editorial"] .productCard {
+  padding: 0;
+  gap: 0.45rem;
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.storefront[data-card="editorial"] .productCard:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+.storefront[data-card="editorial"] .productCard:hover img {
+  opacity: 0.88;
+}
+
+.storefront[data-card="editorial"] .cardName {
+  font-weight: 500;
+  font-family: var(--brand-font-display, var(--brand-font));
+  font-size: 1rem;
+}
+
+.storefront[data-card="editorial"] .productCard .price {
+  font-weight: 500;
+  color: var(--store-ink-soft);
+}
+
+.storefront[data-card="framed"] .productCard {
+  border: 2px solid var(--store-ink);
+  padding: 0.75rem;
+}
+
+.storefront[data-card="framed"] .productCard:hover {
+  border-color: var(--store-brand-ink);
+}
+
+/* Preço em destaque: o card de varejo, de promoção, de esporte. */
+.storefront[data-card="bold"] .productCard {
+  border-top: 4px solid var(--brand-primary);
+}
+
+.storefront[data-card="bold"] .productCard .price {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--store-brand-ink);
+}
+
+.storefront[data-card="bold"] .cardName {
+  font-family: var(--brand-font-display, var(--brand-font));
+  text-transform: var(--brand-heading-transform, none);
+}
+
+.storefront[data-ratio="portrait"] .productCard img,
+.storefront[data-ratio="portrait"] .productCard .photo {
+  aspect-ratio: 4 / 5;
+}
+
+.storefront[data-ratio="landscape"] .productCard img,
+.storefront[data-ratio="landscape"] .productCard .photo {
+  aspect-ratio: 4 / 3;
+}
+
+.storefront[data-columns="dense"] .grid {
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+}
+
+.storefront[data-columns="large"] .grid {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+@media (min-width: 640px) {
+  .storefront[data-columns="dense"] .grid {
+    grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  }
+
+  .storefront[data-columns="large"] .grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+/* ------------------------------------------------------------------ página de produto */
+
+@media (min-width: 900px) {
+  .storefront[data-product="gallery_wide"] [data-split="product"] {
+    grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 0.7fr);
+  }
+}
+
+.storefront[data-price="emphasis"] .buyboxPrice .price {
+  color: var(--store-brand-ink);
+}
+
+.storefront[data-price="emphasis"] .priceLg {
+  font-size: clamp(2rem, 7vw, 2.7rem);
+  font-weight: 800;
+}
+
+.storefront[data-price="emphasis"] .productCard .price {
+  color: var(--store-brand-ink);
+}
+
+/* ------------------------------------------------------------------ carrinho e checkout */
+
+/* Neutro numa loja escura ou creme: o miolo da compra vira uma folha clara da mesma marca. As
+   `--nt-*` são calculadas por `storeStyle()` com o mesmo cuidado de contraste do tema, e só
+   existem quando este atributo vale `neutral`. Cabeçalho e rodapé continuam com a identidade. */
+.storefront[data-checkout="neutral"] main[data-flow="purchase"] {
+  --store-paper: var(--nt-paper);
+  --store-surface: var(--nt-surface);
+  --store-mist: var(--nt-mist);
+  --store-line: var(--nt-line);
+  --store-muted: var(--nt-muted);
+  --store-ink-soft: var(--nt-ink-soft);
+  --store-ink: var(--nt-ink);
+  --store-ink-rgb: var(--nt-ink-rgb);
+  --store-brand-ink: var(--nt-brand-ink);
+  --store-brand-rgb: var(--nt-brand-rgb);
+  --store-brand-tint: var(--nt-brand-tint);
+  --store-on-brand-tint: var(--nt-on-brand-tint);
+  --store-accent-ink: var(--nt-accent-ink);
+  --muted: var(--nt-muted);
+  --line: var(--nt-line);
+
+  margin-block: clamp(0.75rem, 3vw, 1.5rem);
+  border-radius: var(--store-radius-lg);
+  background: var(--store-paper);
+  color: var(--store-ink);
+  box-shadow: var(--store-shadow-lg);
+}
+
+/* ------------------------------------------------------------------ rodapé */
+
+.storefront[data-footer="brand_block"] .footer {
+  background: var(--brand-primary);
+  border-top: 0;
+  padding-block: 2.75rem;
+  color: var(--brand-on-primary);
+}
+
+.storefront[data-footer="brand_block"] .footer p,
+.storefront[data-footer="brand_block"] .footerNav a {
+  color: var(--brand-on-primary);
+}
+
+.storefront[data-footer="brand_block"] .footerBrand {
+  display: block;
+}
+
+.footerBrand {
+  display: none;
+  margin: 0 0 0.75rem;
+  font-family: var(--brand-font-display, var(--brand-font));
+  font-size: 1.4rem;
+  font-weight: 800;
+  text-transform: var(--brand-heading-transform, none);
+}

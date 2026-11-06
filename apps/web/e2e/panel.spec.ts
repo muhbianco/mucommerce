@@ -191,14 +191,14 @@ test("proposta de vitrine: pedir, ver a prévia, publicar e conferir na loja", a
   expect((await built.json()).status).toBe("ready");
 
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Prévia" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "4. A proposta" })).toBeVisible();
   // A prévia renderiza o componente de produção, pelo mesmo resolver da vitrine.
   await expect(page.getByText("Feito na hora, do jeito que você gosta")).toBeVisible();
 
   // Daqui em diante a loja modelo fica com esta página inicial, e não com a semeada. A suíte é
   // serial sobre um banco só de propósito (pedidos.spec depende do pedido de checkout.spec), e
   // o que vem depois foi conferido com esta página no ar.
-  await page.getByRole("button", { name: "Publicar esta página" }).click();
+  await page.getByRole("button", { name: "Publicar na loja" }).click();
   await expect(page.getByText("Proposta publicada")).toBeVisible();
 
   // E o que a lojista aprovou é o que o cliente vê.

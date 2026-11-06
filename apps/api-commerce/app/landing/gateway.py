@@ -21,7 +21,7 @@ o que ele responde": vazio, JSON quebrado, id inventado, lista comprida demais.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -39,6 +39,9 @@ COMPLETE_PATH = "/api/v1/internal/commerce/llm/complete"
 #: modelo, teto e cota por eles — mudar um aqui sem mudar lá é uma chamada recusada.
 FEATURE_DRAFT = "landing_draft"
 FEATURE_REFINE = "landing_refine"
+#: A leitura da marca, com imagens. Feature própria porque custa diferente (visão) e tem teto
+#: próprio do outro lado.
+FEATURE_BRAND = "brand_profile"
 
 
 class LlmUnavailableError(DomainError):
@@ -66,7 +69,7 @@ class LlmGateway(Protocol):
         self,
         *,
         feature: str,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         response_json_schema: dict[str, Any] | None = None,
         tenant_ref: str | None = None,
         external_ref: str | None = None,
@@ -97,7 +100,7 @@ class AgentsGateway:
         self,
         *,
         feature: str,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         response_json_schema: dict[str, Any] | None = None,
         tenant_ref: str | None = None,
         external_ref: str | None = None,
@@ -106,7 +109,7 @@ class AgentsGateway:
     ) -> LlmReply:
         if not self._token:
             raise LlmUnavailableError()
-        body: dict[str, Any] = {"feature": feature, "messages": list(messages)}
+        body: dict[str, Any] = {"feature": feature, "messages": [dict(m) for m in messages]}
         for key, value in (
             ("response_json_schema", response_json_schema),
             ("tenant_ref", tenant_ref),
@@ -207,7 +210,7 @@ class FakeGateway:
         self,
         *,
         feature: str,
-        messages: Sequence[dict[str, str]],
+        messages: Sequence[Mapping[str, Any]],
         response_json_schema: dict[str, Any] | None = None,
         tenant_ref: str | None = None,
         external_ref: str | None = None,
@@ -216,7 +219,7 @@ class FakeGateway:
     ) -> LlmReply:
         call = {
             "feature": feature,
-            "messages": list(messages),
+            "messages": [dict(m) for m in messages],
             "response_json_schema": response_json_schema,
             "tenant_ref": tenant_ref,
             "external_ref": external_ref,

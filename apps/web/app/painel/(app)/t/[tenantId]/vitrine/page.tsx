@@ -8,7 +8,9 @@ import type { Media, Page, ProductSummary } from "@/lib/panel/types";
 
 import { Block as StoreBlock } from "../../../../../(storefront)/_store/landing-blocks";
 import storeStyles from "../../../../../(storefront)/_store/store.module.css";
-import { themeVariables, type Branding } from "@/lib/theme";
+import { type Branding, type StoreDesign, storeAttributes, storeStyle } from "@/lib/theme";
+
+import { storeFonts } from "../../../../../(storefront)/_store/fonts";
 
 import styles from "../../../../panel.module.css";
 import { EmptyState, PageHeader, Section } from "../ui";
@@ -64,6 +66,7 @@ export default async function VitrinePage({
 
   const blocks = ((context.settings.landing?.blocks as Block[] | undefined) ?? []).filter(Boolean);
   const branding = (context.settings.branding ?? {}) as Branding;
+  const design = (context.settings.design ?? {}) as StoreDesign;
   const { ok, erro, tela } = await searchParams;
   const celular = tela === "celular";
   const nextStep = brief.all_steps.find((key) => !brief.steps.includes(key)) ?? brief.all_steps[0];
@@ -127,8 +130,9 @@ export default async function VitrinePage({
             {/* A prévia declara as variáveis da marca e redesenha os títulos: o painel tem os
                 próprios tamanhos de h1/h2, e sem isto a prévia sairia menor que a loja real. */}
             <div
-              className={`${storeStyles.storefront} ${local.canvasInner}`}
-              style={themeVariables(branding)}
+              className={`${storeStyles.storefront} ${storeFonts} ${local.canvasInner}`}
+              style={storeStyle(branding, design)}
+              {...storeAttributes(branding, design)}
             >
               {preview.map((block, i) => (
                 <StoreBlock

@@ -81,6 +81,9 @@ COVERED_TENANT_SCOPED_TABLES = {
     "landing_briefs",
     "landing_drafts",
     "landing_generation_usage",
+    # Motor de identidade (docs/16): o perfil da marca de uma loja não aparece na outra —
+    # `test_brand_identity.py::test_uma_loja_nao_ve_o_perfil_da_outra`.
+    "brand_profiles",
     # Frete v2: embalagem de outra loja dá 404 e não serve de regra de produto — exercitado em
     # `test_shipping_packages.py::test_embalagem_de_outra_loja_nao_existe_aqui`.
     "shipping_packages",

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel
+
 from app.tenancy.settings_schemas import LandingV1
 
 #: Chaves que o Pydantic põe para documentação e que não ensinam nada ao modelo.
@@ -56,8 +58,27 @@ def _clean(node: Any, *, names: bool = False) -> Any:
 
 
 def landing_generation_schema() -> dict[str, Any]:
-    """O esquema que viaja no pedido ao modelo."""
-    bruto = LandingV1.model_json_schema()
+    """O esquema dos blocos da página inicial, como viaja no pedido ao modelo."""
+    return generation_schema(LandingV1)
+
+
+def proposal_generation_schema() -> dict[str, Any]:
+    """O esquema da proposta completa (marca + desenho por área + blocos + explicação)."""
+    from app.landing.design_rules import ProposalV1
+
+    return generation_schema(ProposalV1)
+
+
+def brand_reply_schema() -> dict[str, Any]:
+    """O esquema da leitura da marca (análise por arquivo + perfil)."""
+    from app.landing.brand import BrandReply
+
+    return generation_schema(BrandReply)
+
+
+def generation_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """O JSON Schema de `model`, limpo do que só documenta e sem os ids que nós atribuímos."""
+    bruto = model.model_json_schema()
     limpo: dict[str, Any] = _clean(bruto)
     # `id` é nosso: quem atribui somos nós, e deixá-lo no esquema convida o modelo a inventar um.
     # Sai das propriedades e, por consequência, da lista de obrigatórios — as duas coisas juntas,

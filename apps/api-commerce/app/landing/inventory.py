@@ -15,12 +15,14 @@ vai recusar é gastar token para produzir erro.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import PUBLISHED_STATUSES, Category, Product
+from app.landing.brand import LOGO_KINDS, SCENE_KINDS, Material
 from app.media.models import MediaAsset, MediaOwner, MediaRole, MediaStatus
 from app.tenancy.context import TenantContext
 
@@ -49,9 +51,70 @@ SCENE_ROLES = frozenset(
 PAGE_MEDIA_OWNERS = (MediaOwner.LANDING, MediaOwner.TENANT_BRAND)
 
 
+def _usable(item: Mapping[str, Any]) -> bool:
+    """Uma imagem pode virar foto de destaque ou de galeria?
+
+    A leitura do perfil da marca (`kind`) vence o papel declarado: é ela que sabe que o arquivo
+    "logo.jpeg" da SGPipas, enviado sem papel como material da vitrine, é um emblema. Sem
+    leitura e sem papel, só a foto de produto passa — **material sem papel não vira mais hero**,
+    que foi o que pôs o emblema esticado no destaque duas vezes (docs/16 §A.2).
+    """
+    if item.get("owner") == str(MediaOwner.TENANT_BRAND):
+        return False
+    kind = item.get("kind")
+    if kind is not None:
+        return kind in SCENE_KINDS and kind not in LOGO_KINDS
+    role = item.get("role")
+    if role is not None:
+        return role in SCENE_ROLES
+    return item.get("owner") == str(MediaOwner.PRODUCT)
+
+
 def usable_media(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """As imagens que podem ir para um bloco visual, na ordem em que o inventário as trouxe."""
-    return [item for item in items if item.get("role") in SCENE_ROLES or item.get("role") is None]
+    return [item for item in items if _usable(item)]
+
+
+def with_analysis(
+    inventory: Mapping[str, Any],
+    *,
+    analysis: Mapping[str, Mapping[str, Any]],
+    materials: Iterable[Material],
+) -> dict[str, Any]:
+    """O inventário com a leitura do perfil da marca e as capas de produto. Puro.
+
+    A leitura entra como `kind` e `description` — é o que o compositor lê no lugar da imagem —
+    e decide o que pode virar foto de bloco. As capas de produto entram como imagens: eram o
+    material novo da SGPipas, e não chegavam à página (docs/16 §A.2).
+    """
+    saida = dict(inventory)
+    media: list[dict[str, Any]] = []
+    for item in inventory.get("media") or []:
+        novo = dict(item)
+        info = analysis.get(str(item.get("id"))) or {}
+        if info.get("kind"):
+            novo["kind"] = info["kind"]
+            if info.get("superseded_by") or info.get("relevance") == "irrelevant":
+                novo["kind"] = "other"
+        if not novo.get("alt") and info.get("description"):
+            novo["alt"] = info["description"]
+        media.append(novo)
+    ids = {str(m.get("id")) for m in media}
+    for material in materials:
+        if material.owner != str(MediaOwner.PRODUCT) or material.media_id in ids:
+            continue
+        info = analysis.get(material.media_id) or {}
+        media.append(
+            {
+                "id": material.media_id,
+                "role": material.role or str(MediaRole.PRODUCT_PHOTO),
+                "alt": info.get("description") or material.alt or material.product_name,
+                "owner": material.owner,
+                "kind": info.get("kind") or "product_photo",
+            }
+        )
+    saida["media"] = media
+    return saida
 
 
 async def collect_inventory(session: AsyncSession, tenant: TenantContext) -> dict[str, Any]:
@@ -73,9 +136,9 @@ async def collect_inventory(session: AsyncSession, tenant: TenantContext) -> dic
         {
             "id": row.id,
             "role": row.role,
-            # O `alt` é o que a lojista escreveu sobre a imagem. É a única descrição que temos
-            # dela sem olhar o pixel, e é justamente por isso que basta: `role` + `alt` entregam
-            # quase todo o valor de visão por custo nenhum.
+            # O que a lojista escreveu sobre a imagem. Sem isso, `with_analysis` põe a descrição
+            # que o perfil da marca leu nela; sem nenhum dos dois, o modelo trabalha às cegas —
+            # foi o caso da SGPipas.
             "alt": row.alt,
             "owner": row.owner_type,
         }

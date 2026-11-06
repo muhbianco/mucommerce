@@ -77,14 +77,7 @@ def parse_blocks(text: str) -> list[dict[str, Any]]:
     Aceita o objeto `{"blocks": [...]}`, a lista solta, e os dois embrulhados em cerca de
     markdown. Não aceita adivinhação: se não houver JSON, é falha de verdade.
     """
-    limpo = text.strip()
-    if limpo.startswith("```"):
-        # ```json\n{...}\n``` — tira a primeira linha e a última cerca.
-        limpo = limpo.split("\n", 1)[-1] if "\n" in limpo else ""
-        fim = limpo.rfind("```")
-        if fim >= 0:
-            limpo = limpo[:fim]
-        limpo = limpo.strip()
+    limpo = _unfence(text)
     if not limpo:
         raise UnparseableReplyError("resposta vazia")
 
@@ -102,6 +95,37 @@ def parse_blocks(text: str) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         raise UnparseableReplyError("o JSON não traz uma lista de blocos")
     return [item for item in data if isinstance(item, dict)]
+
+
+def parse_json_object(text: str) -> dict[str, Any]:
+    """O objeto JSON da resposta (proposta ou leitura da marca), com as mesmas tolerâncias de
+    `parse_blocks`. Lista solta de blocos vira `{"blocks": [...]}` — é o formato antigo."""
+    limpo = _unfence(text)
+    if not limpo:
+        raise UnparseableReplyError("resposta vazia")
+    try:
+        data = json.loads(limpo)
+    except ValueError:
+        data = _first_json_value(limpo)
+        if data is None:
+            raise UnparseableReplyError("a resposta não tem JSON") from None
+    if isinstance(data, list):
+        return {"blocks": [item for item in data if isinstance(item, dict)]}
+    if not isinstance(data, dict):
+        raise UnparseableReplyError("o JSON não é um objeto")
+    return data
+
+
+def _unfence(text: str) -> str:
+    """Tira a cerca de markdown: ```json\n{...}\n``` — a primeira linha e a última cerca."""
+    limpo = text.strip()
+    if limpo.startswith("```"):
+        limpo = limpo.split("\n", 1)[-1] if "\n" in limpo else ""
+        fim = limpo.rfind("```")
+        if fim >= 0:
+            limpo = limpo[:fim]
+        limpo = limpo.strip()
+    return limpo
 
 
 def _first_json_value(text: str) -> Any | None:
@@ -158,6 +182,9 @@ def repair_blocks(
         campo = SINGLE_MEDIA_FIELDS.get(tipo)
         if campo and limpo.get(campo) not in (None, "") and limpo[campo] not in conhecidos["media"]:
             limpo.pop(campo, None)
+            # "Texto sobre a foto" sem foto não existe: o arranjo vira o que não precisa dela.
+            if limpo.get("variant") == "image_background":
+                limpo["variant"] = "text_only"
             mexeu = True
 
         par = LIST_ID_FIELDS.get(tipo)

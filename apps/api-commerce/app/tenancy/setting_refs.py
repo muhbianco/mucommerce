@@ -37,11 +37,20 @@ def _references(key: str, value: dict[str, Any]) -> dict[str, set[str]]:
     return refs
 
 
-async def _existing_media(session: AsyncSession, ids: Collection[str], owner: str) -> set[str]:
+#: De que donos cada tipo de referência aceita imagem. A página inicial aceita, além do material
+#: da vitrine, as fotos de produto: são as melhores imagens que uma loja pequena tem, já são
+#: públicas na vitrine, e deixá-las de fora fez o material novo da SGPipas — nove fotos de
+#: produto — não chegar à página que ela pediu para remontar (docs/16 §A.2).
+LANDING_MEDIA_OWNERS = (MediaOwner.LANDING, MediaOwner.PRODUCT)
+
+
+async def _existing_media(
+    session: AsyncSession, ids: Collection[str], owners: Collection[str]
+) -> set[str]:
     stmt = (
         select(MediaAsset.id)
         .where(MediaAsset.id.in_(list(ids)))
-        .where(MediaAsset.owner_type == owner)
+        .where(MediaAsset.owner_type.in_([str(o) for o in owners]))
     )
     return set((await session.execute(stmt)).scalars())
 
@@ -49,12 +58,12 @@ async def _existing_media(session: AsyncSession, ids: Collection[str], owner: st
 async def check_setting_references(session: AsyncSession, key: str, value: dict[str, Any]) -> None:
     refs = _references(key, value)
     unknown: dict[str, list[str]] = {}
-    for field, ids, owner in (
-        ("media_ids", refs["brand_media"], MediaOwner.TENANT_BRAND),
-        ("media_ids", refs["landing_media"], MediaOwner.LANDING),
+    for field, ids, owners in (
+        ("media_ids", refs["brand_media"], (MediaOwner.TENANT_BRAND,)),
+        ("media_ids", refs["landing_media"], LANDING_MEDIA_OWNERS),
     ):
         if ids:
-            missing = ids - await _existing_media(session, ids, owner)
+            missing = ids - await _existing_media(session, ids, owners)
             if missing:
                 unknown.setdefault(field, []).extend(sorted(missing))
     if refs["products"]:

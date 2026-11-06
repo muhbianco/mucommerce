@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { getStorefrontContext } from "@/lib/server-context";
-import { type Branding, themeVariables } from "@/lib/theme";
+import { type Branding, type StoreDesign, storeAttributes, storeStyle } from "@/lib/theme";
 
 import { storeFonts } from "./_store/fonts";
 import styles from "./_store/store.module.css";
@@ -19,8 +19,15 @@ export default async function StorefrontLayout({ children }: { children: ReactNo
   const context = await getStorefrontContext();
   if (!context) return <>{children}</>;
   const branding = context.branding as Branding;
+  // `design` falta quando a API ainda é a anterior ao motor de identidade (meio de deploy): os
+  // padrões são o desenho de antes.
+  const design = (context.design ?? {}) as StoreDesign;
   return (
-    <div className={`${styles.storefront} ${storeFonts}`} style={themeVariables(branding)}>
+    <div
+      className={`${styles.storefront} ${storeFonts}`}
+      style={storeStyle(branding, design)}
+      {...storeAttributes(branding, design)}
+    >
       {children}
     </div>
   );

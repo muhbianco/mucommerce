@@ -87,13 +87,16 @@ export function Split({
   children,
   aside,
   stickyAside = true,
+  kind,
 }: {
   children: ReactNode;
   aside: ReactNode;
   stickyAside?: boolean;
+  /** Que página é: o desenho da página de produto (`gallery_wide`) mexe só na dela. */
+  kind?: "product";
 }) {
   return (
-    <div className={styles.split}>
+    <div className={styles.split} data-split={kind}>
       <div className={styles.splitMain}>{children}</div>
       <aside className={stickyAside ? `${styles.splitAside} ${styles.sticky}` : styles.splitAside}>{aside}</aside>
     </div>

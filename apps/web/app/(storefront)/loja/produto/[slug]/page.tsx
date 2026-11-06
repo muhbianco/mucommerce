@@ -155,6 +155,7 @@ export default async function ProductPage({
         ]}
       />
       <Split
+        kind="product"
         aside={
           /* A caixa de compra acompanha a rolagem no computador: preço e botão ficam à mão
              enquanto a pessoa lê a descrição. No celular ela é conteúdo normal. */

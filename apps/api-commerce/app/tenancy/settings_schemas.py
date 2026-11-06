@@ -16,6 +16,17 @@ from pydantic import ValidationError as PydanticValidationError
 
 from app.core.exceptions import ValidationError
 from app.landing.blocks import MAX_BLOCKS, LandingBlock
+from app.landing.design import (
+    BodyFont,
+    ButtonStyle,
+    Density,
+    DesignV1,
+    HeadingCase,
+    HeadingFont,
+    Radius,
+    Shadow,
+    Surface,
+)
 
 AccessMode = Literal["public", "login_required", "whitelist"]
 HexColor = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -43,29 +54,37 @@ class StorefrontV1(_Setting):
 
 class BrandingV1(_Setting):
     """A marca da loja. Campos novos entram opcionais e com padrão: o que está salvo continua
-    valendo, e nenhuma loja acorda com a vitrine diferente sem ter pedido."""
+    valendo, e nenhuma loja acorda com a vitrine diferente sem ter pedido.
+
+    Os enums moram em `app.landing.design`, de onde a proposta da IA também os lê."""
 
     primary_color: HexColor = "#111111"
     # Accent for links and highlights; None = the primary colour.
     secondary_color: HexColor | None = None
-    # Font family of the storefront (system stack, serif or rounded).
-    font: Literal["system", "serif", "rounded"] = "system"
+    # Font family of the storefront body text.
+    font: BodyFont = "system"
     logo_url: HttpsUrl | None = None
     # Uploaded logo (media owner `tenant_brand`); wins over `logo_url` once processed.
     logo_media_id: MediaId | None = None
     #: Quina dos cartões e botões. Enum e não número: raio de 40px num cartão é defeito, e uma
     #: lista de três não produz um.
-    radius: Literal["square", "soft", "round"] = "soft"
+    radius: Radius = "soft"
     #: Quanto ar entre as seções. Loja com muita foto pede folga; catálogo grande pede aperto.
-    density: Literal["cozy", "normal", "airy"] = "normal"
+    density: Density = "normal"
     #: Papel da vitrine. Três triplas auditadas em vez de um seletor de cor: escuro é o que mais
     #: se pede e o que mais quebra contraste quando alguém escolhe à mão.
-    surface: Literal["light", "warm", "dark"] = "light"
+    surface: Surface = "light"
     #: Fonte dos títulos. `inherit` usa a do corpo — que é o que quase toda loja quer.
-    heading_font: Literal["inherit", "serif", "rounded"] = "inherit"
+    heading_font: HeadingFont = "inherit"
     #: Altura do logotipo no cabeçalho. Marca horizontal precisa de mais que os 40px fixos de
     #: antes; marca quadrada, de menos.
     logo_height_px: Annotated[int, Field(ge=24, le=72)] = 40
+    #: Títulos em caixa alta. Marca de rua, de esporte, de promoção.
+    heading_case: HeadingCase = "normal"
+    #: Profundidade dos cartões. `soft` é a de sempre; `glow` é o halo na cor da marca.
+    shadow: Shadow = "soft"
+    #: Desenho do botão principal, em toda a loja — inclusive no carrinho e no checkout.
+    button_style: ButtonStyle = "solid"
 
 
 class SeoV1(_Setting):
@@ -416,11 +435,12 @@ class EmailV1(_Setting):
     from_name: Annotated[str, Field(max_length=80)] = ""
 
 
-SETTINGS_SCHEMAS: dict[str, tuple[int, type[_Setting]]] = {
+SETTINGS_SCHEMAS: dict[str, tuple[int, type[BaseModel]]] = {
     "storefront": (1, StorefrontV1),
     "branding": (1, BrandingV1),
     "seo": (1, SeoV1),
     "landing": (1, LandingV1),
+    "design": (1, DesignV1),
     "fulfillment": (2, FulfillmentV2),
     "checkout": (1, CheckoutV1),
     "payments": (1, PaymentsV1),
@@ -453,6 +473,11 @@ def validate_setting(key: str, value: dict[str, Any]) -> tuple[int, dict[str, An
 def email_settings(settings: Mapping[str, Any]) -> EmailV1:
     """De onde saem os e-mails da loja; loja que nunca configurou cai nos padrões."""
     return EmailV1.model_validate(settings.get("email") or {})
+
+
+def design_settings(settings: Mapping[str, Any]) -> DesignV1:
+    """O desenho por área; loja que nunca recebeu proposta cai nos padrões (o desenho de hoje)."""
+    return DesignV1.model_validate(settings.get("design") or {})
 
 
 def checkout_settings(settings: Mapping[str, Any]) -> CheckoutV1:

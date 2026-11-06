@@ -51,6 +51,8 @@ class DraftStatus(StrEnum):
     FAILED = "failed"
     APPLIED = "applied"
     DISCARDED = "discarded"
+    #: Foi publicada e depois desfeita: o que estava no ar antes dela voltou.
+    REVERTED = "reverted"
 
 
 class DraftSource(StrEnum):
@@ -93,6 +95,17 @@ class LandingDraft(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantS
     blocks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     #: Cores sugeridas junto, quando houve logotipo para extrair.
     branding_suggestion: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: A marca proposta (só as chaves que a IA pode mudar — `design.AI_BRANDING_KEYS`). Nulo em
+    #: proposta anterior ao motor de identidade, que só tinha blocos.
+    branding: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: O desenho por área proposto (`DesignV1`).
+    design: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: O que a lojista lê: explicação, decisões e a lista do que muda contra o que está no ar.
+    summary: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: O perfil da marca que a proposta usou.
+    profile_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    #: O que estava no ar quando foi publicada (`branding`, `design`, `landing`). É o restaurar.
+    previous_settings: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     model: Mapped[str | None] = mapped_column(String(64))
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -127,3 +140,36 @@ class LandingGenerationUsage(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, 
     #: "AAAA-MM", em UTC.
     period: Mapped[str] = mapped_column(String(7), nullable=False)
     used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class BrandProfile(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantScoped, Base):
+    """Como a marca se expressa, e o que cada arquivo da loja disse sobre isso.
+
+    Uma linha por loja: o perfil é o retrato de agora. O histórico que interessa mora em
+    `landing_drafts.profile_snapshot` — cada proposta guarda o perfil que usou.
+
+    É cache, não fonte da verdade: se um dia não validar mais, o gerador refaz a partir dos
+    arquivos. Por isso não há migração de dado para ele.
+    """
+
+    __tablename__ = "brand_profiles"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", name="uq_brand_profiles_tenant"),
+        ForeignKeyConstraint(["tenant_id"], ["tenants.id"], name="fk_brand_profiles_tenant"),
+    )
+
+    #: `BrandProfileV1`.
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    #: `{media_id: {checksum, kind, relevance, description, usable_on_page, accents, ...}}`.
+    materials: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    #: O brief que o perfil considerou. Mudou, o perfil é revisto.
+    brief_digest: Mapped[str | None] = mapped_column(String(64))
+    #: Sobe a cada revisão. A proposta guarda qual usou.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: `llm` (o modelo olhou as imagens) ou `deterministic` (Pillow + brief, sem modelo).
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="deterministic")
+    model: Mapped[str | None] = mapped_column(String(64))
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: O que a última revisão mudou e as contradições achadas, em frases curtas.
+    changes: Mapped[dict[str, Any] | None] = mapped_column(JSON)

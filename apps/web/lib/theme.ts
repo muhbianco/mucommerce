@@ -22,6 +22,10 @@ const FONTS = {
   // `--store-font-rounded` vem do `next/font` (app/(storefront)/_store/fonts.ts). O resto da
   // pilha é a rede de segurança para antes da fonte carregar.
   rounded: 'var(--store-font-rounded), ui-rounded, "SF Pro Rounded", system-ui, sans-serif',
+  // As três do motor de identidade (docs/16): também servidas pelo app (`fonts.ts`).
+  display: 'var(--store-font-display), "Arial Narrow", Impact, system-ui, sans-serif',
+  elegant: 'var(--store-font-elegant), Georgia, "Times New Roman", serif',
+  geometric: 'var(--store-font-geometric), "Segoe UI", system-ui, sans-serif',
 } as const;
 
 export type StoreFont = keyof typeof FONTS;
@@ -37,6 +41,8 @@ export function onColor(hex: string): "#000000" | "#ffffff" {
 export type StoreRadius = "square" | "soft" | "round";
 export type StoreDensity = "cozy" | "normal" | "airy";
 export type StoreSurface = "light" | "warm" | "dark";
+export type StoreShadow = "soft" | "none" | "strong" | "glow";
+export type StoreButton = "solid" | "pill" | "outline" | "block";
 
 export interface Branding {
   primary_color?: string;
@@ -46,7 +52,26 @@ export interface Branding {
   density?: StoreDensity;
   surface?: StoreSurface;
   heading_font?: "inherit" | StoreFont;
+  heading_case?: "normal" | "upper";
+  shadow?: StoreShadow;
+  button_style?: StoreButton;
   logo_height_px?: number;
+}
+
+/**
+ * O desenho por área (`DesignV1` na API). Cada valor é um desenho que o CSS da vitrine já tem;
+ * ausente = o padrão, que é o desenho de antes de o motor de identidade existir.
+ */
+export interface StoreDesign {
+  header?: { layout?: "classic" | "centered" | "brand_bar" | "minimal"; nav?: "strip" | "pills" | "underline" };
+  catalog?: {
+    card?: "standard" | "compact" | "editorial" | "framed" | "bold";
+    image_ratio?: "square" | "portrait" | "landscape";
+    columns?: "normal" | "dense" | "large";
+  };
+  product?: { layout?: "split" | "gallery_wide"; price?: "plain" | "emphasis" };
+  checkout?: { style?: "branded" | "neutral" };
+  footer?: { layout?: "simple" | "brand_block" };
 }
 
 /** Quina dos cartões e botões. Três valores, porque raio de 40px num cartão é defeito. */
@@ -215,12 +240,15 @@ export function themeVariables(branding: Branding): Record<string, string> {
     "--brand-radius-lg": radius[1],
     "--brand-space": DENSITY[branding.density ?? "normal"] ?? DENSITY.normal,
     "--brand-logo-height": `${Math.min(72, Math.max(24, branding.logo_height_px ?? 40))}px`,
+    "--brand-heading-transform": branding.heading_case === "upper" ? "uppercase" : "none",
     // Derivados: tudo que o sistema calculou.
     "--store-brand-hover": t.brandHover,
     "--store-brand-ink": t.brandInk,
     "--store-brand-tint": t.brandTint,
     "--store-on-brand-tint": t.onBrandTint,
     "--store-brand-rgb": t.brandRgb,
+    // A marca como preenchimento, para brilho e halo. Nunca pinta texto (ver o cabeçalho).
+    "--store-brand-fill-rgb": rgbTriplet(t.brand),
     "--store-accent-ink": t.accentInk,
     "--store-paper": t.paper,
     "--store-surface": t.surface,
@@ -239,5 +267,70 @@ export function themeVariables(branding: Branding): Record<string, string> {
     "--store-danger": t.danger,
     "--store-danger-tint": t.dangerTint,
     "--store-danger-ink": t.dangerInk,
+  };
+}
+
+/** As camadas que mudam quando o carrinho e o checkout são "neutros" numa loja de papel escuro
+ *  ou creme: as da versão clara da mesma marca, só para o miolo da compra. */
+const NEUTRAL_KEYS = [
+  "paper",
+  "surface",
+  "mist",
+  "line",
+  "muted",
+  "inkSoft",
+  "ink",
+  "brandInk",
+  "brandTint",
+  "onBrandTint",
+  "accentInk",
+] as const;
+
+function kebab(key: string): string {
+  return key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
+
+/** O checkout neutro só existe onde há o que neutralizar: na loja clara ele é o próprio tema. */
+function neutralPurchase(branding: Branding, design: StoreDesign): boolean {
+  return design.checkout?.style === "neutral" && (branding.surface ?? "light") !== "light";
+}
+
+/**
+ * As variáveis inline da casca da loja: o tema da marca e, quando a compra é neutra numa loja
+ * que não é clara, a paleta clara da mesma marca (`--nt-*`) para o miolo do carrinho e do
+ * checkout.
+ */
+export function storeStyle(branding: Branding, design: StoreDesign = {}): Record<string, string> {
+  const vars = themeVariables(branding);
+  if (neutralPurchase(branding, design)) {
+    const claro = storeTheme({ ...branding, surface: "light" });
+    for (const key of NEUTRAL_KEYS) vars[`--nt-${kebab(key)}`] = claro[key];
+    vars["--nt-ink-rgb"] = claro.inkRgb;
+    vars["--nt-brand-rgb"] = claro.brandRgb;
+  }
+  return vars;
+}
+
+/**
+ * Os atributos `data-*` que escolhem o desenho de cada área no CSS da vitrine.
+ *
+ * Só valores de lista fechada — nunca estilo. O padrão de cada um reproduz o desenho de antes,
+ * então loja sem `design` não muda um pixel.
+ */
+export function storeAttributes(branding: Branding, design: StoreDesign = {}): Record<string, string> {
+  return {
+    "data-surface": branding.surface ?? "light",
+    "data-heading-case": branding.heading_case ?? "normal",
+    "data-shadow": branding.shadow ?? "soft",
+    "data-button": branding.button_style ?? "solid",
+    "data-header": design.header?.layout ?? "classic",
+    "data-nav": design.header?.nav ?? "strip",
+    "data-card": design.catalog?.card ?? "standard",
+    "data-ratio": design.catalog?.image_ratio ?? "square",
+    "data-columns": design.catalog?.columns ?? "normal",
+    "data-product": design.product?.layout ?? "split",
+    "data-price": design.product?.price ?? "plain",
+    "data-checkout": neutralPurchase(branding, design) ? "neutral" : "branded",
+    "data-footer": design.footer?.layout ?? "simple",
   };
 }

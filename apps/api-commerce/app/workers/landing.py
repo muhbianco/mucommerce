@@ -9,6 +9,7 @@ custa dinheiro.
 from __future__ import annotations
 
 from app.core.logging import get_logger
+from app.core.storage import StorageUnavailableError, get_storage
 from app.landing.gateway import AgentsGateway
 from app.landing.generation import generate_draft
 from app.landing.sweeper import sweep_stuck_drafts
@@ -20,8 +21,15 @@ logger = get_logger(__name__)
 
 @celery_app.task(name="app.workers.landing.generate_landing_draft")
 def generate_landing_draft_task(tenant_id: str, draft_id: str) -> str:
+    try:
+        storage = get_storage()
+    except StorageUnavailableError:
+        # Sem storage, a proposta sai sem olhar as imagens (perfil do brief) — não deixa de sair.
+        storage = None
     return run_async(
-        generate_draft(with_session, AgentsGateway(), tenant_id=tenant_id, draft_id=draft_id)
+        generate_draft(
+            with_session, AgentsGateway(), tenant_id=tenant_id, draft_id=draft_id, storage=storage
+        )
     )
 
 
