@@ -13,7 +13,7 @@
     "e2e:typecheck": "tsc -p e2e/tsconfig.json --noEmit"
   },
   "dependencies": {
-    "next": "^15.5.0",
+    "next": "^15.5.28",
     "qrcode-generator": "1.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -26,7 +26,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "eslint": "^9.30.0",
-    "eslint-config-next": "^15.5.0",
+    "eslint-config-next": "^15.5.28",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },

@@ -174,7 +174,7 @@ class Material:
     #: Nome do produto, quando é foto de produto.
     product_name: str | None = None
     #: Chave da menor rendição pública (para ler os bytes fora da transação).
-    thumb_key: str | None = None
+    thumb_path: str | None = None
     #: A paleta já gravada na mídia, quando existe.
     stored_palette: Mapping[str, Any] | None = None
     #: Preenchidos depois de ler a miniatura (sem transação aberta).

@@ -45,7 +45,7 @@ MAX_PAGE_MATERIALS = 24
 THUMB_RENDITIONS = ("w320", "w600")
 
 
-def _thumb_key(media: MediaAsset) -> str | None:
+def _thumb_path(media: MediaAsset) -> str | None:
     renditions = media.renditions or {}
     for nome in THUMB_RENDITIONS:
         info = renditions.get(nome)
@@ -65,7 +65,7 @@ def _material(media: MediaAsset, product_name: str | None = None) -> Material:
         width=media.width,
         height=media.height,
         product_name=product_name,
-        thumb_key=_thumb_key(media),
+        thumb_path=_thumb_path(media),
         stored_palette=media.palette,
     )
 
@@ -136,7 +136,7 @@ async def load_thumbnails(
     data_urls: dict[str, str] = {}
     paletas: dict[str, dict[str, Any]] = {}
     for material in materials:
-        if material.thumb_key is None or storage is None:
+        if material.thumb_path is None or storage is None:
             saida.append(material)
             continue
         if material.priority >= 2 and material.media_id not in send:
@@ -144,7 +144,7 @@ async def load_thumbnails(
             continue
         try:
             dados = await storage.read(
-                settings.storage_public_bucket, material.thumb_key, max_bytes=MAX_THUMB_BYTES
+                settings.storage_public_bucket, material.thumb_path, max_bytes=MAX_THUMB_BYTES
             )
         except (ObjectMissingError, ObjectTooLargeError, S3Error, Urllib3HTTPError, OSError) as exc:
             logger.warning(
