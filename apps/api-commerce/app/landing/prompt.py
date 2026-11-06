@@ -123,7 +123,9 @@ Regras:
 - `usable_on_page` é verdadeiro só para foto nítida, bem enquadrada, sem texto embutido demais,
   que ficaria bem em destaque ou galeria. Logotipo e emblema: falso;
 - quando já existe um perfil, atualize só o que o material novo justifica e conte em `changes`
-  o que mudou e por quê; contradições entre materiais vão em `contradictions`.
+  o que mudou e por quê; contradições entre materiais vão em `contradictions`;
+- seja breve: `description` de cada arquivo em até 15 palavras, cada nota em até 20, `summary`
+  em até três frases. O que importa são os campos, não a prosa.
 
 Responda SOMENTE com o objeto JSON pedido, em português do Brasil."""
 

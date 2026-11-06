@@ -29,7 +29,7 @@ from app.core.scopes import Scope
 from app.landing.brand import parse_profile
 from app.landing.brief import STEP_KEYS, LandingBriefService, filled_steps
 from app.landing.drafts import LandingDraftService
-from app.landing.models import BrandProfile, DraftStatus, LandingDraft
+from app.landing.models import PUBLISHABLE_STATUSES, BrandProfile, DraftStatus, LandingDraft
 from app.landing.quota import LandingQuotaService
 from app.landing.resolver import resolve_landing
 from app.landing.schemas import BriefV1
@@ -167,18 +167,24 @@ class DraftOut(BaseModel):
     #: A saída precisou de conserto determinístico (id inventado, lista comprida demais).
     repaired: bool
     failure_reason: str | None
+    #: Quando a proposta foi montada.
     created_at: str
+    #: A última vez que esta versão entrou no ar.
     applied_at: str | None
-    #: A página, a marca ou o desenho foram editados depois de a proposta ser montada:
-    #: publicar substitui essa edição. A tela avisa antes.
+    #: Quando saiu do ar (outra foi publicada, ou ela foi desfeita). Nulo na que está no ar.
+    replaced_at: str | None = None
+    #: É a versão que está no ar agora. No máximo uma.
+    live: bool = False
+    #: Pode ser publicada (de novo): pronta, já esteve no ar, desfeita ou descartada.
+    publishable: bool = False
+    #: Proposta pronta: a loja foi editada depois de ela ser montada (publicar substitui a
+    #: edição). Versão no ar: a loja foi editada depois de ela entrar. A tela avisa.
     edited_since: bool = False
-    #: É a última publicada e guarda o que estava no ar antes: dá para restaurar.
+    #: É a que está no ar e guarda o que estava antes dela: dá para desfazer.
     revertible: bool = False
 
 
-def _draft_out(
-    draft: LandingDraft, *, edited_since: bool = False, revertible: bool = False
-) -> DraftOut:
+def _draft_out(draft: LandingDraft, *, edited_since: bool = False) -> DraftOut:
     return DraftOut(
         id=draft.id,
         status=str(draft.status),
@@ -193,8 +199,11 @@ def _draft_out(
         failure_reason=draft.failure_reason,
         created_at=draft.created_at.isoformat(),
         applied_at=draft.applied_at.isoformat() if draft.applied_at else None,
+        replaced_at=draft.replaced_at.isoformat() if draft.replaced_at else None,
+        live=draft.status == DraftStatus.APPLIED,
+        publishable=draft.status in PUBLISHABLE_STATUSES and bool(draft.blocks),
         edited_since=edited_since,
-        revertible=revertible,
+        revertible=draft.status == DraftStatus.APPLIED and draft.previous_settings is not None,
     )
 
 
@@ -225,17 +234,8 @@ async def list_drafts(
     cota = await LandingQuotaService(session, tenant).state()
     drafts = await service.list()
     para_tras = await service.edited_since(drafts)
-    publicadas = sorted(
-        (d for d in drafts if d.status == DraftStatus.APPLIED and d.applied_at is not None),
-        key=lambda d: d.applied_at or d.created_at,
-        reverse=True,
-    )
-    restauravel = publicadas[0].id if publicadas and publicadas[0].previous_settings else None
     return DraftListOut(
-        drafts=[
-            _draft_out(d, edited_since=d.id in para_tras, revertible=d.id == restauravel)
-            for d in drafts
-        ],
+        drafts=[_draft_out(d, edited_since=d.id in para_tras) for d in drafts],
         quota=QuotaOut(
             period=cota.period, used=cota.used, limit=cota.limit, left=cota.left, paid=cota.paid
         ),
@@ -284,7 +284,7 @@ async def refine_draft(
 @router.post(
     "/landing/drafts/{draft_id}/apply",
     response_model=dict[str, Any],
-    summary="Publica a proposta (mesma porta da edição à mão)",
+    summary="Publica uma versão: a proposta nova ou uma que já esteve no ar",
 )
 async def apply_draft(
     request: Request,
@@ -302,7 +302,7 @@ async def apply_draft(
 @router.post(
     "/landing/drafts/{draft_id}/revert",
     response_model=DraftOut,
-    summary="Volta ao ar o que estava antes da última proposta publicada",
+    summary="Tira do ar a versão publicada e devolve o que estava antes dela",
 )
 async def revert_draft(
     request: Request,

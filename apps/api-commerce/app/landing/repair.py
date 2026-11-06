@@ -218,6 +218,30 @@ def repair_blocks(
     return saida, mexeu
 
 
+def drop_unknown_refs(blocks: list[dict[str, Any]], unknown_ids: set[str]) -> list[dict[str, Any]]:
+    """Os blocos sem os ids que não existem mais — para publicar de novo uma versão antiga.
+
+    Uma versão de setembro pode citar um produto arquivado ou uma foto apagada depois. Tira só
+    esses ids; o bloco que perde o que o definia (galeria sem foto, destaque sem produto) sai, em
+    vez de ser preenchido com palpite. Mesma regra de `repair_blocks`, sem precisar de inventário.
+    """
+    saida: list[dict[str, Any]] = []
+    for bloco in blocks:
+        limpo = dict(bloco)
+        if limpo.get("media_id") in unknown_ids:
+            limpo.pop("media_id", None)
+            if limpo.get("variant") == "image_background":
+                limpo["variant"] = "text_only"
+        for campo in ("media_ids", "product_ids", "category_ids"):
+            if isinstance(limpo.get(campo), list):
+                limpo[campo] = [x for x in limpo[campo] if x not in unknown_ids]
+        obrigatorio = NEEDS_ITEMS.get(str(limpo.get("type")))
+        if obrigatorio and not limpo.get(obrigatorio):
+            continue
+        saida.append(limpo)
+    return saida
+
+
 def _fix_enums(node: Any) -> bool:
     """Troca valor de enum desconhecido pelo padrão, em qualquer profundidade. Devolve se mexeu."""
     mexeu = False

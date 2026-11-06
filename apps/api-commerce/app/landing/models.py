@@ -53,6 +53,19 @@ class DraftStatus(StrEnum):
     DISCARDED = "discarded"
     #: Foi publicada e depois desfeita: o que estava no ar antes dela voltou.
     REVERTED = "reverted"
+    #: Já esteve no ar e foi substituída por outra publicação. Pode ser publicada de novo.
+    SUPERSEDED = "superseded"
+
+
+#: Status de quem foi publicada alguma vez — o histórico de versões que a tela mostra.
+PUBLISHED_STATUSES = frozenset({DraftStatus.APPLIED, DraftStatus.SUPERSEDED, DraftStatus.REVERTED})
+#: Status de quem pode ser publicada (de novo). A que está no ar (`applied`) não: já está.
+PUBLISHABLE_STATUSES = frozenset(
+    {DraftStatus.READY, DraftStatus.SUPERSEDED, DraftStatus.REVERTED, DraftStatus.DISCARDED}
+)
+#: Quantas versões publicadas ficam guardadas além da poda comum: são o histórico que a lojista
+#: pode escolher de novo.
+KEEP_PUBLISHED = 5
 
 
 class DraftSource(StrEnum):
@@ -117,7 +130,10 @@ class LandingDraft(UUIDPrimaryKeyMixin, TimestampMixin, ActorStampMixin, TenantS
     failure_reason: Mapped[str | None] = mapped_column(String(300))
     #: Mês que esta proposta consumiu, para a devolução da cota achar a linha certa.
     quota_period: Mapped[str] = mapped_column(String(7), nullable=False)
+    #: A última vez que esta versão entrou no ar (publicar de novo atualiza).
     applied_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    #: Quando saiu do ar: outra versão foi publicada, ou esta foi desfeita. Nula na que está no ar.
+    replaced_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
 class LandingGenerationUsage(UUIDPrimaryKeyMixin, TimestampMixin, TenantScoped, Base):

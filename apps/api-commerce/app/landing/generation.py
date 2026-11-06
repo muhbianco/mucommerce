@@ -75,7 +75,15 @@ from app.landing.gateway import (
 )
 from app.landing.inventory import collect_inventory, with_analysis
 from app.landing.materials import collect_materials, load_thumbnails, save_palettes
-from app.landing.models import BrandProfile, DraftSource, DraftStatus, LandingBrief, LandingDraft
+from app.landing.models import (
+    KEEP_PUBLISHED,
+    PUBLISHED_STATUSES,
+    BrandProfile,
+    DraftSource,
+    DraftStatus,
+    LandingBrief,
+    LandingDraft,
+)
 from app.landing.prompt import build_brand_prompt, build_compose_prompt, build_refine_prompt
 from app.landing.quota import LandingQuotaService
 from app.landing.repair import UnparseableReplyError, parse_json_object, repair_blocks
@@ -94,8 +102,10 @@ logger = get_logger(__name__)
 TEMPERATURE = 0.7
 #: A leitura da marca descreve o que vê: quanto menos criatividade, melhor.
 BRAND_TEMPERATURE = 0.2
-#: Teto de saída da leitura da marca (perfil + uma análise curta por arquivo).
-BRAND_MAX_OUTPUT_TOKENS = 3000
+#: Teto de saída da leitura da marca (perfil + uma análise curta por arquivo). Era 3.000: a
+#: primeira leitura real (SGPipas, 06/11/2026, 8 arquivos) parou em `max_tokens` e caiu no perfil
+#: sem modelo. A api-agents tem o teto dela para `brand_profile`, e o menor vence.
+BRAND_MAX_OUTPUT_TOKENS = 8000
 #: As chaves de `tenant_settings` que uma proposta lê e publica.
 PROPOSAL_KEYS = ("branding", "design", "landing")
 
@@ -704,13 +714,10 @@ def _feedback(error: ValidationError) -> list[dict[str, str]]:
     return [{"field": "blocks", "message": str(error.message)}]
 
 
-#: Quantas propostas publicadas ficam guardadas além da poda comum: são o "restaurar".
-KEEP_APPLIED = 3
-
-
 async def _prune(session: AsyncSession, *, keep: int) -> None:
-    """Guarda as últimas `keep` propostas resolvidas da loja e apaga o resto — menos as últimas
-    publicadas, que carregam o que estava no ar antes delas.
+    """Guarda as últimas `keep` propostas resolvidas da loja e apaga o resto — menos a versão
+    no ar (nunca) e as últimas `KEEP_PUBLISHED` que já estiveram no ar: são o histórico que a
+    lojista pode publicar de novo.
 
     `queued` e `running` ficam de fora: apagar uma proposta que o worker está montando deixaria
     a cota sem quem a devolva.
@@ -727,6 +734,7 @@ async def _prune(session: AsyncSession, *, keep: int) -> None:
                             str(DraftStatus.APPLIED),
                             str(DraftStatus.DISCARDED),
                             str(DraftStatus.REVERTED),
+                            str(DraftStatus.SUPERSEDED),
                         ]
                     )
                 )
@@ -736,8 +744,9 @@ async def _prune(session: AsyncSession, *, keep: int) -> None:
         .scalars()
         .all()
     )
-    publicadas = [r.id for r in rows if r.status in {DraftStatus.APPLIED, DraftStatus.REVERTED}]
-    poupadas = set(publicadas[:KEEP_APPLIED])
+    publicadas = [r.id for r in rows if r.status in PUBLISHED_STATUSES]
+    poupadas = set(publicadas[:KEEP_PUBLISHED])
+    poupadas.update(r.id for r in rows if r.status == DraftStatus.APPLIED)
     for row in rows[keep:]:
         if row.id in poupadas:
             continue

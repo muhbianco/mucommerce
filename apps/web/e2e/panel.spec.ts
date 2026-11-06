@@ -199,7 +199,10 @@ test("proposta de vitrine: pedir, ver a prévia, publicar e conferir na loja", a
   // serial sobre um banco só de propósito (pedidos.spec depende do pedido de checkout.spec), e
   // o que vem depois foi conferido com esta página no ar.
   await page.getByRole("button", { name: "Publicar na loja" }).click();
-  await expect(page.getByText("Proposta publicada")).toBeVisible();
+  await expect(page.getByText("Publicada: esta versão está no ar agora")).toBeVisible();
+  // Versões: a publicada aparece sozinha em "No ar agora", com a data em que entrou.
+  await expect(page.getByRole("heading", { name: "No ar agora" })).toBeVisible();
+  await expect(page.getByText("No ar desde")).toBeVisible();
 
   // E o que a lojista aprovou é o que o cliente vê.
   await page.goto(`${STORE}/`);

@@ -10,13 +10,20 @@ imagina, um deles esquecido numa mudança. Há uma regra em `test_architecture.p
 uma proposta 48 minutos depois de editar a página à mão e perdeu a edição sem aviso e sem
 caminho de volta (docs/16 §A.1).
 
+**Uma versão no ar por vez.** Publicar põe a que estava no ar em `superseded` ("já esteve no
+ar", com `replaced_at`), e qualquer versão que já esteve no ar, foi desfeita ou descartada pode
+ser publicada de novo. Antes disto, "publicada" era uma marca que nunca saía, e a tela mostrava
+três versões "no ar" ao mesmo tempo.
+
 A ordem do pedido também é deliberada: **reserva a cota, depois enfileira.** Contar depois é como
 se descobre, no fim do mês, que o limite nunca segurou nada.
 """
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -28,13 +35,27 @@ from app.core.exceptions import ConflictError, DomainError, NotFoundError, Valid
 from app.landing.brief import parse_brief
 from app.landing.design import AI_BRANDING_KEYS, DesignV1
 from app.landing.design_rules import effective_branding
-from app.landing.models import BrandProfile, DraftSource, DraftStatus, LandingBrief, LandingDraft
+from app.landing.models import (
+    KEEP_PUBLISHED,
+    PUBLISHABLE_STATUSES,
+    BrandProfile,
+    DraftSource,
+    DraftStatus,
+    LandingBrief,
+    LandingDraft,
+)
 from app.landing.quota import LandingQuotaService
+from app.landing.repair import drop_unknown_refs
 from app.landing.schemas import BriefV1
 from app.models.base import utcnow
 from app.tenancy.context import TenantContext
 from app.tenancy.models import TenantSetting
 from app.tenancy.service import Actor, TenantService
+from app.tenancy.setting_refs import check_setting_references
+
+#: Folga entre publicar e "editado à mão depois": a publicação grava as settings e só então
+#: carimba `applied_at`, então a hora das settings fica alguns milissegundos antes.
+EDIT_TOLERANCE_SECONDS = 5
 
 #: As chaves que uma proposta publica (e que o restaurar devolve).
 PROPOSAL_KEYS = ("branding", "design", "landing")
@@ -62,7 +83,17 @@ class DraftNotReadyError(ConflictError):
 
 class NotRevertibleError(ConflictError):
     error_code = "landing_draft_not_revertible"
-    message = "Só dá para restaurar a última proposta publicada."
+    message = "Só dá para desfazer a versão que está no ar."
+
+
+class NotPublishableError(ConflictError):
+    error_code = "landing_draft_not_publishable"
+    message = "Esta versão não pode ser publicada."
+
+
+class NotDiscardableError(ConflictError):
+    error_code = "landing_draft_not_discardable"
+    message = "Só dá para descartar proposta que ainda não foi publicada."
 
 
 class BriefTooEmptyError(ValidationError):
@@ -83,7 +114,7 @@ class LandingDraftService:
         stmt = (
             select(LandingDraft)
             .order_by(LandingDraft.created_at.desc())
-            .limit(settings.landing_drafts_kept + MAX_IN_FLIGHT)
+            .limit(settings.landing_drafts_kept + MAX_IN_FLIGHT + KEEP_PUBLISHED)
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
@@ -169,58 +200,75 @@ class LandingDraftService:
     # ------------------------------------------------------------------ decidir
 
     async def apply(self, draft_id: str) -> dict[str, Any]:
-        """Publica a proposta: marca, desenho por área e página inicial, nesta ordem.
+        """Publica uma versão: marca, desenho por área e página inicial, nesta ordem.
+
+        Vale para a proposta nova (`ready`) e para publicar de novo uma versão que já esteve no
+        ar, foi desfeita ou foi descartada. A que estava no ar vira `superseded` ("já esteve no
+        ar") com `replaced_at`: uma versão no ar por vez.
 
         **Pela mesma porta da edição à mão**: `set_setting` valida, confere as referências
         contra as linhas desta loja e escreve a auditoria — uma linha por chave. O modelo nunca
         toca em `tenant_settings`. A marca é mesclada sobre a de agora, e só nas chaves que a IA
         pode mexer: um logotipo trocado depois da proposta continua o novo.
 
+        Versão antiga pode citar produto arquivado ou foto apagada depois: esses ids saem antes
+        de gravar (`drop_unknown_refs`), em vez de a publicação inteira ser recusada.
+
         Devolve o valor gravado da página inicial (o contrato antigo da rota).
         """
         draft = await self.get_or_404(draft_id)
-        if draft.status != DraftStatus.READY or not draft.blocks:
+        if draft.status in {DraftStatus.QUEUED, DraftStatus.RUNNING}:
             raise DraftNotReadyError()
+        if draft.status not in PUBLISHABLE_STATUSES or not draft.blocks:
+            raise NotPublishableError()
 
         service = TenantService(self.session)
         row = await service.get_or_404(self.tenant.id)
         atual = await service.repo.settings(self.tenant.id)
-        anterior = {key: atual.get(key) for key in PROPOSAL_KEYS}
+        no_ar = await self._live()
+        anterior: dict[str, Any] = {key: atual.get(key) for key in PROPOSAL_KEYS}
+        # Quem estava no ar: desfazer esta publicação a devolve ao ar, e a lista volta a dizer.
+        anterior["live_draft_id"] = no_ar[0].id if no_ar else None
+
+        blocos = list(draft.blocks)
+        if draft.status != DraftStatus.READY:
+            blocos = await self._without_stale_refs(blocos)
 
         if draft.branding:
             marca = effective_branding(dict(atual.get("branding") or {}), draft.branding)
             await service.set_setting(row, "branding", marca, self.actor)
         if draft.design:
             await service.set_setting(row, "design", dict(draft.design), self.actor)
-        saved = await service.set_setting(row, "landing", {"blocks": draft.blocks}, self.actor)
+        saved = await service.set_setting(
+            row, "landing", {"blocks": _fresh_ids(blocos)}, self.actor
+        )
 
+        agora = utcnow()
+        for outra in no_ar:
+            if outra.id != draft.id:
+                outra.status = DraftStatus.SUPERSEDED
+                outra.replaced_at = agora
+                outra.updated_by_actor = self.actor.id
         draft.previous_settings = anterior
         draft.status = DraftStatus.APPLIED
-        draft.applied_at = utcnow()
+        draft.applied_at = agora
+        draft.replaced_at = None
         draft.updated_by_actor = self.actor.id
         await self.session.flush()
         return saved
 
     async def revert(self, draft_id: str) -> LandingDraft:
-        """Devolve ao ar o que estava antes desta proposta.
+        """Tira do ar a versão publicada e devolve o que estava antes dela.
 
-        Só a última publicada: restaurar uma mais antiga apagaria o que veio depois dela sem a
-        lojista ver. A marca volta só nas chaves da IA (o logotipo atual fica); desenho e página
-        voltam inteiros. Chave que não existia antes volta ao padrão.
+        Só a que está no ar. A marca volta só nas chaves da IA (o logotipo atual fica); desenho
+        e página voltam inteiros; chave que não existia antes volta ao padrão. Se antes dela havia
+        outra versão no ar, essa volta a ser a "no ar" da lista.
         """
         draft = await self.get_or_404(draft_id)
         if draft.status != DraftStatus.APPLIED or draft.previous_settings is None:
             raise NotRevertibleError()
-        ultima = (
-            await self.session.execute(
-                select(LandingDraft.id)
-                .where(LandingDraft.status == str(DraftStatus.APPLIED))
-                .order_by(LandingDraft.applied_at.desc(), LandingDraft.created_at.desc())
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if ultima != draft.id:
-            raise NotRevertibleError()
+        if draft.id not in {d.id for d in await self._live()}:
+            raise NotRevertibleError()  # pragma: no cover - só com dado anterior à 0053
 
         service = TenantService(self.session)
         row = await service.get_or_404(self.tenant.id)
@@ -239,20 +287,34 @@ class LandingDraftService:
         if draft.design:
             desenho = antes.get("design") or DesignV1().model_dump(mode="json")
             await service.set_setting(row, "design", dict(desenho), self.actor)
-        await service.set_setting(
-            row, "landing", dict(antes.get("landing") or {"blocks": []}), self.actor
-        )
+        pagina = dict(antes.get("landing") or {"blocks": []})
+        pagina["blocks"] = _fresh_ids(list(pagina.get("blocks") or []))
+        await service.set_setting(row, "landing", pagina, self.actor)
 
+        agora = utcnow()
         draft.status = DraftStatus.REVERTED
+        draft.replaced_at = agora
         draft.updated_by_actor = self.actor.id
+        anterior_id = antes.get("live_draft_id")
+        if isinstance(anterior_id, str):
+            anterior = await self.session.get(LandingDraft, anterior_id)
+            if anterior is not None and anterior.status == DraftStatus.SUPERSEDED:
+                anterior.status = DraftStatus.APPLIED
+                anterior.applied_at = agora
+                anterior.replaced_at = None
+                anterior.updated_by_actor = self.actor.id
         await self.session.flush()
         return draft
 
     async def edited_since(self, drafts: Sequence[LandingDraft]) -> set[str]:
-        """Propostas prontas que ficaram para trás: o que ela publicaria foi editado à mão
-        depois de a proposta ser montada. A tela avisa antes de publicar por cima."""
-        prontas = [d for d in drafts if d.status == DraftStatus.READY]
-        if not prontas:
+        """Versões que a edição à mão deixou para trás.
+
+        - proposta pronta montada antes da última edição: publicar substitui a edição;
+        - a que está no ar, quando a loja foi editada depois de ela entrar: o que está no ar já
+          não é exatamente ela.
+        """
+        alvo = [d for d in drafts if d.status in {DraftStatus.READY, DraftStatus.APPLIED}]
+        if not alvo:
             return set()
         mudou = (
             (
@@ -266,7 +328,43 @@ class LandingDraftService:
         ultima = max(mudou, default=None)
         if ultima is None:
             return set()
-        return {d.id for d in prontas if d.created_at < ultima}
+        folga = timedelta(seconds=EDIT_TOLERANCE_SECONDS)
+        saida: set[str] = set()
+        for d in alvo:
+            if d.status == DraftStatus.READY:
+                para_tras = d.created_at < ultima
+            else:
+                para_tras = d.applied_at is not None and d.applied_at + folga < ultima
+            if para_tras:
+                saida.add(d.id)
+        return saida
+
+    async def _live(self) -> builtins.list[LandingDraft]:
+        """A versão no ar (no máximo uma; a lista cobre dado anterior à 0053)."""
+        return list(
+            (
+                await self.session.execute(
+                    select(LandingDraft)
+                    .where(LandingDraft.status == str(DraftStatus.APPLIED))
+                    .order_by(LandingDraft.applied_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    async def _without_stale_refs(
+        self, blocks: builtins.list[dict[str, Any]]
+    ) -> builtins.list[dict[str, Any]]:
+        """Os blocos sem os ids que não existem mais nesta loja."""
+        try:
+            await check_setting_references(self.session, "landing", {"blocks": blocks})
+        except ValidationError as exc:
+            sumiram: set[str] = set()
+            for campo in ("media_ids", "product_ids", "category_ids"):
+                sumiram.update(str(x) for x in (exc.details.get(campo) or []))
+            return drop_unknown_refs(blocks, sumiram)
+        return blocks
 
     async def reset_brand_reading(self) -> None:
         """Esquece a leitura de cada arquivo: a próxima proposta olha todo o material de novo.
@@ -283,11 +381,16 @@ class LandingDraftService:
         await self.session.flush()
 
     async def discard(self, draft_id: str) -> LandingDraft:
+        """Descarta uma proposta que ainda não foi publicada. Ela fica na lista e pode ser
+        publicada depois, se a lojista mudar de ideia."""
         draft = await self.get_or_404(draft_id)
         if draft.status in {DraftStatus.QUEUED, DraftStatus.RUNNING}:
             # Parar no meio deixaria a cota sem quem a devolva e o worker escrevendo numa linha
             # que a lojista acha que descartou.
             raise DraftAlreadyRunningError("Espere a montagem terminar para descartar.")
+        if draft.status != DraftStatus.READY:
+            # A que está no ar sai por "desfazer"; as que já estiveram no ar são histórico.
+            raise NotDiscardableError()
         draft.status = DraftStatus.DISCARDED
         draft.updated_by_actor = self.actor.id
         await self.session.flush()
@@ -298,3 +401,14 @@ class LandingDraftService:
     async def _brief(self) -> BriefV1:
         row = (await self.session.execute(select(LandingBrief))).scalar_one_or_none()
         return parse_brief(row.data) if row else BriefV1()
+
+
+def _fresh_ids(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Os blocos sem id: a escrita (`normalize_landing`) dá ids novos.
+
+    O normalizador recusa id que a página no ar não tem ("Bloco desconhecido") — é o que protege
+    o editor de formulário velho. Uma página restaurada ou uma versão publicada de novo traz os
+    ids de quando esteve no ar, que a página de agora não conhece: sem isto, desfazer uma
+    publicação dava 422.
+    """
+    return [{**b, "id": None} if isinstance(b, dict) else b for b in blocks]

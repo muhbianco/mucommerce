@@ -228,6 +228,11 @@ def plan_refresh(
         if force
         or m.media_id not in stored_materials
         or (m.checksum and stored_materials[m.media_id].get("checksum") != m.checksum)
+        # Lido sem modelo (a visão falhou ou não existia) não é lido: volta à fila. Sem isto, a
+        # primeira proposta real da SGPipas (06/11/2026, visão parou no teto de saída) teria
+        # deixado o arquivo "analisado" pelo Pillow para sempre, e nenhuma proposta seguinte o
+        # mandaria ao modelo.
+        or stored_materials[m.media_id].get("source") != "llm"
     ]
     removidos = sorted(set(stored_materials) - ids)
     mudou_brief = digest != stored_digest

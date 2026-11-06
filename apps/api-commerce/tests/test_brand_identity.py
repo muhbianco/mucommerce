@@ -151,7 +151,7 @@ class TestPlanoDeLeitura:
         assert plano.analyse == [_id(1), _id(2)], "logotipo antes da foto de produto"
 
     def test_nada_novo_nao_chama_a_visao(self) -> None:
-        guardado = {_id(1): {"checksum": "a"}}
+        guardado = {_id(1): {"checksum": "a", "source": "llm"}}
         plano = plan_refresh(
             stored_materials=guardado,
             materials=[_material(_id(1))],
@@ -162,7 +162,7 @@ class TestPlanoDeLeitura:
         assert plano.reuse
 
     def test_so_o_material_novo_vai_ao_modelo(self) -> None:
-        guardado = {_id(1): {"checksum": "a"}}
+        guardado = {_id(1): {"checksum": "a", "source": "llm"}}
         plano = plan_refresh(
             stored_materials=guardado,
             materials=[_material(_id(1)), _material(_id(2))],
@@ -174,7 +174,7 @@ class TestPlanoDeLeitura:
 
     def test_arquivo_trocado_no_mesmo_lugar_e_relido(self) -> None:
         plano = plan_refresh(
-            stored_materials={_id(1): {"checksum": "a"}},
+            stored_materials={_id(1): {"checksum": "a", "source": "llm"}},
             materials=[_material(_id(1), checksum="b")],
             digest="x",
             stored_digest="x",
@@ -184,7 +184,7 @@ class TestPlanoDeLeitura:
 
     def test_brief_novo_revisa_mesmo_sem_arquivo_novo(self) -> None:
         plano = plan_refresh(
-            stored_materials={_id(1): {"checksum": "a"}},
+            stored_materials={_id(1): {"checksum": "a", "source": "llm"}},
             materials=[_material(_id(1))],
             digest="novo",
             stored_digest="velho",
@@ -195,7 +195,7 @@ class TestPlanoDeLeitura:
     def test_apagado_sai_e_excesso_fica_para_a_proxima(self) -> None:
         novos = [_material(_id(n)) for n in range(2, 2 + MAX_VISION_IMAGES + 3)]
         plano = plan_refresh(
-            stored_materials={_id(1): {"checksum": "a"}},
+            stored_materials={_id(1): {"checksum": "a", "source": "llm"}},
             materials=novos,
             digest="x",
             stored_digest="x",
@@ -204,6 +204,23 @@ class TestPlanoDeLeitura:
         assert plano.removed == [_id(1)]
         assert len(plano.analyse) == MAX_VISION_IMAGES
         assert len(plano.pending) == 3
+
+    def test_lido_sem_modelo_volta_para_a_fila(self) -> None:
+        """A primeira proposta real da SGPipas (06/11/2026) teve a visão cortada no teto de saída
+        e caiu no Pillow. O arquivo não pode ficar "analisado" por isso: a próxima proposta o
+        manda ao modelo de novo."""
+        plano = plan_refresh(
+            stored_materials={
+                _id(1): {"checksum": "a", "source": "deterministic"},
+                _id(2): {"checksum": "b", "source": "llm"},
+            },
+            materials=[_material(_id(1)), _material(_id(2), checksum="b")],
+            digest="x",
+            stored_digest="x",
+            has_profile=True,
+        )
+        assert not plano.reuse
+        assert plano.analyse == [_id(1)], "só o que não foi lido pelo modelo"
 
 
 SGPIPAS_BRIEF = BriefV1(

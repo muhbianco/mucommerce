@@ -337,10 +337,24 @@ componentes de sempre.
 
 ## Estado
 
-Implementado no ramo `feat/motor-identidade-visual` (mucommerce) e
-`feat/brand-profile-feature` (api-agents), sem deploy. Fora deste ramo: crítica por
+No ar desde 06/11/2026 (commerce `eb5637e`, api-agents `d3a5813`). Fora: crítica por
 screenshot (§C.1), fontes enviadas pelo lojista, mega menu.
 
-Recomendação para a SGPipas depois do deploy: mandar o logotipo em PNG sem fundo (o atual é
-JPEG com fundo branco e fica numa caixa branca sobre a faixa da marca) e pedir uma proposta
-nova — a primeira já lê o material inteiro, porque o perfil ainda não existe.
+**A primeira proposta real** (SGPipas, 06/11/2026 14:18) mudou a loja inteira — cores, fontes,
+botões, cabeçalho, cards, rodapé —, mas **sem visão**: a leitura da marca parou no teto de
+3.000 tokens de saída (`stop_reason: max_tokens`, 502 na api-agents) e caiu no perfil sem
+modelo. Saiu em fundo claro com o petróleo e o verde do logotipo, em vez do azul-noite e do
+ciano do emblema. E o perfil sem modelo ficou gravado como "lido", então a próxima proposta não
+tentaria a visão de novo. Corrigido no ramo `feat/versoes-identidade`: teto de 8.000 nos dois
+lados, descrições curtas no pedido, e arquivo lido sem modelo volta para a fila.
+
+**Versões** (mesmo ramo): publicar deixava a anterior marcada como "publicada", e a tela
+mostrava três versões "no ar". Agora há uma só no ar; as anteriores ficam "já esteve no ar",
+com a hora em que saíram (`replaced_at`, migration `0053`, que também arruma o histórico);
+qualquer versão que já esteve no ar, foi desfeita ou descartada pode ser publicada de novo
+(produto ou foto que sumiu desde então sai da página); desfazer devolve a anterior ao ar. E
+desfazer não dava mais erro "Bloco desconhecido": a página que volta recebe ids de bloco novos.
+
+Recomendação para a SGPipas: mandar o logotipo em PNG sem fundo (o atual é JPEG com fundo
+branco e fica numa caixa branca sobre a faixa da marca) e, depois do deploy deste ramo, pedir
+uma proposta nova — ela lê as imagens.

@@ -396,3 +396,68 @@ def test_telefones_dos_pedidos_e_dos_clientes_entram_no_mapa(sqlite_url: str) ->
         (ana, "5511944443333", "whatsapp"),
     ]
     command.downgrade(config, "0047_product_home_exposure")
+
+
+def test_so_a_ultima_publicacao_fica_no_ar(sqlite_url: str) -> None:
+    """0053: por loja, a publicação mais recente continua `applied`; as anteriores viram
+    `superseded`, com `replaced_at` na hora em que a seguinte entrou. A SGPipas tinha três
+    versões "no ar" ao mesmo tempo (06/11/2026)."""
+    from datetime import datetime
+
+    from sqlalchemy import text
+
+    config = alembic_config(sqlite_url)
+    command.upgrade(config, "0052_brand_profiles")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    loja, outra = "01a00000-0000-7000-8000-0000000000c1", "01a00000-0000-7000-8000-0000000000c2"
+    horas = {
+        "setembro": datetime(2026, 9, 29, 20, 33),
+        "novembro": datetime(2026, 11, 5, 19, 45),
+        "hoje": datetime(2026, 11, 6, 17, 21),
+    }
+    with engine.begin() as conn:
+        _insert(conn, "tenants", id=loja, slug="sgpipas")
+        _insert(conn, "tenants", id=outra, slug="outra")
+        for n, hora in enumerate(horas.values()):
+            _insert(
+                conn,
+                "landing_drafts",
+                id=f"01a00000-0000-7000-8000-0000000000d{n}",
+                tenant_id=loja,
+                status="applied",
+                applied_at=hora,
+                quota_period="2026-11",
+            )
+        _insert(
+            conn,
+            "landing_drafts",
+            id="01a00000-0000-7000-8000-0000000000e0",
+            tenant_id=outra,
+            status="applied",
+            applied_at=horas["setembro"],
+            quota_period="2026-09",
+        )
+    engine.dispose()
+
+    def estado() -> dict[str, tuple[str, Any]]:
+        engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+        with engine.connect() as conn:
+            linhas = conn.execute(
+                text("SELECT id, status, replaced_at FROM landing_drafts ORDER BY id")
+            ).all()
+        engine.dispose()
+        return {str(i)[-2:]: (str(s), r) for i, s, r in linhas}
+
+    command.upgrade(config, "0053_landing_draft_versions")
+    depois = estado()
+    assert depois["d2"][0] == "applied" and depois["d2"][1] is None, "a de hoje fica no ar"
+    assert depois["d1"][0] == "superseded" and str(depois["d1"][1]).startswith("2026-11-06 17:21")
+    assert depois["d0"][0] == "superseded" and str(depois["d0"][1]).startswith("2026-11-05 19:45")
+    assert depois["e0"] == ("applied", None), "outra loja, uma publicação só: nada muda"
+
+    command.downgrade(config, "0052_brand_profiles")
+    engine = create_engine(sqlite_url.replace("+aiosqlite", ""))
+    with engine.connect() as conn:
+        status = conn.execute(text("SELECT DISTINCT status FROM landing_drafts")).scalars().all()
+    engine.dispose()
+    assert status == ["applied"], "o downgrade devolve `superseded` a `applied`"
