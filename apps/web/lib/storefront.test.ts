@@ -9,10 +9,12 @@ import {
   isIndexable,
   jsonLd,
   offSale,
+  plainDescription,
   type ProductDetail,
   productOffers,
   SCHEMA_AVAILABILITY,
   srcSet,
+  storeJsonLd,
   type StoreVariant,
   withDefaults,
 } from "./storefront";
@@ -152,5 +154,95 @@ describe("events", () => {
       offers: [{ price: "50.00", availability: "https://schema.org/PreSale", validFrom: "2026-11-01T00:00:00Z" }],
     });
     expect(JSON.stringify(data)).toContain('"url":"https://loja/eventos/show"');
+  });
+});
+
+describe("storeJsonLd", () => {
+  const hours = {
+    type: "hours",
+    address: "Jardim Santo Antonio",
+    city: "Osasco",
+    state: "SP",
+    days: [
+      { weekday: 0, opens: "08:00", closes: "12:00" },
+      { weekday: 6, opens: "08:00", closes: "17:00" },
+      { weekday: 9, opens: "08:00", closes: "17:00" }, // dia que não existe: some
+    ],
+  };
+  const contact = {
+    type: "contact",
+    whatsapp_e164: "+5511967201770",
+    instagram: "sgpipas.original",
+    email: "loja@x.test",
+  };
+  const graphOf = (value: Record<string, unknown>) => value["@graph"] as Record<string, unknown>[];
+
+  it("names the site after the store and links it to the seller", () => {
+    const graph = graphOf(storeJsonLd(context({ tenant: { ...context().tenant, name: "SG Pipas" } }), []));
+    expect(graph[0]).toMatchObject({
+      "@type": "WebSite",
+      "@id": "https://loja.test/#site",
+      name: "SG Pipas",
+      url: "https://loja.test/",
+      publisher: { "@id": "https://loja.test/#loja" },
+    });
+    // Sem endereço na página, a loja é só online.
+    expect(graph[1]).toMatchObject({ "@type": "Organization", "@id": "https://loja.test/#loja", name: "SG Pipas" });
+    expect(graph[1]).not.toHaveProperty("address");
+  });
+
+  it("becomes a Store with what the page already shows: city, hours, phone, Instagram", () => {
+    const ctx = context({
+      branding: { logo: { url: "https://cdn.test/logo.webp" } },
+      seo: { indexable: true, description: "Fábrica de pipas", og_image_url: "https://cdn.test/og.webp" },
+    });
+    const store = graphOf(storeJsonLd(ctx, [hours, contact]))[1]!;
+    expect(store).toMatchObject({
+      "@type": "Store",
+      logo: "https://cdn.test/logo.webp",
+      image: "https://cdn.test/og.webp",
+      description: "Fábrica de pipas",
+      telephone: "+5511967201770",
+      email: "loja@x.test",
+      sameAs: ["https://www.instagram.com/sgpipas.original/"],
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: "Jardim Santo Antonio",
+        addressLocality: "Osasco",
+        addressRegion: "SP",
+        addressCountry: "BR",
+      },
+    });
+    expect(store.openingHoursSpecification).toEqual([
+      { "@type": "OpeningHoursSpecification", dayOfWeek: "https://schema.org/Monday", opens: "08:00", closes: "12:00" },
+      { "@type": "OpeningHoursSpecification", dayOfWeek: "https://schema.org/Sunday", opens: "08:00", closes: "17:00" },
+    ]);
+  });
+
+  it("uses the primary host, never the one the visit came through", () => {
+    const ctx = context({ host: "sgpipas.loja.muhbianco.com.br", primary_host: "sgpipas.com.br" });
+    expect(graphOf(storeJsonLd(ctx, []))[0]?.url).toBe("https://sgpipas.com.br/");
+  });
+
+  it("cannot close the script tag it is embedded in", () => {
+    const ctx = context({ tenant: { ...context().tenant, name: "</script><b>" } });
+    expect(jsonLd(storeJsonLd(ctx, []))).not.toContain("</script>");
+  });
+});
+
+describe("plainDescription", () => {
+  it("drops markup and joins lines", () => {
+    expect(plainDescription("# Pipa Vanda\r\n\r\n- 25 pipas\n- **50 cm**\n[Veja](https://x.test) ![foto](a.png)")).toBe(
+      "Pipa Vanda 25 pipas 50 cm Veja",
+    );
+  });
+  it("cuts at a word and marks the cut", () => {
+    const cut = plainDescription("rabiola ".repeat(40), 50) ?? "";
+    expect(cut).toBe("rabiola rabiola rabiola rabiola rabiola rabiola…");
+    expect(cut.length).toBeLessThanOrEqual(51);
+  });
+  it("is null when there is nothing to say", () => {
+    expect(plainDescription(null)).toBeNull();
+    expect(plainDescription("  **  ")).toBeNull();
   });
 });

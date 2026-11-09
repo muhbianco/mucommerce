@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.tenancy.models import TenantStatus
+from app.tenancy.context import CROSS_TENANT_OPTION
+from app.tenancy.models import (
+    DomainKind,
+    DomainPurpose,
+    DomainRole,
+    DomainStatus,
+    TenantDomain,
+    TenantStatus,
+)
 from tests.conftest import create_tenant
 
 
@@ -18,6 +27,48 @@ async def test_platform_subdomain_resolves_tenant(
     assert body["primary_host"] == "lunares.loja.test"
     assert body["access_mode"] == "whitelist"
     assert "payments.mercadopago" not in body["features"]
+
+
+async def test_primary_host_is_announced_only_while_it_serves(
+    client: AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Domínio próprio primário que ainda não aponta para a plataforma (a dream-store em
+    09/11/2026: TXT ok, A/CNAME não) levava o canonical e o sitemap para um endereço fora do ar."""
+    tenant = await create_tenant(session_factory, "fumaca")
+    async with session_factory() as session:
+        await session.execute(
+            update(TenantDomain)
+            .where(TenantDomain.tenant_id == tenant.id)
+            .values(role=DomainRole.ALIAS)
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+        session.add(
+            TenantDomain(
+                tenant_id=tenant.id,
+                hostname="fumaca.com.br",
+                kind=DomainKind.CUSTOM_APEX,
+                purpose=DomainPurpose.STOREFRONT,
+                role=DomainRole.PRIMARY,
+                status=DomainStatus.VERIFIED,
+            )
+        )
+        await session.commit()
+
+    pending = await client.get("/api/v1/storefront/context", headers={"host": "fumaca.loja.test"})
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["primary_host"] is None  # a vitrine fica no host da visita
+
+    async with session_factory() as session:
+        await session.execute(
+            update(TenantDomain)
+            .where(TenantDomain.hostname == "fumaca.com.br")
+            .values(status=DomainStatus.ACTIVE)
+            .execution_options(**{CROSS_TENANT_OPTION: True})
+        )
+        await session.commit()
+    serving = await client.get("/api/v1/storefront/context", headers={"host": "fumaca.com.br"})
+    assert serving.status_code == 200, serving.text
+    assert serving.json()["primary_host"] == "fumaca.com.br"
 
 
 async def test_unknown_host_is_404_without_leaking(client: AsyncClient) -> None:

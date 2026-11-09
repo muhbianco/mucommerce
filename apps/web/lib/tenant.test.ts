@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalRedirect,
   classifyHost,
   isPanelPath,
   isPublicStorefrontPath,
@@ -140,5 +141,47 @@ describe("rota de dados da vitrine", () => {
     expect(requiresSession("/carrinho", "whitelist")).toBe(true);
     expect(requiresSession("/api/loja", "whitelist"), "sem a barra não é a rota de dados").toBe(true);
     expect(requiresSession("/api/outra-coisa", "whitelist")).toBe(true);
+  });
+});
+
+describe("canonicalRedirect", () => {
+  const primary = "sgpipas.com.br";
+  const alias = "sgpipas.loja.muhbianco.com.br";
+  it("sends store pages on a secondary host to the primary one, keeping path and query", () => {
+    expect(canonicalRedirect("GET", alias, primary, "/", "")).toBe("https://sgpipas.com.br/");
+    expect(canonicalRedirect("GET", alias, primary, "/loja/produto/vanda", "?variante=1")).toBe(
+      "https://sgpipas.com.br/loja/produto/vanda?variante=1",
+    );
+    expect(canonicalRedirect("HEAD", alias, primary, "/eventos", "")).toBe("https://sgpipas.com.br/eventos");
+    expect(canonicalRedirect("GET", alias, primary, "/politicas/termos", "")).toBe(
+      "https://sgpipas.com.br/politicas/termos",
+    );
+  });
+  it("stays put on the primary host or without one (domain not serving yet)", () => {
+    expect(canonicalRedirect("GET", primary, primary, "/loja", "")).toBeNull();
+    expect(canonicalRedirect("GET", primary, "SGPipas.com.br", "/loja", "")).toBeNull();
+    expect(canonicalRedirect("GET", alias, null, "/loja", "")).toBeNull();
+    expect(canonicalRedirect("GET", null, primary, "/loja", "")).toBeNull();
+  });
+  it("never moves writes, sessions or payments: cookies are bound to the host", () => {
+    expect(canonicalRedirect("POST", alias, primary, "/loja/produto/vanda", "")).toBeNull();
+    for (const path of [
+      "/carrinho",
+      "/checkout",
+      "/conta/pedidos/1/retorno/2",
+      "/entrar",
+      "/auth/complete",
+      "/api/loja/busca",
+      "/lojinha",
+    ]) {
+      expect(canonicalRedirect("GET", alias, primary, path, "")).toBeNull();
+    }
+  });
+});
+
+describe("store icon path", () => {
+  it("opens without login, even on a fully closed store", () => {
+    expect(isPublicStorefrontPath("/icone.png")).toBe(true);
+    expect(needsEntry("/icone.png", { access_mode: "whitelist", landing_locked: true })).toBe(false);
   });
 });

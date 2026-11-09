@@ -12,7 +12,7 @@ from app.media.service import pick_rendition, ready_media_by_ids
 from app.payments.public_view import load_public_payments
 from app.schemas.internal import StorefrontContext, StorefrontTenant
 from app.tenancy.context import TenantContext
-from app.tenancy.models import DomainPurpose
+from app.tenancy.models import DomainPurpose, DomainStatus
 from app.tenancy.repository import TenantRepository
 from app.tenancy.settings_schemas import checkout_settings, design_settings
 
@@ -42,6 +42,12 @@ async def build_storefront_context(
     session: AsyncSession, tenant: TenantContext, *, internal: bool
 ) -> StorefrontContext:
     primary = await TenantRepository(session).primary_domain(tenant.id, DomainPurpose.STOREFRONT)
+    # O principal só vale enquanto atende: domínio próprio que ainda não aponta para a
+    # plataforma (ou deixou de apontar) levaria canonical, sitemap e o 301 da vitrine para um
+    # endereço fora do ar. Sem ele, a vitrine usa o host por onde a visita chegou.
+    primary_host = (
+        primary.hostname if primary is not None and primary.status == DomainStatus.ACTIVE else None
+    )
     storefront = tenant.settings.get("storefront", {})
     branding, seo = await _branding_and_seo(session, tenant)
     features = (
@@ -60,7 +66,7 @@ async def build_storefront_context(
             currency=tenant.currency,
         ),
         host=tenant.host,
-        primary_host=primary.hostname if primary else None,
+        primary_host=primary_host,
         access_mode=str(storefront.get("access_mode", "whitelist")),
         landing_locked=storefront.get("access_mode", "whitelist") != "public"
         and bool(storefront.get("landing_locked")),

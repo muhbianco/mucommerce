@@ -149,6 +149,107 @@ export function jsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+const SCHEMA_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/**
+ * JSON-LD da página inicial: o site (`WebSite`) e quem vende (`Store`, ou `Organization` para
+ * loja só online), num `@graph`.
+ *
+ * O `WebSite` dá ao Google o nome da loja para o resultado — sem ele, a SG Pipas aparecia como
+ * "muhbianco.com.br". A loja vira `Store` quando a página tem endereço (bloco de horário ou de
+ * contato) e leva o que o lojista já publicou ali: cidade, horário, WhatsApp, Instagram. Nada
+ * sai de outro lugar: o endereço de coleta do frete, por exemplo, é privado e fica de fora.
+ */
+export function storeJsonLd(
+  context: StorefrontContext,
+  blocks: LandingBlock[],
+): Record<string, unknown> {
+  const origin = storeOrigin(context);
+  const hours = blocks.find((block) => block.type === "hours");
+  const contact = blocks.find((block) => block.type === "contact");
+  const branding = context.branding as { logo?: { url?: string } | null };
+  const seo = context.seo as { description?: string | null; og_image_url?: string | null };
+  const logo = text(branding.logo?.url);
+  const image = text(seo.og_image_url) ?? logo;
+
+  const street = text(hours?.address) ?? text(contact?.address);
+  const city = text(hours?.city);
+  const state = text(hours?.state);
+  const local = Boolean(street || city);
+  const days = (hours?.days as { weekday: number; opens: string; closes: string }[] | undefined) ?? [];
+  const instagram = text(contact?.instagram);
+
+  const store: Record<string, unknown> = {
+    "@type": local ? "Store" : "Organization",
+    "@id": `${origin}/#loja`,
+    name: context.tenant.name,
+    url: `${origin}/`,
+    ...(logo ? { logo } : {}),
+    ...(image ? { image } : {}),
+    ...(text(seo.description) ? { description: text(seo.description) } : {}),
+    ...(text(contact?.whatsapp_e164) ? { telephone: text(contact?.whatsapp_e164) } : {}),
+    ...(text(contact?.email) ? { email: text(contact?.email) } : {}),
+    ...(instagram ? { sameAs: [`https://www.instagram.com/${instagram}/`] } : {}),
+  };
+  if (local) {
+    store.address = {
+      "@type": "PostalAddress",
+      ...(street ? { streetAddress: street } : {}),
+      ...(city ? { addressLocality: city } : {}),
+      ...(state ? { addressRegion: state } : {}),
+      addressCountry: "BR",
+    };
+    const opening = days
+      .filter((day) => SCHEMA_DAYS[day.weekday])
+      .map((day) => ({
+        "@type": "OpeningHoursSpecification",
+        dayOfWeek: `https://schema.org/${SCHEMA_DAYS[day.weekday]}`,
+        opens: day.opens,
+        closes: day.closes,
+      }));
+    if (opening.length) store.openingHoursSpecification = opening;
+  }
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${origin}/#site`,
+        name: context.tenant.name,
+        url: `${origin}/`,
+        inLanguage: "pt-BR",
+        publisher: { "@id": `${origin}/#loja` },
+      },
+      store,
+    ],
+  };
+}
+
+/**
+ * Texto corrido de uma descrição em Markdown, para o JSON-LD do produto que não tem descrição
+ * curta: sem marcação, espaços juntados, cortado numa palavra.
+ */
+export function plainDescription(markdown: string | null, limit = 500): string | null {
+  if (!markdown) return null;
+  const plain = markdown
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/[*_`>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!plain) return null;
+  if (plain.length <= limit) return plain;
+  const cut = plain.slice(0, limit);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > limit * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
 export const AVAILABILITY_LABEL: Record<Availability, string> = {
   available: "Disponível",
   sold_out: "Esgotado",

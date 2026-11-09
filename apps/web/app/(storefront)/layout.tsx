@@ -1,10 +1,27 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { getStorefrontContext } from "@/lib/server-context";
-import { type Branding, type StoreDesign, storeAttributes, storeStyle } from "@/lib/theme";
+import { ICON_SIZE, iconVersion } from "@/lib/store-icon";
+import { type Branding, type StoreDesign, storeAttributes, storeStyle, storeTheme } from "@/lib/theme";
 
 import { storeFonts } from "./_store/fonts";
 import styles from "./_store/store.module.css";
+
+/**
+ * O ícone da loja vale para toda página dela. Sem ele a aba e o resultado do Google mostravam o
+ * globo genérico (`/favicon.ico` dava 404 em toda vitrine).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const context = await getStorefrontContext();
+  if (!context) return {};
+  const theme = storeTheme(context.branding as Branding);
+  const url = `/icone.png?v=${iconVersion(context.tenant.name, theme.brand, theme.onBrand)}`;
+  const size = `${ICON_SIZE}x${ICON_SIZE}`;
+  return {
+    icons: { icon: [{ url, type: "image/png", sizes: size }], apple: [{ url, sizes: size }] },
+  };
+}
 
 /**
  * Casca de toda página da loja: é aqui que a marca do lojista vira CSS.

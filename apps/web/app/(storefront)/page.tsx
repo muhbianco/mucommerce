@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { getStorefrontContext } from "@/lib/server-context";
 import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
-import { isIndexable, jsonLd, type LandingBlock, storeOrigin } from "@/lib/storefront";
+import { isIndexable, jsonLd, type LandingBlock, storeJsonLd, storeOrigin } from "@/lib/storefront";
 
 import { Block, faqJsonLd } from "./_store/landing-blocks";
 import { StoreShell } from "./_store/store-shell";
@@ -43,20 +43,12 @@ export default async function Home() {
   if (landing.kind !== "ok" && landing.kind !== "not_found") requireCatalog(landing, "/");
   const blocks = landing.kind === "ok" ? landing.data : [];
   const catalogOn = Boolean(context.features.catalog);
-  const branding = context.branding as { logo?: { url: string } | null };
   // Perguntas frequentes rendem em busca: viram `FAQPage` quando a página tem o bloco.
   const perguntas = faqJsonLd(blocks);
-  const organization = {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    name: context.tenant.name,
-    url: `${storeOrigin(context)}/`,
-    ...(branding.logo?.url ? { logo: branding.logo.url } : {}),
-  };
 
   return (
     <StoreShell context={context}>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(organization) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(storeJsonLd(context, blocks)) }} />
       {blocks.length === 0 ? (
         <section className={styles.hero}>
           <div>

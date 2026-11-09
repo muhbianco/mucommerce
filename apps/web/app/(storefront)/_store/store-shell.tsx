@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { CART_COUNT_COOKIE, cartCountLabel, parseCartCount } from "@/lib/cart-count";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/customer-cookies";
 import { storefrontApi } from "@/lib/storefront-api";
-import type { CategoryRef } from "@/lib/storefront";
+import type { CategoryRef, EventPage } from "@/lib/storefront";
 import type { StorefrontContext } from "@/lib/tenant";
 
 import { SearchBox } from "./search-box";
@@ -57,9 +57,19 @@ export async function StoreShell({
   const logoHeight = Math.min(72, Math.max(24, branding.logo_height_px ?? 40));
   const catalogOn = Boolean(context.features.catalog);
 
-  const categories = catalogOn ? await storefrontApi<CategoryRef[]>(context, "/catalog/categories") : null;
+  // Em paralelo: a faixa espera as duas, e a de eventos é a mesma rota pública e cacheada.
+  const [categories, events] = await Promise.all([
+    catalogOn ? storefrontApi<CategoryRef[]>(context, "/catalog/categories") : null,
+    catalogOn && context.features.events
+      ? storefrontApi<EventPage>(context, "/catalog/events", { limit: "1" })
+      : null,
+  ]);
   const roots =
     categories?.kind === "ok" ? categories.data.filter((c) => !c.parent_id).slice(0, STRIP_LIMIT) : [];
+  // "Eventos" sem evento nenhum era um link para uma página vazia em todo o site — e era ela
+  // que o Google mostrava na busca pelo nome da SG Pipas. Sem resposta clara (loja fechada,
+  // por exemplo), o link fica: a página manda para a porta.
+  const showEvents = events !== null && (events.kind !== "ok" || events.data.items.length > 0);
 
   return (
     <>
@@ -119,7 +129,7 @@ export async function StoreShell({
               {category.name}
             </Link>
           ))}
-          {context.features.events ? <Link href="/eventos">Eventos</Link> : null}
+          {showEvents ? <Link href="/eventos">Eventos</Link> : null}
         </nav>
       ) : null}
 

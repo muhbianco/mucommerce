@@ -12,6 +12,7 @@ import {
   isIndexable,
   jsonLd,
   offSale,
+  plainDescription,
   type ProductDetail,
   productOffers,
   withDefaults,
@@ -74,7 +75,10 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const product = result.data;
   const title = product.seo.title || `${product.name} · ${context.tenant.name}`;
   const description =
-    product.seo.description || product.short_description || `${product.name} em ${context.tenant.name}.`;
+    product.seo.description ||
+    product.short_description ||
+    plainDescription(product.description_md, 155) ||
+    `${product.name} em ${context.tenant.name}.`;
   const url = `${storeOrigin(context)}/loja/produto/${product.slug}`;
   const image = shareImage(product);
   return {
@@ -126,7 +130,10 @@ export default async function ProductPage({
       "@type": "Product",
       name: product.name,
       sku: product.sku,
-      description: product.seo.description || product.short_description || undefined,
+      url,
+      description:
+        product.seo.description || product.short_description || plainDescription(product.description_md) || undefined,
+      ...(category ? { category: category.name } : {}),
       image: product.images.map((image) => image.renditions[image.renditions.length - 1]?.url).filter(Boolean),
       brand: { "@type": "Brand", name: context.tenant.name },
       offers: productOffers(product, url),

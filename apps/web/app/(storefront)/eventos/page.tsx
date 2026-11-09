@@ -6,6 +6,7 @@ import { getStorefrontContext } from "@/lib/server-context";
 import { requireCatalog } from "@/lib/store-access";
 import { storefrontApi } from "@/lib/storefront-api";
 import { type EventPage, isIndexable, storeOrigin } from "@/lib/storefront";
+import type { StorefrontContext } from "@/lib/tenant";
 
 import { EventCard } from "../_store/event-card";
 import { StoreShell } from "../_store/store-shell";
@@ -20,22 +21,31 @@ export async function generateMetadata({
   const context = await getStorefrontContext();
   if (!context) return {};
   const { cursor } = await searchParams;
+  // Mesma chamada da página (o fetch se repete de graça na mesma renderização): lista vazia não
+  // vai para o índice — "Nenhum evento marcado" não responde busca de ninguém.
+  const page = context.features.events ? await loadEvents(context, cursor) : null;
+  const empty = page?.kind === "ok" && page.data.items.length === 0;
   return {
     title: `Eventos · ${context.tenant.name}`,
     description: `Próximos eventos de ${context.tenant.name}.`,
     alternates: { canonical: `${storeOrigin(context)}/eventos` },
-    robots: isIndexable(context) && !cursor ? { index: true, follow: true } : { index: false, follow: true },
+    robots:
+      isIndexable(context) && !cursor && !empty ? { index: true, follow: true } : { index: false, follow: true },
   };
+}
+
+function loadEvents(context: StorefrontContext, cursor: string | undefined) {
+  return storefrontApi<EventPage>(context, "/catalog/events", {
+    cursor: cursor?.slice(0, 256),
+    limit: "24",
+  });
 }
 
 export default async function Events({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
   const context = await getStorefrontContext();
   if (!context || !context.features.events) notFound();
   const { cursor } = await searchParams;
-  const result = await storefrontApi<EventPage>(context, "/catalog/events", {
-    cursor: cursor?.slice(0, 256),
-    limit: "24",
-  });
+  const result = await loadEvents(context, cursor);
   const page = requireCatalog(result, "/eventos");
 
   return (

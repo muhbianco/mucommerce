@@ -15,6 +15,7 @@ import {
   withCookies,
 } from "@/lib/panel/token";
 import {
+  canonicalRedirect,
   classifyHost,
   isPanelPath,
   panelRewritePath,
@@ -161,6 +162,9 @@ export async function middleware(request: NextRequest) {
   }
   if (lookup.kind !== "found") return unavailable(request);
   const { context } = lookup;
+
+  const canonical = canonicalRedirect(request.method, host, context.primary_host, pathname, request.nextUrl.search);
+  if (canonical) return NextResponse.redirect(canonical, 301);
 
   headers.set("x-tenant-id", context.tenant.id);
   headers.set("x-tenant-slug", context.tenant.slug);

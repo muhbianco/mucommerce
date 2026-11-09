@@ -136,6 +136,7 @@ const PUBLIC_PREFIXES = [
   "/healthz",
   "/ingresso",
   "/validar",
+  "/icone.png",
 ];
 
 export function isPublicStorefrontPath(pathname: string): boolean {
@@ -153,12 +154,49 @@ export function isStoreApiPath(pathname: string): boolean {
   return pathname.startsWith(STORE_API_PREFIX);
 }
 
+/** Páginas que o Google indexa. Conta, carrinho, checkout e login ficam onde estão. */
+const CANONICAL_PREFIXES = ["/loja", "/eventos", "/politicas"];
+
+/**
+ * Para onde mandar (301) a visita que chegou por um endereço secundário da loja — o subdomínio
+ * da plataforma depois que a loja ganha domínio próprio. Com as duas portas abertas, o Google
+ * vê duas cópias da loja e só tem o canonical como dica; o 301 é a resposta firme.
+ *
+ * Só páginas de vitrine, e só GET/HEAD: um POST de Server Action não sobrevive a redirect, e
+ * conta/checkout/login dependem de cookie preso ao host (pagamento começado no endereço antigo
+ * volta para ele). `primaryHost` só vem quando o domínio principal está ativo (a API garante);
+ * o `normalizeHost` daqui é só para comparar igual com igual.
+ */
+export function canonicalRedirect(
+  method: string,
+  host: string | null,
+  primaryHost: string | null | undefined,
+  pathname: string,
+  search: string,
+): string | null {
+  if (method !== "GET" && method !== "HEAD") return null;
+  const primary = normalizeHost(primaryHost);
+  if (!host || !primary || host === primary) return null;
+  const page = pathname === "/" || CANONICAL_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+  return page ? `https://${primary}${pathname}${search}` : null;
+}
+
 export function requiresSession(pathname: string, accessMode: StorefrontContext["access_mode"]): boolean {
   return needsEntry(pathname, { access_mode: accessMode });
 }
 
 /** Na loja toda fechada, só a porta (e o que ela usa) abre sem entrar. */
-const ENTRY_PREFIXES = ["/entrar", "/acesso-pendente", "/auth", "/politicas", "/healthz", "/ingresso", "/validar"];
+const ENTRY_PREFIXES = [
+  "/entrar",
+  "/acesso-pendente",
+  "/auth",
+  "/politicas",
+  "/healthz",
+  "/ingresso",
+  "/validar",
+  // O ícone da aba: a porta da loja fechada também é uma página com aba.
+  "/icone.png",
+];
 
 /**
  * O caminho pede que o visitante tenha entrado — com a sessão de cliente ou com o passe da senha
